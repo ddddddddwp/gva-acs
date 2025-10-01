@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TR069管理系统 - 系统集成</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background-color: #343a40;
+        }
+        .sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.75);
+        }
+        .sidebar .nav-link:hover {
+            color: rgba(255, 255, 255, 1);
+        }
+        .sidebar .nav-link.active {
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .main-content {
+            padding: 20px;
+        }
+        .integration-card {
+            margin-bottom: 20px;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            transition: transform 0.2s;
+        }
+        .integration-card:hover {
+            transform: translateY(-5px);
+        }
+        .integration-card .card-header {
+            background-color: rgba(0, 0, 0, 0.03);
+            font-weight: 500;
+        }
+        .integration-status {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .status-active {
+            background-color: #28a745;
+        }
+        .status-inactive {
+            background-color: #dc3545;
+        }
+        .status-pending {
+            background-color: #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏导航 -->
+            <div class="col-md-2 sidebar p-0">
+                <div class="d-flex flex-column p-3 text-white">
+                    <a href="/" class="d-flex align-items-center mb-3 mb-md-0 text-white text-decoration-none">
+                        <span class="fs-4">TR069管理系统</span>
+                    </a>
+                    <hr>
+                    <ul class="nav nav-pills flex-column mb-auto">
+                        <li class="nav-item">
+                            <a href="/" class="nav-link">
+                                <i class="bi bi-speedometer2 me-2"></i>仪表盘
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/devices.html" class="nav-link">
+                                <i class="bi bi-router me-2"></i>设备管理
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/sessions.html" class="nav-link">
+                                <i class="bi bi-broadcast me-2"></i>会话管理
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/logs.html" class="nav-link">
+                                <i class="bi bi-journal-text me-2"></i>日志审计
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/settings.html" class="nav-link">
+                                <i class="bi bi-gear me-2"></i>系统设置
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/integrations.html" class="nav-link active">
+                                <i class="bi bi-box-arrow-in-right me-2"></i>系统集成
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 主内容区域 -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2">系统集成</h1>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <button id="add-integration-btn" type="button" class="btn btn-primary">
+                            <i class="bi bi-plus"></i> 添加集成
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 通知容器 -->
+                <div id="notification-container"></div>
+
+                <!-- 集成搜索和过滤 -->
+                <div class="row mb-4">
+                    <div class="col-md-8">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="integration-search" placeholder="搜索集成...">
+                            <button class="btn btn-outline-secondary" type="button" id="search-btn">
+                                <i class="bi bi-search"></i> 搜索
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select" id="integration-filter">
+                            <option value="all" selected>所有集成</option>
+                            <option value="active">已激活</option>
+                            <option value="inactive">未激活</option>
+                            <option value="pending">待配置</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 集成卡片列表 -->
+                <div class="row" id="integration-list">
+                    <!-- 集成卡片将通过JavaScript动态生成 -->
+                </div>
+
+                <!-- 分页控件 -->
+                <nav aria-label="集成分页" class="mt-4">
+                    <ul class="pagination justify-content-center" id="pagination">
+                        <!-- 分页将通过JavaScript动态生成 -->
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加/编辑集成模态框 -->
+    <div class="modal fade" id="integration-modal" tabindex="-1" aria-labelledby="integration-modal-label" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="integration-modal-label">添加集成</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="integration-form">
+                        <input type="hidden" id="integration-id">
+                        <div class="mb-3">
+                            <label for="integration-name" class="form-label">集成名称</label>
+                            <input type="text" class="form-control" id="integration-name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="integration-type" class="form-label">集成类型</label>
+                            <select class="form-select" id="integration-type" required>
+                                <option value="" selected disabled>选择集成类型</option>
+                                <option value="rest-api">REST API</option>
+                                <option value="soap">SOAP Web服务</option>
+                                <option value="mqtt">MQTT</option>
+                                <option value="kafka">Kafka</option>
+                                <option value="database">数据库</option>
+                                <option value="custom">自定义</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="integration-description" class="form-label">描述</label>
+                            <textarea class="form-control" id="integration-description" rows="2"></textarea>
+                        </div>
+
+                        <!-- 动态配置字段，根据集成类型显示不同的配置选项 -->
+                        <div id="config-fields" class="mb-3">
+                            <!-- 配置字段将通过JavaScript动态生成 -->
+                        </div>
+
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="integration-active">
+                            <label class="form-check-label" for="integration-active">激活集成</label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="save-integration-btn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 集成详情模态框 -->
+    <div class="modal fade" id="integration-details-modal" tabindex="-1" aria-labelledby="integration-details-modal-label" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="integration-details-modal-label">集成详情</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <p><strong>集成ID:</strong> <span id="detail-id"></span></p>
+                            <p><strong>名称:</strong> <span id="detail-name"></span></p>
+                            <p><strong>类型:</strong> <span id="detail-type"></span></p>
+                            <p><strong>状态:</strong> <span id="detail-status"></span></p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>创建时间:</strong> <span id="detail-created"></span></p>
+                            <p><strong>最后更新:</strong> <span id="detail-updated"></span></p>
+                            <p><strong>最后同步:</strong> <span id="detail-synced"></span></p>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <p><strong>描述:</strong></p>
+                        <p id="detail-description"></p>
+                    </div>
+                    <div class="mb-3">
+                        <p><strong>配置:</strong></p>
+                        <pre id="detail-config" class="bg-light p-3 rounded"></pre>
+                    </div>
+                    <div class="mb-3">
+                        <p><strong>统计信息:</strong></p>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <h5 class="card-title" id="detail-requests">0</h5>
+                                        <p class="card-text">总请求数</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <h5 class="card-title" id="detail-success">0</h5>
+                                        <p class="card-text">成功数</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <h5 class="card-title" id="detail-errors">0</h5>
+                                        <p class="card-text">错误数</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-primary" id="edit-integration-btn">编辑</button>
+                    <button type="button" class="btn btn-success" id="test-integration-btn">测试连接</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 确认模态框 -->
+    <div class="modal fade" id="confirm-modal" tabindex="-1" aria-labelledby="confirm-modal-label" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirm-modal-label">确认操作</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="confirm-modal-body">
+                    您确定要执行此操作吗？
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="confirm-modal-confirm">确认</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局变量
+        let integrations = [];
+        let currentPage = 1;
+        let itemsPerPage = 6;
+        let confirmCallback = null;
+        let currentIntegration = null;
+
+        // 模拟集成数据
+        const mockIntegrations = [
+            {
+                id: 'int-001',
+                name: 'ERP系统集成',
+                type: 'rest-api',
+                description: '与企业ERP系统集成，同步设备信息和告警数据',
+                status: 'active',
+                config: {
+                    url: 'https://erp.example.com/api/v1',
+                    authType: 'oauth2',
+                    clientId: 'tr069-client',
+                    syncInterval: 15
+                },
+                created: '2023-09-15T08:30:00',
+                updated: '2023-10-01T14:22:15',
+                lastSync: '2023-10-10T09:15:32',
+                stats: {
+                    requests: 1254,
+                    success: 1230,
+                    errors: 24
+                }
+            },
+            {
+                id: 'int-002',
+                name: 'MQTT消息代理',
+                type: 'mqtt',
+                description: '通过MQTT协议发布设备状态变更和告警信息',
+                status: 'active',
+                config: {
+                    broker: 'mqtt.example.com',
+                    port: 1883,
+                    username: 'tr069-publisher',
+                    topicPrefix: 'tr069/devices',
+                    qos: 1
+                },
+                created: '2023-09-20T10:15:00',
+                updated: '2023-09-20T10:15:00',
+                lastSync: '2023-10-10T09:30:12',
+                stats: {
+                    requests: 3562,
+                    success: 3560,
+                    errors: 2
+                }
+            },
+            {
+                id: 'int-003',
+                name: '监控系统集成',
+                type: 'soap',
+                description: '与企业监控系统集成，提供设备状态和性能数据',
+                status: 'inactive',
+                config: {
+                    wsdlUrl: 'https://monitor.example.com/services/DeviceMonitor?wsdl',
+                    username: 'tr069-monitor',
+                    namespace: 'http://monitor.example.com/schemas',
+                    operation: 'updateDeviceStatus'
+                },
+                created: '2023-09-25T15:45:00',
+                updated: '2023-10-05T11:30:22',
+                lastSync: '2023-10-05T11:30:22',
+                stats: {
+                    requests: 850,
+                    success: 842,
+                    errors: 8
+                }
+            },
+            {
+                id: 'int-004',
+                name: '数据仓库同步',
+                type: 'database',
+                description: '将设备数据和统计信息同步到企业数据仓库',
+                status: 'active',
+                config: {
+                    dbType: 'postgresql',
+                    host: 'datawarehouse.internal',
+                    port: 5432,
+                    database: 'tr069_data',
+                    schema: 'device_metrics',
+                    syncInterval: 60
+                },
+                created: '2023-09-30T09:20:00',
+                updated: '2023-10-02T16:45:10',
+                lastSync: '2023-10-10T09:00:00',
+                stats: {
+                    requests: 720,
+                    success: 720,
+                    errors: 0
+                }
+            },
+            {
+                id: 'int-005',
+                name: 'Kafka事件流',
+                type: 'kafka',
+                description: '将TR-069事件发布到Kafka事件流供其他系统消费',
+                status: 'pending',
+                config: {
+                    bootstrapServers: 'kafka1.example.com:9092,kafka2.example.com:9092',
+                    topic: 'tr069-events',
+                    securityProtocol: 'SASL_SSL',
+                    compressionType: 'snappy'
+                },
+                created: '2023-10-08T14:10:00',
+                updated: '2023-10-08T14:10:00',
+                lastSync: null,
+                stats: {
+                    requests: 0,
+                    success: 0,
+                    errors: 0
+                }
+            },
+            {
+                id: 'int-006',
+                name: '客户门户API',
+                type: 'rest-api',
+                description: '为客户门户网站提供设备信息和状态的API接口',
+                status: 'active',
+                config: {
+                    url: 'https://portal-api.example.com/v2',
+                    authType: 'apikey',
+                    rateLimit: 100,
+                    cacheTime: 300
+                },
+                created: '2023-10-01T11:25:00',
+                updated: '2023-10-09T10:15:30',
+                lastSync: '2023-10-10T09:45:12',
+                stats: {
+                    requests: 5280,
+                    success: 5250,
+                    errors: 30
+                }
+            },
+            {
+                id: 'int-007',
+                name: '自定义脚本集成',
+                type: 'custom',
+                description: '通过自定义脚本将数据导出到第三方系统',
+                status: 'inactive',
+                config: {
+                    scriptPath: '/opt/tr069/scripts/export_data.py',
+                    arguments: '--format=json --compress',
+                    schedule: '0 */6 * * *'
+                },
+                created: '2023-10-05T16:40:00',
+                updated: '2023-10-05T16:40:00',
+                lastSync: null,
+                stats: {
+                    requests: 120,
+                    success: 115,
+                    errors: 5
+                }
+            }
+        ];
+
+        // DOM加载完成后执行初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化数据
+            integrations = [...mockIntegrations];
+            
+            // 加载集成列表
+            loadIntegrations();
+            
+            // 添加事件监听器
+            document.getElementById('add-integration-btn').addEventListener('click', showAddIntegrationModal);
+            document.getElementById('save-integration-btn').addEventListener('click', saveIntegration);
+            document.getElementById('search-btn').addEventListener('click', searchIntegrations);
+            document.getElementById('integration-filter').addEventListener('change', filterIntegrations);
+            document.getElementById('integration-search').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    searchIntegrations();
+                }
+            });
+            document.getElementById('integration-type').addEventListener('change', updateConfigFields);
+            document.getElementById('edit-integration-btn').addEventListener('click', editCurrentIntegration);
+            document.getElementById('test-integration-btn').addEventListener('click', testIntegrationConnection);
+        });
+
+        /**
+         * 加载集成列表
+         */
+        function loadIntegrations(filtered = integrations) {
+            const container = document.getElementById('integration-list');
+            container.innerHTML = '';
+            
+            // 计算分页
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = Math.min(startIndex + itemsPerPage, filtered.length);
+            const pageItems = filtered.slice(startIndex, endIndex);
+            
+            if (pageItems.length === 0) {
+                container.innerHTML = '<div class="col-12 text-center py-5"><p>没有找到匹配的集成</p></div>';
+                document.getElementById('pagination').innerHTML = '';
+                return;
+            }
+            
+            // 创建集成卡片
+            pageItems.forEach(integration => {
+                const card = createIntegrationCard(integration);
+                container.appendChild(card);
+            });
+            
+            // 更新分页控件
+            updatePagination(filtered.length);
+        }
+
+        /**
+         * 创建集成卡片
+         */
+        function createIntegrationCard(integration) {
+            const col = document.createElement('div');
+            col.className = 'col-md-4 mb-4';
+            
+            // 状态类和文本
+            let statusClass = '';
+            let statusText = '';
+            switch (integration.status) {
+                case 'active':
+                    statusClass = 'status-active';
+                    statusText = '已激活';
+                    break;
+                case 'inactive':
+                    statusClass = 'status-inactive';
+                    statusText = '未激活';
+                    break;
+                case 'pending':
+                    statusClass = 'status-pending';
+                    statusText = '待配置';
+                    break;
+            }
+            
+            // 集成类型图标
+            let typeIcon = '';
+            switch (integration.type) {
+                case 'rest-api':
+                    typeIcon = 'bi-hdd-network';
+                    break;
+                case 'soap':
+                    typeIcon = 'bi-envelope';
+                    break;
+                case 'mqtt':
+                    typeIcon = 'bi-broadcast';
+                    break;
+                case 'kafka':
+                    typeIcon = 'bi-lightning';
+                    break;
+                case 'database':
+                    typeIcon = 'bi-database';
+                    break;
+                case 'custom':
+                    typeIcon = 'bi-code-slash';
+                    break;
+                default:
+                    typeIcon = 'bi-box';
+            }
+            
+            col.innerHTML = `
+                <div class="card integration-card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="integration-status ${statusClass}"></span>
+                            ${integration.name}
+                        </div>
+                        <div class="dropdown">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                操作
+                            </button>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item view-integration" href="#" data-id="${integration.id}">查看详情</a></li>
+                                <li><a class="dropdown-item edit-integration" href="#" data-id="${integration.id}">编辑</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item toggle-integration" href="#" data-id="${integration.id}" data-status="${integration.status}">
+                                    ${integration.status === 'active' ? '停用' : '激活'}
+                                </a></li>
+                                <li><a class="dropdown-item delete-integration" href="#" data-id="${integration.id}">删除</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3 text-center">
+                            <i class="bi ${typeIcon} fs-1"></i>
+                            <p class="text-muted">${getIntegrationTypeName(integration.type)}</p>
+                        </div>
+                        <p class="card-text">${integration.description || '无描述'}</p>
+                    </div>
+                    <div class="card-footer d-flex justify-content-between align-items-center">
+                        <small class="text-muted">状态: ${statusText}</small>
+                        <button class="btn btn-sm btn-primary view-details" data-id="${integration.id}">查看详情</button>
+                    </div>
+                </div>
+            `;
+            
+            // 添加事件监听器
+            col.querySelector('.view-integration, .view-details').addEventListener('click', function(e) {
+                e.preventDefault();
+                viewIntegrationDetails(integration.id);
+            });
+            
+            col.querySelector('.edit-integration').addEventListener('click', function(e) {
+                e.preventDefault();
+                editIntegration(integration.id);
+            });
+            
+            col.querySelector('.toggle-integration').addEventListener('click', function(e) {
+                e.preventDefault();
+                toggleIntegrationStatus(integration.id);
+            });
+            
+            col.querySelector('.delete-integration').addEventListener('click', function(e) {
+                e.preventDefault();
+                deleteIntegration(integration.id);
+            });
+            
+            return col;
+        }
+
+        /**
+         * 更新分页控件
+         */
+        function updatePagination(totalItems) {
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            const pagination = document.getElementById('pagination');
+            pagination.innerHTML = '';
+            
+            if (totalPages <= 1) {
+                return;
+            }
+            
+            // 上一页按钮
+            const prevLi = document.createElement('li');
+            prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+            prevLi.innerHTML = `<a class="page-link" href="#" aria-label="上一页"><span aria-hidden="true">&laquo;</span></a>`;
+            prevLi.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadIntegrations();
+                }
+            });
+            pagination.appendChild(prevLi);
+            
+            // 页码按钮
+            for (let i = 1; i <= totalPages; i++) {
+                const pageLi = document.createElement('li');
+                pageLi.className = `page-item ${i === currentPage ? 'active' : ''}`;
+                pageLi.innerHTML = `<a class="page-link" href="#">${i}</a>`;
+                pageLi.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    currentPage = i;
+                    loadIntegrations();
+                });
+                pagination.appendChild(pageLi);
+            }
+            
+            // 下一页按钮
+            const nextLi = document.createElement('li');
+            nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+            nextLi.innerHTML = `<a class="page-link" href="#" aria-label="下一页"><span aria-hidden="true">&raquo;</span></a>`;
+            nextLi.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    loadIntegrations();
+                }
+            });
+            pagination.appendChild(nextLi);
+        }
+
+        /**
+         * 搜索集成
+         */
+        function searchIntegrations() {
+            const searchTerm = document.getElementById('integration-search').value.toLowerCase();
+            const filterValue = document.getElementById('integration-filter').value;
+            
+            let filtered = integrations;
+            
+            // 应用搜索
+            if (searchTerm) {
+                filtered = filtered.filter(integration => 
+                    integration.name.toLowerCase().includes(searchTerm) || 
+                    integration.description.toLowerCase().includes(searchTerm) ||
+                    integration.type.toLowerCase().includes(searchTerm)
+                );
+            }
+            
+            // 应用过滤
+            if (filterValue !== 'all') {
+                filtered = filtered.filter(integration => integration.status === filterValue);
+            }
+            
+            // 重置分页并加载
+            currentPage = 1;
+            loadIntegrations(filtered);
+        }
+
+        /**
+         * 过滤集成
+         */
+        function filterIntegrations() {
+            searchIntegrations();
+        }
+
+        /**
+         * 显示添加集成模态框
+         */
+        function showAddIntegrationModal() {
+            // 重置表单
+            document.getElementById('integration-form').reset();
+            document.getElementById('integration-id').value = '';
+            document.getElementById('integration-modal-label').textContent = '添加集成';
+            
+            // 清空配置字段
+            document.getElementById('config-fields').innerHTML = '';
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('integration-modal'));
+            modal.show();
+        }
+
+        /**
+         * 根据集成类型更新配置字段
+         */
+        function updateConfigFields() {
+            const integrationType = document.getElementById('integration-type').value;
+            const configFields = document.getElementById('config-fields');
+            configFields.innerHTML = '';
+            
+            if (!integrationType) {
+                return;
+            }
+            
+            // 根据集成类型创建不同的配置字段
+            switch (integrationType) {
+                case 'rest-api':
+                    configFields.innerHTML = `
+                        <h6 class="mb-3">API配置</h6>
+                        <div class="mb-3">
+                            <label for="config-url" class="form-label">API URL</label>
+                            <input type="url" class="form-control" id="config-url" name="url" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-auth-type" class="form-label">认证类型</label>
+                            <select class="form-select" id="config-auth-type" name="authType">
+                                <option value="none">无认证</option>
+                                <option value="basic">基本认证</option>
+                                <option value="apikey">API密钥</option>
+                                <option value="oauth2">OAuth 2.0</option>
+                            </select>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="config-username" class="form-label">用户名/客户端ID</label>
+                                <input type="text" class="form-control" id="config-username" name="username">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="config-password" class="form-label">密码/密钥</label>
+                                <input type="password" class="form-control" id="config-password" name="password">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-headers" class="form-label">自定义请求头</label>
+                            <textarea class="form-control" id="config-headers" name="headers" rows="2" placeholder="格式: Key: Value (每行一个)"></textarea>
+                        </div>
+                    `;
+                    break;
+                case 'soap':
+                    configFields.innerHTML = `
+                        <h6 class="mb-3">SOAP配置</h6>
+                        <div class="mb-3">
+                            <label for="config-wsdl" class="form-label">WSDL URL</label>
+                            <input type="url" class="form-control" id="config-wsdl" name="wsdlUrl" required>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="config-soap-username" class="form-label">用户名</label>
+                                <input type="text" class="form-control" id="config-soap-username" name="username">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="config-soap-password" class="form-label">密码</label>
+                                <input type="password" class="form-control" id="config-soap-password" name="password">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-namespace" class="form-label">命名空间</label>
+                            <input type="text" class="form-control" id="config-namespace" name="namespace">
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-operation" class="form-label">操作名称</label>
+                            <input type="text" class="form-control" id="config-operation" name="operation">
+                        </div>
+                    `;
+                    break;
+                case 'mqtt':
+                    configFields.innerHTML = `
+                        <h6 class="mb-3">MQTT配置</h6>
+                        <div class="row mb-3">
+                            <div class="col-md-8">
+                                <label for="config-broker" class="form-label">代理服务器</label>
+                                <input type="text" class="form-control" id="config-broker" name="broker" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="config-port" class="form-label">端口</label>
+                                <input type="number" class="form-control" id="config-port" name="port" value="1883">
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="config-mqtt-username" class="form-label">用户名</label>
+                                <input type="text" class="form-control" id="config-mqtt-username" name="username">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="config-mqtt-password" class="form-label">密码</label>
+                                <input type="password" class="form-control" id="config-mqtt-password" name="password">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-topic" class="form-label">主题前缀</label>
+                            <input type="text" class="form-control" id="config-topic" name="topicPrefix" value="tr069/">
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-qos" class="form-label">服务质量(QoS)</label>
+                            <select class="form-select" id="config-qos" name="qos">
+                                <option value="0">0 - 最多一次</option>
+                                <option value="1" selected>1 - 至少一次</option>
+                                <option value="2">2 - 恰好一次</option>
+                            </select>
+                        </div>
+                    `;
+                    break;
+                case 'kafka':
+                    configFields.innerHTML = `
+                        <h6 class="mb-3">Kafka配置</h6>
+                        <div class="mb-3">
+                            <label for="config-bootstrap" class="form-label">Bootstrap服务器</label>
+                            <input type="text" class="form-control" id="config-bootstrap" name="bootstrapServers" required placeholder="host1:9092,host2:9092">
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-kafka-topic" class="form-label">主题</label>
+                            <input type="text" class="form-control" id="config-kafka-topic" name="topic" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-security" class="form-label">安全协议</label>
+                            <select class="form-select" id="config-security" name="securityProtocol">
+                                <option value="PLAINTEXT" selected>PLAINTEXT</option>
+                                <option value="SSL">SSL</option>
+                                <option value="SASL_PLAINTEXT">SASL_PLAINTEXT</option>
+                                <option value="SASL_SSL">SASL_SSL</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-compression" class="form-label">压缩类型</label>
+                            <select class="form-select" id="config-compression" name="compressionType">
+                                <option value="none">无压缩</option>
+                                <option value="gzip">GZIP</option>
+                                <option value="snappy" selected>Snappy</option>
+                                <option value="lz4">LZ4</option>
+                                <option value="zstd">Zstandard</option>
+                            </select>
+                        </div>
+                    `;
+                    break;
+                case 'database':
+                    configFields.innerHTML = `
+                        <h6 class="mb-3">数据库配置</h6>
+                        <div class="mb-3">
+                            <label for="config-db-type" class="form-label">数据库类型</label>
+                            <select class="form-select" id="config-db-type" name="dbType">
+                                <option value="mysql">MySQL</option>
+                                <option value="postgresql" selected>PostgreSQL</option>
+                                <option value="oracle">Oracle</option>
+                                <option value="sqlserver">SQL Server</option>
+                            </select>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-8">
+                                <label for="config-db-host" class="form-label">主机</label>
+                                <input type="text" class="form-control" id="config-db-host" name="host" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="config-db-port" class="form-label">端口</label>
+                                <input type="number" class="form-control" id="config-db-port" name="port" value="5432">
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="config-db-name" class="form-label">数据库名</label>
+                                <input type="text" class="form-control" id="config-db-name" name="database" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="config-db-schema" class="form-label">模式/架构</label>
+                                <input type="text" class="form-control" id="config-db-schema" name="schema">
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="config-db-user" class="form-label">用户名</label>
+                                <input type="text" class="form-control" id="config-db-user" name="dbUser" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="config-db-password" class="form-label">密码</label>
+                                <input type="password" class="form-control" id="config-db-password" name="dbPassword">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-sync-interval" class="form-label">同步间隔(分钟)</label>
+                            <input type="number" class="form-control" id="config-sync-interval" name="syncInterval" value="60" min="1">
+                        </div>
+                    `;
+                    break;
+                case 'custom':
+                    configFields.innerHTML = `
+                        <h6 class="mb-3">自定义集成配置</h6>
+                        <div class="mb-3">
+                            <label for="config-script" class="form-label">脚本路径</label>
+                            <input type="text" class="form-control" id="config-script" name="scriptPath" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-args" class="form-label">命令行参数</label>
+                            <input type="text" class="form-control" id="config-args" name="arguments">
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-schedule" class="form-label">执行计划(Cron表达式)</label>
+                            <input type="text" class="form-control" id="config-schedule" name="schedule" placeholder="例如: 0 */6 * * * (每6小时)">
+                        </div>
+                        <div class="mb-3">
+                            <label for="config-env" class="form-label">环境变量</label>
+                            <textarea class="form-control" id="config-env" name="environment" rows="2" placeholder="格式: KEY=VALUE (每行一个)"></textarea>
+                        </div>
+                    `;
+                    break;
+            }
+            
+            // 如果是编辑模式，填充配置字段
+            if (currentIntegration) {
+                fillConfigFields(currentIntegration);
+            }
+        }
+
+        /**
+         * 填充配置字段
+         */
+        function fillConfigFields(integration) {
+            const config = integration.config;
+            if (!config) return;
+            
+            // 遍历配置对象的所有属性
+            Object.keys(config).forEach(key => {
+                const input = document.getElementById(`config-${key}`) || document.querySelector(`[name="${key}"]`);
+                if (input) {
+                    input.value = config[key];
+                }
+            });
+        }
+
+        /**
+         * 保存集成
+         */
+        function saveIntegration() {
+            const form = document.getElementById('integration-form');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            
+            const integrationId = document.getElementById('integration-id').value;
+            const name = document.getElementById('integration-name').value;
+            const type = document.getElementById('integration-type').value;
+            const description = document.getElementById('integration-description').value;
+            const active = document.getElementById('integration-active').checked;
+            
+            // 收集配置字段
+            const configFields = document.getElementById('config-fields').querySelectorAll('input, select, textarea');
+            const config = {};
+            configFields.forEach(field => {
+                if (field.name && field.value) {
+                    config[field.name] = field.value;
+                }
+            });
+            
+            // 创建或更新集成对象
+            const integration = {
+                id: integrationId || `int-${Date.now().toString().substr(-6)}`,
+                name,
+                type,
+                description,
+                status: active ? 'active' : 'inactive',
+                config,
+                created: integrationId ? (currentIntegration ? currentIntegration.created : new Date().toISOString()) : new Date().toISOString(),
+                updated: new Date().toISOString(),
+                lastSync: null,
+                stats: {
+                    requests: 0,
+                    success: 0,
+                    errors: 0
+                }
+            };
+            
+            // 更新或添加集成
+            if (integrationId) {
+                const index = integrations.findIndex(item => item.id === integrationId);
+                if (index !== -1) {
+                    // 保留原有统计数据
+                    integration.stats = integrations[index].stats;
+                    integration.lastSync = integrations[index].lastSync;
+                    integrations[index] = integration;
+                }
+            } else {
+                integrations.push(integration);
+            }
+            
+            // 关闭模态框
+            const modal = bootstrap.Modal.getInstance(document.getElementById('integration-modal'));
+            modal.hide();
+            
+            // 重新加载集成列表
+            currentPage = 1;
+            loadIntegrations();
+            
+            // 显示成功通知
+            showNotification('成功', integrationId ? '集成已更新' : '集成已添加', 'success');
+        }
+
+        /**
+         * 查看集成详情
+         */
+        function viewIntegrationDetails(id) {
+            const integration = integrations.find(item => item.id === id);
+            if (!integration) return;
+            
+            // 保存当前集成
+            currentIntegration = integration;
+            
+            // 填充详情模态框
+            document.getElementById('detail-id').textContent = integration.id;
+            document.getElementById('detail-name').textContent = integration.name;
+            document.getElementById('detail-type').textContent = getIntegrationTypeName(integration.type);
+            document.getElementById('detail-status').textContent = getStatusText(integration.status);
+            document.getElementById('detail-created').textContent = formatDateTime(integration.created);
+            document.getElementById('detail-updated').textContent = formatDateTime(integration.updated);
+            document.getElementById('detail-synced').textContent = integration.lastSync ? formatDateTime(integration.lastSync) : '从未同步';
+            document.getElementById('detail-description').textContent = integration.description || '无描述';
+            document.getElementById('detail-config').textContent = JSON.stringify(integration.config, null, 2);
+            
+            // 填充统计信息
+            document.getElementById('detail-requests').textContent = integration.stats.requests;
+            document.getElementById('detail-success').textContent = integration.stats.success;
+            document.getElementById('detail-errors').textContent = integration.stats.errors;
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('integration-details-modal'));
+            modal.show();
+        }
+
+        /**
+         * 编辑集成
+         */
+        function editIntegration(id) {
+            const integration = integrations.find(item => item.id === id);
+            if (!integration) return;
+            
+            // 保存当前集成
+            currentIntegration = integration;
+            
+            // 填充表单
+            document.getElementById('integration-id').value = integration.id;
+            document.getElementById('integration-name').value = integration.name;
+            document.getElementById('integration-type').value = integration.type;
+            document.getElementById('integration-description').value = integration.description || '';
+            document.getElementById('integration-active').checked = integration.status === 'active';
+            
+            // 更新配置字段
+            updateConfigFields();
+            
+            // 更新模态框标题
+            document.getElementById('integration-modal-label').textContent = '编辑集成';
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('integration-modal'));
+            modal.show();
+        }
+
+        /**
+         * 编辑当前集成
+         */
+        function editCurrentIntegration() {
+            if (!currentIntegration) return;
+            
+            // 关闭详情模态框
+            const detailsModal = bootstrap.Modal.getInstance(document.getElementById('integration-details-modal'));
+            detailsModal.hide();
+            
+            // 编辑集成
+            editIntegration(currentIntegration.id);
+        }
+
+        /**
+         * 切换集成状态
+         */
+        function toggleIntegrationStatus(id) {
+            const integration = integrations.find(item => item.id === id);
+            if (!integration) return;
+            
+            const newStatus = integration.status === 'active' ? 'inactive' : 'active';
+            const actionText = newStatus === 'active' ? '激活' : '停用';
+            
+            // 显示确认对话框
+            showConfirmModal(`确认${actionText}集成`, `您确定要${actionText}「${integration.name}」集成吗？`, () => {
+                // 更新状态
+                integration.status = newStatus;
+                integration.updated = new Date().toISOString();
+                
+                // 重新加载集成列表
+                loadIntegrations();
+                
+                // 显示成功通知
+                showNotification('成功', `集成已${actionText}`, 'success');
+            });
+        }
+
+        /**
+         * 删除集成
+         */
+        function deleteIntegration(id) {
+            const integration = integrations.find(item => item.id === id);
+            if (!integration) return;
+            
+            // 显示确认对话框
+            showConfirmModal('确认删除集成', `您确定要删除「${integration.name}」集成吗？此操作无法撤销。`, () => {
+                // 删除集成
+                integrations = integrations.filter(item => item.id !== id);
+                
+                // 重新加载集成列表
+                currentPage = 1;
+                loadIntegrations();
+                
+                // 显示成功通知
+                showNotification('成功', '集成已删除', 'success');
+            });
+        }
+
+        /**
+         * 测试集成连接
+         */
+        function testIntegrationConnection() {
+            if (!currentIntegration) return;
+            
+            // 显示加载通知
+            showNotification('信息', `正在测试「${currentIntegration.name}」集成连接...`, 'info');
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 随机成功或失败
+                const success = Math.random() > 0.3;
+                
+                if (success) {
+                    showNotification('成功', `成功连接到「${currentIntegration.name}」集成`, 'success');
+                } else {
+                    showNotification('错误', `连接「${currentIntegration.name}」集成失败: 连接超时`, 'error');
+                }
+            }, 1500);
+        }
+
+        /**
+         * 显示确认对话框
+         */
+        function showConfirmModal(title, message, callback) {
+            document.getElementById('confirm-modal-label').textContent = title;
+            document.getElementById('confirm-modal-body').textContent = message;
+            
+            // 设置确认回调
+            confirmCallback = callback;
+            
+            // 添加确认按钮事件
+            const confirmButton = document.getElementById('confirm-modal-confirm');
+            confirmButton.onclick = function() {
+                if (confirmCallback) {
+                    confirmCallback();
+                }
+                // 关闭模态框
+                const modal = bootstrap.Modal.getInstance(document.getElementById('confirm-modal'));
+                modal.hide();
+            };
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('confirm-modal'));
+            modal.show();
+        }
+
+        /**
+         * 显示通知
+         */
+        function showNotification(title, message, type = 'info') {
+            const container = document.getElementById('notification-container');
+            
+            // 创建通知元素
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show`;
+            notification.innerHTML = `
+                <strong>${title}</strong> ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            
+            // 添加到容器
+            container.appendChild(notification);
+            
+            // 自动关闭
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    notification.remove();
+                }, 300);
+            }, 3000);
+        }
+
+        /**
+         * 获取集成类型名称
+         */
+        function getIntegrationTypeName(type) {
+            const typeNames = {
+                'rest-api': 'REST API',
+                'soap': 'SOAP Web服务',
+                'mqtt': 'MQTT',
+                'kafka': 'Kafka',
+                'database': '数据库',
+                'custom': '自定义脚本'
+            };
+            return typeNames[type] || type;
+        }
+
+        /**
+         * 获取状态文本
+         */
+        function getStatusText(status) {
+            const statusTexts = {
+                'active': '已激活',
+                'inactive': '未激活',
+                'pending': '待配置'
+            };
+            return statusTexts[status] || status;
+        }
+
+        /**
+         * 格式化日期时间
+         */
+        function formatDateTime(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+    </script>
+</body>
+</html>

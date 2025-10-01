@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TR069管理系统 - 系统设置</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background-color: #343a40;
+        }
+        .sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.75);
+        }
+        .sidebar .nav-link:hover {
+            color: rgba(255, 255, 255, 1);
+        }
+        .sidebar .nav-link.active {
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .main-content {
+            padding: 20px;
+        }
+        .settings-card {
+            margin-bottom: 20px;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        }
+        .settings-card .card-header {
+            background-color: rgba(0, 0, 0, 0.03);
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏导航 -->
+            <div class="col-md-2 sidebar p-0">
+                <div class="d-flex flex-column p-3 text-white">
+                    <a href="/" class="d-flex align-items-center mb-3 mb-md-0 text-white text-decoration-none">
+                        <span class="fs-4">TR069管理系统</span>
+                    </a>
+                    <hr>
+                    <ul class="nav nav-pills flex-column mb-auto">
+                        <li class="nav-item">
+                            <a href="/" class="nav-link">
+                                <i class="bi bi-speedometer2 me-2"></i>仪表盘
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/devices.html" class="nav-link">
+                                <i class="bi bi-router me-2"></i>设备管理
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/sessions.html" class="nav-link">
+                                <i class="bi bi-broadcast me-2"></i>会话管理
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/logs.html" class="nav-link">
+                                <i class="bi bi-journal-text me-2"></i>日志审计
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/settings.html" class="nav-link active">
+                                <i class="bi bi-gear me-2"></i>系统设置
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 主内容区域 -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2">系统设置</h1>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <button id="save-all-btn" type="button" class="btn btn-primary">
+                            <i class="bi bi-save"></i> 保存所有设置
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 通知容器 -->
+                <div id="notification-container"></div>
+
+                <!-- 设置选项卡 -->
+                <ul class="nav nav-tabs mb-4" id="settingsTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="general-tab" data-bs-toggle="tab" data-bs-target="#general" type="button" role="tab" aria-controls="general" aria-selected="true">
+                            <i class="bi bi-gear-fill me-1"></i> 基本设置
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="server-tab" data-bs-toggle="tab" data-bs-target="#server" type="button" role="tab" aria-controls="server" aria-selected="false">
+                            <i class="bi bi-hdd-rack me-1"></i> 服务器配置
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="security-tab" data-bs-toggle="tab" data-bs-target="#security" type="button" role="tab" aria-controls="security" aria-selected="false">
+                            <i class="bi bi-shield-lock me-1"></i> 安全设置
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="notification-tab" data-bs-toggle="tab" data-bs-target="#notification" type="button" role="tab" aria-controls="notification" aria-selected="false">
+                            <i class="bi bi-bell me-1"></i> 通知设置
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="backup-tab" data-bs-toggle="tab" data-bs-target="#backup" type="button" role="tab" aria-controls="backup" aria-selected="false">
+                            <i class="bi bi-cloud-arrow-up me-1"></i> 备份与恢复
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- 选项卡内容 -->
+                <div class="tab-content" id="settingsTabContent">
+                    <!-- 基本设置 -->
+                    <div class="tab-pane fade show active" id="general" role="tabpanel" aria-labelledby="general-tab">
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                系统信息
+                            </div>
+                            <div class="card-body">
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <p><strong>系统版本:</strong> <span id="system-version">1.0.0</span></p>
+                                        <p><strong>运行时间:</strong> <span id="system-uptime">3天 5小时 22分钟</span></p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <p><strong>当前设备数:</strong> <span id="device-count">24</span></p>
+                                        <p><strong>当前会话数:</strong> <span id="session-count">5</span></p>
+                                    </div>
+                                </div>
+                                <div class="d-flex justify-content-end">
+                                    <button id="check-update-btn" class="btn btn-outline-primary">
+                                        <i class="bi bi-arrow-repeat"></i> 检查更新
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                界面设置
+                            </div>
+                            <div class="card-body">
+                                <form id="ui-settings-form">
+                                    <div class="mb-3">
+                                        <label for="page-size" class="form-label">每页显示记录数</label>
+                                        <select class="form-select" id="page-size" name="pageSize">
+                                            <option value="10">10</option>
+                                            <option value="20" selected>20</option>
+                                            <option value="50">50</option>
+                                            <option value="100">100</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="refresh-interval" class="form-label">自动刷新间隔（秒）</label>
+                                        <input type="number" class="form-control" id="refresh-interval" name="refreshInterval" value="30" min="0" max="3600">
+                                        <div class="form-text">设置为0表示禁用自动刷新</div>
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="dark-mode" name="darkMode">
+                                        <label class="form-check-label" for="dark-mode">启用深色模式</label>
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="show-tooltips" name="showTooltips" checked>
+                                        <label class="form-check-label" for="show-tooltips">显示工具提示</label>
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="submit" class="btn btn-primary">保存界面设置</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 服务器配置 -->
+                    <div class="tab-pane fade" id="server" role="tabpanel" aria-labelledby="server-tab">
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                TR-069 服务器设置
+                            </div>
+                            <div class="card-body">
+                                <form id="server-settings-form">
+                                    <div class="mb-3">
+                                        <label for="server-url" class="form-label">服务器URL</label>
+                                        <input type="url" class="form-control" id="server-url" name="serverUrl" value="http://localhost:8080/tr069">
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <label for="server-port" class="form-label">服务器端口</label>
+                                            <input type="number" class="form-control" id="server-port" name="serverPort" value="8080" min="1" max="65535">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="connection-timeout" class="form-label">连接超时（秒）</label>
+                                            <input type="number" class="form-control" id="connection-timeout" name="connectionTimeout" value="30" min="1" max="300">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="enable-ssl" name="enableSsl">
+                                        <label class="form-check-label" for="enable-ssl">启用SSL/TLS</label>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="max-sessions" class="form-label">最大并发会话数</label>
+                                        <input type="number" class="form-control" id="max-sessions" name="maxSessions" value="100" min="1" max="1000">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="session-timeout" class="form-label">会话超时（秒）</label>
+                                        <input type="number" class="form-control" id="session-timeout" name="sessionTimeout" value="300" min="30" max="3600">
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="button" class="btn btn-secondary me-2" id="test-server-btn">测试连接</button>
+                                        <button type="submit" class="btn btn-primary">保存服务器设置</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                数据库设置
+                            </div>
+                            <div class="card-body">
+                                <form id="database-settings-form">
+                                    <div class="mb-3">
+                                        <label for="db-type" class="form-label">数据库类型</label>
+                                        <select class="form-select" id="db-type" name="dbType">
+                                            <option value="sqlite">SQLite</option>
+                                            <option value="mysql" selected>MySQL</option>
+                                            <option value="postgresql">PostgreSQL</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="db-host" class="form-label">主机地址</label>
+                                        <input type="text" class="form-control" id="db-host" name="dbHost" value="localhost">
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <label for="db-port" class="form-label">端口</label>
+                                            <input type="number" class="form-control" id="db-port" name="dbPort" value="3306" min="1" max="65535">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="db-name" class="form-label">数据库名</label>
+                                            <input type="text" class="form-control" id="db-name" name="dbName" value="tr069db">
+                                        </div>
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <label for="db-user" class="form-label">用户名</label>
+                                            <input type="text" class="form-control" id="db-user" name="dbUser" value="tr069user">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="db-password" class="form-label">密码</label>
+                                            <input type="password" class="form-control" id="db-password" name="dbPassword" value="********">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="db-pool" name="dbPool" checked>
+                                        <label class="form-check-label" for="db-pool">启用连接池</label>
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="button" class="btn btn-secondary me-2" id="test-db-btn">测试连接</button>
+                                        <button type="submit" class="btn btn-primary">保存数据库设置</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 安全设置 -->
+                    <div class="tab-pane fade" id="security" role="tabpanel" aria-labelledby="security-tab">
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                用户认证
+                            </div>
+                            <div class="card-body">
+                                <form id="auth-settings-form">
+                                    <div class="mb-3">
+                                        <label for="auth-method" class="form-label">认证方式</label>
+                                        <select class="form-select" id="auth-method" name="authMethod">
+                                            <option value="local" selected>本地认证</option>
+                                            <option value="ldap">LDAP</option>
+                                            <option value="oauth">OAuth 2.0</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="session-duration" class="form-label">会话有效期（分钟）</label>
+                                        <input type="number" class="form-control" id="session-duration" name="sessionDuration" value="30" min="5" max="1440">
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="enforce-password-policy" name="enforcePasswordPolicy" checked>
+                                        <label class="form-check-label" for="enforce-password-policy">强制密码策略</label>
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="enable-2fa" name="enable2fa">
+                                        <label class="form-check-label" for="enable-2fa">启用双因素认证</label>
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="submit" class="btn btn-primary">保存认证设置</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                设备认证
+                            </div>
+                            <div class="card-body">
+                                <form id="device-auth-settings-form">
+                                    <div class="mb-3">
+                                        <label for="device-auth-method" class="form-label">设备认证方式</label>
+                                        <select class="form-select" id="device-auth-method" name="deviceAuthMethod">
+                                            <option value="basic" selected>基本认证</option>
+                                            <option value="digest">摘要认证</option>
+                                            <option value="certificate">证书认证</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="device-auth-realm" class="form-label">认证域</label>
+                                        <input type="text" class="form-control" id="device-auth-realm" name="deviceAuthRealm" value="TR069-ACS">
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="allow-unknown-devices" name="allowUnknownDevices">
+                                        <label class="form-check-label" for="allow-unknown-devices">允许未知设备连接</label>
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="submit" class="btn btn-primary">保存设备认证设置</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 通知设置 -->
+                    <div class="tab-pane fade" id="notification" role="tabpanel" aria-labelledby="notification-tab">
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                邮件通知
+                            </div>
+                            <div class="card-body">
+                                <form id="email-settings-form">
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="enable-email" name="enableEmail" checked>
+                                        <label class="form-check-label" for="enable-email">启用邮件通知</label>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="smtp-server" class="form-label">SMTP服务器</label>
+                                        <input type="text" class="form-control" id="smtp-server" name="smtpServer" value="smtp.example.com">
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <label for="smtp-port" class="form-label">SMTP端口</label>
+                                            <input type="number" class="form-control" id="smtp-port" name="smtpPort" value="587" min="1" max="65535">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="smtp-security" class="form-label">安全连接</label>
+                                            <select class="form-select" id="smtp-security" name="smtpSecurity">
+                                                <option value="none">无</option>
+                                                <option value="ssl">SSL</option>
+                                                <option value="tls" selected>TLS</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <label for="smtp-user" class="form-label">用户名</label>
+                                            <input type="text" class="form-control" id="smtp-user" name="smtpUser" value="notifications@example.com">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="smtp-password" class="form-label">密码</label>
+                                            <input type="password" class="form-control" id="smtp-password" name="smtpPassword" value="********">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="email-from" class="form-label">发件人</label>
+                                        <input type="email" class="form-control" id="email-from" name="emailFrom" value="tr069-system@example.com">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="email-recipients" class="form-label">收件人（多个邮箱用逗号分隔）</label>
+                                        <input type="text" class="form-control" id="email-recipients" name="emailRecipients" value="admin@example.com, support@example.com">
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="button" class="btn btn-secondary me-2" id="test-email-btn">发送测试邮件</button>
+                                        <button type="submit" class="btn btn-primary">保存邮件设置</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                告警设置
+                            </div>
+                            <div class="card-body">
+                                <form id="alert-settings-form">
+                                    <div class="mb-3">
+                                        <label class="form-label">触发告警的事件</label>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="alert-device-offline" name="alertEvents" value="deviceOffline" checked>
+                                            <label class="form-check-label" for="alert-device-offline">设备离线</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="alert-device-error" name="alertEvents" value="deviceError" checked>
+                                            <label class="form-check-label" for="alert-device-error">设备错误</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="alert-session-error" name="alertEvents" value="sessionError" checked>
+                                            <label class="form-check-label" for="alert-session-error">会话错误</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="alert-system-error" name="alertEvents" value="systemError" checked>
+                                            <label class="form-check-label" for="alert-system-error">系统错误</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="alert-auth-failure" name="alertEvents" value="authFailure" checked>
+                                            <label class="form-check-label" for="alert-auth-failure">认证失败</label>
+                                        </div>
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="submit" class="btn btn-primary">保存告警设置</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 备份与恢复 -->
+                    <div class="tab-pane fade" id="backup" role="tabpanel" aria-labelledby="backup-tab">
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                系统备份
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label">备份内容</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="backup-config" name="backupItems" value="config" checked>
+                                        <label class="form-check-label" for="backup-config">系统配置</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="backup-devices" name="backupItems" value="devices" checked>
+                                        <label class="form-check-label" for="backup-devices">设备数据</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="backup-logs" name="backupItems" value="logs">
+                                        <label class="form-check-label" for="backup-logs">系统日志</label>
+                                    </div>
+                                </div>
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="encrypt-backup" name="encryptBackup" checked>
+                                    <label class="form-check-label" for="encrypt-backup">加密备份文件</label>
+                                </div>
+                                <div class="d-flex justify-content-end">
+                                    <button type="button" class="btn btn-primary" id="create-backup-btn">创建备份</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                自动备份
+                            </div>
+                            <div class="card-body">
+                                <form id="auto-backup-form">
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="enable-auto-backup" name="enableAutoBackup">
+                                        <label class="form-check-label" for="enable-auto-backup">启用自动备份</label>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="backup-frequency" class="form-label">备份频率</label>
+                                        <select class="form-select" id="backup-frequency" name="backupFrequency">
+                                            <option value="daily">每天</option>
+                                            <option value="weekly" selected>每周</option>
+                                            <option value="monthly">每月</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="backup-time" class="form-label">备份时间</label>
+                                        <input type="time" class="form-control" id="backup-time" name="backupTime" value="03:00">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="backup-retention" class="form-label">保留备份数量</label>
+                                        <input type="number" class="form-control" id="backup-retention" name="backupRetention" value="5" min="1" max="100">
+                                    </div>
+                                    <div class="d-flex justify-content-end">
+                                        <button type="submit" class="btn btn-primary">保存自动备份设置</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card settings-card">
+                            <div class="card-header">
+                                恢复系统
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label for="backup-file" class="form-label">选择备份文件</label>
+                                    <input class="form-control" type="file" id="backup-file">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="backup-password" class="form-label">备份密码（如果有）</label>
+                                    <input type="password" class="form-control" id="backup-password">
+                                </div>
+                                <div class="d-flex justify-content-end">
+                                    <button type="button" class="btn btn-warning" id="restore-backup-btn">恢复系统</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 确认模态框 -->
+    <div class="modal fade" id="confirm-modal" tabindex="-1" aria-labelledby="confirm-modal-label" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirm-modal-label">确认操作</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="confirm-modal-body">
+                    您确定要执行此操作吗？
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="confirm-modal-confirm">确认</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局变量
+        let confirmCallback = null;
+
+        // DOM加载完成后执行初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 加载系统信息
+            loadSystemInfo();
+            
+            // 添加表单提交事件监听器
+            document.getElementById('ui-settings-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSettings('ui-settings-form', '界面设置已保存');
+            });
+            
+            document.getElementById('server-settings-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSettings('server-settings-form', '服务器设置已保存');
+            });
+            
+            document.getElementById('database-settings-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSettings('database-settings-form', '数据库设置已保存');
+            });
+            
+            document.getElementById('auth-settings-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSettings('auth-settings-form', '用户认证设置已保存');
+            });
+            
+            document.getElementById('device-auth-settings-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSettings('device-auth-settings-form', '设备认证设置已保存');
+            });
+            
+            document.getElementById('email-settings-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSettings('email-settings-form', '邮件通知设置已保存');
+            });
+            
+            document.getElementById('alert-settings-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSettings('alert-settings-form', '告警设置已保存');
+            });
+            
+            document.getElementById('auto-backup-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSettings('auto-backup-form', '自动备份设置已保存');
+            });
+            
+            // 添加按钮事件监听器
+            document.getElementById('save-all-btn').addEventListener('click', saveAllSettings);
+            document.getElementById('check-update-btn').addEventListener('click', checkUpdate);
+            document.getElementById('test-server-btn').addEventListener('click', testServerConnection);
+            document.getElementById('test-db-btn').addEventListener('click', testDatabaseConnection);
+            document.getElementById('test-email-btn').addEventListener('click', testEmailSettings);
+            document.getElementById('create-backup-btn').addEventListener('click', createBackup);
+            document.getElementById('restore-backup-btn').addEventListener('click', confirmRestore);
+        });
+
+        /**
+         * 加载系统信息
+         */
+        function loadSystemInfo() {
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 更新系统信息（实际应用中应从API获取）
+                document.getElementById('system-version').textContent = '1.0.0';
+                document.getElementById('system-uptime').textContent = '3天 5小时 22分钟';
+                document.getElementById('device-count').textContent = '24';
+                document.getElementById('session-count').textContent = '5';
+            }, 300);
+        }
+
+        /**
+         * 保存设置
+         */
+        function saveSettings(formId, successMessage) {
+            const form = document.getElementById(formId);
+            const formData = new FormData(form);
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 在实际应用中，这里会发送API请求保存设置
+                console.log(`保存${formId}的设置:`, Object.fromEntries(formData));
+                
+                // 显示成功通知
+                showNotification('成功', successMessage, 'success');
+            }, 300);
+        }
+
+        /**
+         * 保存所有设置
+         */
+        function saveAllSettings() {
+            // 显示确认对话框
+            showConfirmModal('确认保存所有设置？', '此操作将保存所有页面的设置。', () => {
+                // 模拟API请求延迟
+                setTimeout(() => {
+                    // 在实际应用中，这里会发送API请求保存所有设置
+                    
+                    // 显示成功通知
+                    showNotification('成功', '所有设置已保存', 'success');
+                }, 500);
+            });
+        }
+
+        /**
+         * 检查更新
+         */
+        function checkUpdate() {
+            // 显示加载通知
+            showNotification('信息', '正在检查更新...', 'info');
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 在实际应用中，这里会发送API请求检查更新
+                
+                // 显示结果通知
+                showNotification('信息', '您的系统已是最新版本', 'info');
+            }, 1000);
+        }
+
+        /**
+         * 测试服务器连接
+         */
+        function testServerConnection() {
+            const serverUrl = document.getElementById('server-url').value;
+            const serverPort = document.getElementById('server-port').value;
+            
+            // 显示加载通知
+            showNotification('信息', '正在测试服务器连接...', 'info');
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 在实际应用中，这里会发送API请求测试连接
+                
+                // 显示结果通知
+                showNotification('成功', `成功连接到服务器 ${serverUrl}:${serverPort}`, 'success');
+            }, 800);
+        }
+
+        /**
+         * 测试数据库连接
+         */
+        function testDatabaseConnection() {
+            const dbType = document.getElementById('db-type').value;
+            const dbHost = document.getElementById('db-host').value;
+            const dbPort = document.getElementById('db-port').value;
+            const dbName = document.getElementById('db-name').value;
+            
+            // 显示加载通知
+            showNotification('信息', '正在测试数据库连接...', 'info');
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 在实际应用中，这里会发送API请求测试连接
+                
+                // 显示结果通知
+                showNotification('成功', `成功连接到${dbType}数据库 ${dbHost}:${dbPort}/${dbName}`, 'success');
+            }, 800);
+        }
+
+        /**
+         * 测试邮件设置
+         */
+        function testEmailSettings() {
+            const smtpServer = document.getElementById('smtp-server').value;
+            const emailFrom = document.getElementById('email-from').value;
+            const emailRecipients = document.getElementById('email-recipients').value;
+            
+            // 显示加载通知
+            showNotification('信息', '正在发送测试邮件...', 'info');
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 在实际应用中，这里会发送API请求发送测试邮件
+                
+                // 显示结果通知
+                showNotification('成功', `测试邮件已发送至 ${emailRecipients}`, 'success');
+            }, 1000);
+        }
+
+        /**
+         * 创建备份
+         */
+        function createBackup() {
+            const backupConfig = document.getElementById('backup-config').checked;
+            const backupDevices = document.getElementById('backup-devices').checked;
+            const backupLogs = document.getElementById('backup-logs').checked;
+            const encryptBackup = document.getElementById('encrypt-backup').checked;
+            
+            if (!backupConfig && !backupDevices && !backupLogs) {
+                showNotification('错误', '请至少选择一项备份内容', 'error');
+                return;
+            }
+            
+            // 显示加载通知
+            showNotification('信息', '正在创建备份...', 'info');
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 在实际应用中，这里会发送API请求创建备份
+                
+                // 显示结果通知
+                showNotification('成功', '备份已创建: tr069-backup-20231015.zip', 'success');
+                
+                // 模拟下载
+                alert('在实际应用中，这里会触发备份文件下载');
+            }, 1500);
+        }
+
+        /**
+         * 确认恢复系统
+         */
+        function confirmRestore() {
+            const backupFile = document.getElementById('backup-file').value;
+            
+            if (!backupFile) {
+                showNotification('错误', '请选择备份文件', 'error');
+                return;
+            }
+            
+            // 显示确认对话框
+            showConfirmModal('确认恢复系统？', '此操作将使用所选备份文件恢复系统，当前数据可能会被覆盖。', restoreSystem);
+        }
+
+        /**
+         * 恢复系统
+         */
+        function restoreSystem() {
+            // 显示加载通知
+            showNotification('信息', '正在恢复系统...', 'info');
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 在实际应用中，这里会发送API请求恢复系统
+                
+                // 显示结果通知
+                showNotification('成功', '系统已成功恢复，将在5秒后刷新页面', 'success');
+                
+                // 模拟页面刷新
+                setTimeout(() => {
+                    alert('在实际应用中，这里会刷新页面');
+                }, 5000);
+            }, 2000);
+        }
+
+        /**
+         * 显示确认对话框
+         */
+        function showConfirmModal(title, message, callback) {
+            document.getElementById('confirm-modal-label').textContent = title;
+            document.getElementById('confirm-modal-body').textContent = message;
+            
+            // 设置确认回调
+            confirmCallback = callback;
+            
+            // 添加确认按钮事件
+            const confirmButton = document.getElementById('confirm-modal-confirm');
+            confirmButton.onclick = function() {
+                if (confirmCallback) {
+                    confirmCallback();
+                }
+                // 关闭模态框
+                const modal = bootstrap.Modal.getInstance(document.getElementById('confirm-modal'));
+                modal.hide();
+            };
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('confirm-modal'));
+            modal.show();
+        }
+
+        /**
+         * 显示通知
+         */
+        function showNotification(title, message, type = 'info') {
+            const container = document.getElementById('notification-container');
+            
+            // 创建通知元素
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show`;
+            notification.innerHTML = `
+                <strong>${title}</strong> ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            
+            // 添加到容器
+            container.appendChild(notification);
+            
+            // 自动关闭
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    notification.remove();
+                }, 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

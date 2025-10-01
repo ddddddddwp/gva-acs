@@ -1,0 +1,168 @@
+// Package parser implements the TR069 message parser.
+package parser
+
+import (
+ "context"
+ "encoding/xml"
+ "fmt"
+ "strings"
+ 
+ "github.com/example/tr069/errors"
+ "github.com/example/tr069/interfaces"
+ "github.com/example/tr069/internal/types"
+ "github.com/example/tr069/pool"
+)
+
+// Parser implements the interface.Parser interface.
+type Parser struct {
+ strictMode bool
+ maxDepth   int
+}
+
+// New creates a new Parser.
+func New() *Parser {
+ return &Parser{
+  strictMode: false,
+  maxDepth:   100,
+ }
+}
+
+// ParseMessage parses a TR069 message from raw bytes.
+func (p *Parser) ParseMessage(ctx context.Context, data []byte) (*interfaces.Message, error) {
+ // Get a message from the pool
+ msg := pool.Messages.Get()
+ defer pool.Messages.Put(msg)
+ 
+ // Parse the SOAP envelope
+ envelope := &types.Envelope{}
+ if err := xml.Unmarshal(data, envelope); err != nil {
+  return nil, errors.ErrInvalidXMLFormat
+ }
+ 
+ // Extract basic information from the envelope
+ msg.SessionID = envelope.Header.SessionID
+ msg.HoldRequests = envelope.Header.HoldRequests
+ msg.NoMoreRequests = envelope.Header.NoMoreRequests
+ 
+ // Parse the RPC method
+ method, err := p.ParseRPCMethod(ctx, envelope.Body.Contents)
+ if err != nil {
+  return nil, err
+ }
+ 
+ msg.Method = method
+ 
+ // Parse parameters based on the method
+ switch method {
+ case interfaces.MethodInform:
+  inform := &types.Inform{}
+  if err := xml.Unmarshal(envelope.Body.Contents, inform); err != nil {
+   return nil, errors.ErrInvalidMessage
+  }
+  
+  // Convert parameters
+  params := make([]interfaces.Parameter, len(inform.ParameterList.Parameters))
+  for i, param := range inform.ParameterList.Parameters {
+   params[i] = param.ToInterface()
+  }
+  msg.Parameters = params
+  
+ case interfaces.MethodGetParameterValues:
+  getParams := &types.GetParameterValues{}
+  if err := xml.Unmarshal(envelope.Body.Contents, getParams); err != nil {
+   return nil, errors.ErrInvalidMessage
+  }
+  
+  // Convert parameters
+  params := make([]interfaces.Parameter, len(getParams.ParameterNames.Names))
+  for i, name := range getParams.ParameterNames.Names {
+   params[i] = interfaces.Parameter{
+    Name:  name,
+    Value: nil,
+    Type:  "string",
+   }
+  }
+  msg.Parameters = params
+  
+ case interfaces.MethodSetParameterValues:
+  setParams := &types.SetParameterValues{}
+  if err := xml.Unmarshal(envelope.Body.Contents, setParams); err != nil {
+   return nil, errors.ErrInvalidMessage
+  }
+  
+  // Convert parameters
+  params := make([]interfaces.Parameter, len(setParams.ParameterList.Parameters))
+  for i, param := range setParams.ParameterList.Parameters {
+   params[i] = param.ToInterface()
+  }
+  msg.Parameters = params
+  
+ default:
+  // For other methods, just extract the method name
+  msg.Parameters = []interfaces.Parameter{}
+ }
+ 
+ return msg, nil
+}
+
+// ParseRPCMethod extracts the RPC method from the raw message.
+func (p *Parser) ParseRPCMethod(ctx context.Context, data []byte) (string, error) {
+ // Simple approach: look for the method tag
+ dataStr := string(data)
+ 
+ // Look for common TR-069 methods
+ methods := []string{
+  interfaces.MethodInform,
+  interfaces.MethodGetRPCMethods,
+  interfaces.MethodGetParameterValues,
+  interfaces.MethodSetParameterValues,
+  interfaces.MethodGetParameterNames,
+  interfaces.MethodAddObject,
+  interfaces.MethodDeleteObject,
+  interfaces.MethodDownload,
+  interfaces.MethodUpload,
+  interfaces.MethodReboot,
+  interfaces.MethodFactoryReset,
+  interfaces.MethodGetQueuedTransfers,
+  interfaces.MethodScheduleInform,
+  interfaces.MethodSetVouchers,
+  interfaces.MethodGetOptions,
+  interfaces.MethodTransferComplete,
+  interfaces.MethodAutonomousTransferComplete,
+  interfaces.MethodDUStateChangeComplete,
+  interfaces.MethodAutonomousDUStateChangeComplete,
+ }
+ 
+ for _, method := range methods {
+  // Check for both prefixed and non-prefixed versions
+  methodName := strings.TrimPrefix(method, "cwmp:")
+  if strings.Contains(dataStr, fmt.Sprintf("<%s>", methodName)) ||
+     strings.Contains(dataStr, fmt.Sprintf("<%s ", methodName)) ||
+     strings.Contains(dataStr, fmt.Sprintf("<cwmp:%s>", methodName)) ||
+     strings.Contains(dataStr, fmt.Sprintf("<cwmp:%s ", methodName)) {
+   return method, nil
+  }
+ }
+ 
+ return "", errors.ErrInvalidRPCMethod
+}
+
+// ParseParameterList extracts the parameter list from the raw message.
+func (p *Parser) ParseParameterList(ctx context.Context, data []byte) ([]interfaces.Parameter, error) {
+ msg, err := p.ParseMessage(ctx, data)
+ if err != nil {
+  return nil, err
+ }
+ 
+ return msg.Parameters, nil
+}
+
+// SetStrictMode sets the parser to strict mode, which will enforce stricter validation.
+func (p *Parser) SetStrictMode(strict bool) {
+ p.strictMode = strict
+}
+
+// GetStrictMode returns the current strict mode setting.
+func (p *Parser) GetStrictMode() bool {
+ return p.strictMode
+}

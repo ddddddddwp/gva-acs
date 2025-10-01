@@ -75,6 +75,9 @@
   "/src/view/systemTools/pubPlug/pubPlug.vue": "PubPlug",
   "/src/view/systemTools/system/system.vue": "Config",
   "/src/view/systemTools/version/version.vue": "SysVersion",
+  "/src/view/tr069/device/deviceDetail.vue": "DeviceDetail",
+  "/src/view/tr069/device/deviceEvents.vue": "DeviceEvents",
+  "/src/view/tr069/device/deviceList.vue": "DeviceList",
   "/src/plugin/announcement/form/info.vue": "InfoForm",
   "/src/plugin/announcement/view/info.vue": "Info",
   "/src/plugin/email/view/index.vue": "Email"

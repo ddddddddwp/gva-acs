@@ -1,0 +1,112 @@
+POST /acs/acs/acs/ HTTP/1.1
+Host: 192.168.13.158:8088
+Date: Tue, 07 Jan 2025 15:11:59 CST
+Authorization: Digest username="acsuser",realm="tech-acs",qop="auth",algorithm="MD5",uri="/acs/acs/acs/",nonce="bbb6b05c204a45fe8685072a2fbe6ddb",nc=00000001,cnonce="X9JSLu6Tv5AO296bM8Njyp205cNdy3P7",response="aec69cf4824cfec92e473a3cb96a99de"
+Content-Length: 3354
+Content-Type: text/xml
+Connection: Keep-Alive
+
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<soap_env:Envelope xmlns:soap_env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soap_enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap_env:Header>
+    <cwmp:ID soap_env:mustUnderstand="1">7994</cwmp:ID>
+  </soap_env:Header>
+  <soap_env:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>CHINATELECOM</Manufacturer>
+        <OUI>20AC9C</OUI>
+        <ProductClass>SNB</ProductClass>
+        <SerialNumber>SBR61223-V10-20240129-0086</SerialNumber>
+      </DeviceId>
+      <Event soap_enc:arrayType="cwmp:EventStruct[1]">
+        <EventStruct>
+          <EventCode xsi:type="xsd:string">4 VALUE CHANGE</EventCode>
+          <CommandKey xsi:type="xsd:string"/>
+        </EventStruct>
+      </Event>
+      <MaxEnvelopes xsi:type="xsd:unsignedInt">1</MaxEnvelopes>
+      <CurrentTime xsi:type="xsd:dateTime">2025-01-07T07:11:59Z</CurrentTime>
+      <RetryCount xsi:type="xsd:unsignedInt">0</RetryCount>
+      <ParameterList soap_enc:arrayType="cwmp:ParameterValueStruct[11]">
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.ParameterKey</Name>
+          <Value xsi:type="xsd:string">1736234089503.e2X24Z</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.Auth.SerialNumberSec</Name>
+          <Value xsi:type="xsd:string"/>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.MU.1.Slot.1.DataModel</Name>
+          <Value xsi:type="xsd:string">TR-181-X1</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.MU.1.Slot.1.HardwareVersion</Name>
+          <Value xsi:type="xsd:string">1.0.0.0</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.MU.1.Slot.1.ModelName</Name>
+          <Value xsi:type="xsd:string">nCELL-F2240-78001A1-B</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.MU.1.Slot.1.ProvisioningCode</Name>
+          <Value xsi:type="xsd:string">IntegratedBaseStation</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.MU.1.Slot.1.SerialNumber</Name>
+          <Value xsi:type="xsd:string">SBR61223-V10-20240129-0086</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.MU.1.Slot.1.SoftwareVersion</Name>
+          <Value xsi:type="xsd:string">fa.tdd.fr1.5.1.0.183</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.ConnectionRequestURL</Name>
+          <Value xsi:type="xsd:string">http://192.168.13.79:7547/</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.ParameterKey</Name>
+          <Value xsi:type="xsd:string"/>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.URL</Name>
+          <Value xsi:type="xsd:string">http://192.168.13.158:8088/acs/acs/acs/</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:Inform>
+  </soap_env:Body>
+</soap_env:Envelope>
+
+HTTP/1.1 200 
+Content-Type: text/xml
+Content-Length: 554
+Date: Tue, 07 Jan 2025 07:14:49 GMT
+Keep-Alive: timeout=20
+Connection: keep-alive
+
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+	<SOAP-ENV:Header>
+		<cwmp:ID SOAP-ENV:mustUnderstand="1">7994</cwmp:ID>
+		<cwmp:NoMoreRequests>0</cwmp:NoMoreRequests>
+	</SOAP-ENV:Header>
+	<SOAP-ENV:Body>
+		<cwmp:InformResponse>
+			<MaxEnvelopes>1</MaxEnvelopes>
+		</cwmp:InformResponse>
+	</SOAP-ENV:Body>
+</SOAP-ENV:Envelope>
+POST /acs/acs/acs/ HTTP/1.1
+Host: 192.168.13.158:8088
+Date: Tue, 07 Jan 2025 15:11:59 CST
+Authorization: Digest username="acsuser",realm="tech-acs",qop="auth",algorithm="MD5",uri="/acs/acs/acs/",nonce="bbb6b05c204a45fe8685072a2fbe6ddb",nc=00000001,cnonce="X9JSLu6Tv5AO296bM8Njyp205cNdy3P7",response="aec69cf4824cfec92e473a3cb96a99de"
+Content-Length: 0
+Content-Type: text/xml
+Connection: Keep-Alive
+
+
+HTTP/1.1 204 
+Content-Type: text/xml
+Date: Tue, 07 Jan 2025 07:14:49 GMT
+Keep-Alive: timeout=20
+Connection: keep-alive

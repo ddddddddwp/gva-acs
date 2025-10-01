@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TR069管理系统 - 日志审计</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background-color: #343a40;
+        }
+        .sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.75);
+        }
+        .sidebar .nav-link:hover {
+            color: rgba(255, 255, 255, 1);
+        }
+        .sidebar .nav-link.active {
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .main-content {
+            padding: 20px;
+        }
+        .log-row:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏导航 -->
+            <div class="col-md-2 sidebar p-0">
+                <div class="d-flex flex-column p-3 text-white">
+                    <a href="/" class="d-flex align-items-center mb-3 mb-md-0 text-white text-decoration-none">
+                        <span class="fs-4">TR069管理系统</span>
+                    </a>
+                    <hr>
+                    <ul class="nav nav-pills flex-column mb-auto">
+                        <li class="nav-item">
+                            <a href="/" class="nav-link">
+                                <i class="bi bi-speedometer2 me-2"></i>仪表盘
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/devices.html" class="nav-link">
+                                <i class="bi bi-router me-2"></i>设备管理
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/sessions.html" class="nav-link">
+                                <i class="bi bi-broadcast me-2"></i>会话管理
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/logs.html" class="nav-link active">
+                                <i class="bi bi-journal-text me-2"></i>日志审计
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/settings.html" class="nav-link">
+                                <i class="bi bi-gear me-2"></i>系统设置
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 主内容区域 -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2">日志审计</h1>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <button id="refresh-btn" type="button" class="btn btn-sm btn-outline-secondary me-2">
+                            <i class="bi bi-arrow-clockwise"></i> 刷新
+                        </button>
+                        <button id="export-btn" type="button" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-download"></i> 导出
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 通知容器 -->
+                <div id="notification-container"></div>
+
+                <!-- 搜索和过滤区域 -->
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <div class="input-group">
+                            <input type="text" id="log-search-input" class="form-control" placeholder="搜索日志内容">
+                            <button id="search-btn" class="btn btn-outline-secondary" type="button">
+                                <i class="bi bi-search"></i> 搜索
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="d-flex justify-content-end gap-2">
+                            <select id="level-filter" class="form-select w-auto">
+                                <option value="all">所有级别</option>
+                                <option value="info">信息</option>
+                                <option value="warning">警告</option>
+                                <option value="error">错误</option>
+                            </select>
+                            <select id="source-filter" class="form-select w-auto">
+                                <option value="all">所有来源</option>
+                                <option value="system">系统</option>
+                                <option value="session">会话</option>
+                                <option value="device">设备</option>
+                                <option value="user">用户</option>
+                            </select>
+                            <div class="input-group w-auto">
+                                <span class="input-group-text">日期范围</span>
+                                <input type="date" id="date-from" class="form-control">
+                                <span class="input-group-text">至</span>
+                                <input type="date" id="date-to" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 日志列表 -->
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>级别</th>
+                                <th>来源</th>
+                                <th>消息</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-table-body">
+                            <tr>
+                                <td colspan="5" class="text-center">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 分页控件 -->
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <span id="total-count">0</span> 条日志记录
+                    </div>
+                    <nav aria-label="Page navigation">
+                        <div id="pagination" class="pagination"></div>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志详情模态框 -->
+    <div class="modal fade" id="log-detail-modal" tabindex="-1" aria-labelledby="log-detail-modal-label" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="log-detail-modal-label">日志详情</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <p><strong>日志ID:</strong> <span id="detail-log-id"></span></p>
+                            <p><strong>时间:</strong> <span id="detail-timestamp"></span></p>
+                            <p><strong>级别:</strong> <span id="detail-level"></span></p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>来源:</strong> <span id="detail-source"></span></p>
+                            <p><strong>相关ID:</strong> <span id="detail-related-id"></span></p>
+                            <p><strong>用户:</strong> <span id="detail-user"></span></p>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <h6>消息内容</h6>
+                        <div id="detail-message" class="border p-3 bg-light"></div>
+                    </div>
+                    <div class="mb-3">
+                        <h6>上下文数据</h6>
+                        <pre id="detail-context" class="border p-3 bg-light" style="max-height: 200px; overflow-y: auto;"></pre>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 审计报表模态框 -->
+    <div class="modal fade" id="audit-report-modal" tabindex="-1" aria-labelledby="audit-report-modal-label" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="audit-report-modal-label">审计报表</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <h6>日志级别分布</h6>
+                            <canvas id="level-chart" width="400" height="200"></canvas>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>日志来源分布</h6>
+                            <canvas id="source-chart" width="400" height="200"></canvas>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12">
+                            <h6>日志时间分布</h6>
+                            <canvas id="time-chart" width="800" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" id="export-report-btn">导出报表</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    <script>
+        // 模拟数据 - 日志列表
+        const mockLogs = [
+            { id: 'log-001', timestamp: '2023-10-15T08:30:45', level: 'info', source: 'system', message: '系统启动成功', user: 'system', relatedId: null, context: { version: '1.0.0', environment: 'production' } },
+            { id: 'log-002', timestamp: '2023-10-15T08:31:10', level: 'info', source: 'session', message: '设备 dev-001 连接成功', user: 'system', relatedId: 'dev-001', context: { sessionId: 'sess-001', deviceId: 'dev-001' } },
+            { id: 'log-003', timestamp: '2023-10-15T09:15:22', level: 'warning', source: 'device', message: '设备 dev-001 参数更新失败', user: 'system', relatedId: 'dev-001', context: { sessionId: 'sess-001', deviceId: 'dev-001', parameterName: 'Device.WiFi.SSID.1.SSID', reason: 'Invalid value' } },
+            { id: 'log-004', timestamp: '2023-10-15T10:20:35', level: 'info', source: 'session', message: '设备 dev-002 连接成功', user: 'system', relatedId: 'dev-002', context: { sessionId: 'sess-002', deviceId: 'dev-002' } },
+            { id: 'log-005', timestamp: '2023-10-15T11:05:15', level: 'error', source: 'system', message: '数据库连接超时', user: 'system', relatedId: null, context: { dbHost: 'localhost', dbName: 'tr069db', errorCode: 'ETIMEDOUT' } },
+            { id: 'log-006', timestamp: '2023-10-15T11:30:20', level: 'info', source: 'user', message: '用户 admin 登录成功', user: 'admin', relatedId: null, context: { ipAddress: '192.168.1.100', userAgent: 'Mozilla/5.0' } },
+            { id: 'log-007', timestamp: '2023-10-15T12:15:45', level: 'info', source: 'device', message: '设备 dev-003 固件升级开始', user: 'admin', relatedId: 'dev-003', context: { deviceId: 'dev-003', firmwareVersion: '2.1.0', previousVersion: '2.0.5' } },
+            { id: 'log-008', timestamp: '2023-10-15T12:45:30', level: 'warning', source: 'device', message: '设备 dev-003 固件升级失败', user: 'system', relatedId: 'dev-003', context: { deviceId: 'dev-003', firmwareVersion: '2.1.0', reason: 'Connection lost during transfer' } },
+            { id: 'log-009', timestamp: '2023-10-15T13:10:15', level: 'info', source: 'system', message: '系统配置更新', user: 'admin', relatedId: null, context: { configName: 'session.timeout', oldValue: '30', newValue: '60' } },
+            { id: 'log-010', timestamp: '2023-10-15T14:25:40', level: 'error', source: 'session', message: '设备 dev-004 会话异常关闭', user: 'system', relatedId: 'dev-004', context: { sessionId: 'sess-004', deviceId: 'dev-004', reason: 'Connection reset by peer' } }
+        ];
+
+        // 全局变量
+        let currentPage = 1;
+        const itemsPerPage = 10;
+
+        // DOM加载完成后执行初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 设置默认日期范围（今天）
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('date-from').value = today;
+            document.getElementById('date-to').value = today;
+            
+            // 加载日志数据
+            loadLogs();
+            
+            // 添加事件监听器
+            document.getElementById('refresh-btn').addEventListener('click', loadLogs);
+            document.getElementById('search-btn').addEventListener('click', searchLogs);
+            document.getElementById('level-filter').addEventListener('change', loadLogs);
+            document.getElementById('source-filter').addEventListener('change', loadLogs);
+            document.getElementById('date-from').addEventListener('change', loadLogs);
+            document.getElementById('date-to').addEventListener('change', loadLogs);
+            document.getElementById('export-btn').addEventListener('click', showAuditReport);
+            document.getElementById('export-report-btn').addEventListener('click', exportAuditReport);
+        });
+
+        /**
+         * 加载日志列表
+         */
+        function loadLogs() {
+            const tableBody = document.getElementById('logs-table-body');
+            tableBody.innerHTML = '<tr><td colspan="5" class="text-center">加载中...</td></tr>';
+
+            // 获取过滤器值
+            const levelFilter = document.getElementById('level-filter').value;
+            const sourceFilter = document.getElementById('source-filter').value;
+            const dateFrom = document.getElementById('date-from').value;
+            const dateTo = document.getElementById('date-to').value;
+
+            // 模拟API请求延迟
+            setTimeout(() => {
+                // 过滤日志
+                let filteredLogs = mockLogs;
+                
+                // 按级别过滤
+                if (levelFilter !== 'all') {
+                    filteredLogs = filteredLogs.filter(log => log.level === levelFilter);
+                }
+                
+                // 按来源过滤
+                if (sourceFilter !== 'all') {
+                    filteredLogs = filteredLogs.filter(log => log.source === sourceFilter);
+                }
+                
+                // 按日期范围过滤
+                if (dateFrom) {
+                    const fromDate = new Date(dateFrom);
+                    filteredLogs = filteredLogs.filter(log => new Date(log.timestamp) >= fromDate);
+                }
+                
+                if (dateTo) {
+                    const toDate = new Date(dateTo);
+                    toDate.setHours(23, 59, 59, 999); // 设置为当天结束时间
+                    filteredLogs = filteredLogs.filter(log => new Date(log.timestamp) <= toDate);
+                }
+
+                // 计算分页
+                const startIndex = (currentPage - 1) * itemsPerPage;
+                const endIndex = startIndex + itemsPerPage;
+                const paginatedLogs = filteredLogs.slice(startIndex, endIndex);
+                const totalPages = Math.ceil(filteredLogs.length / itemsPerPage);
+
+                // 更新表格
+                updateLogsTable(paginatedLogs);
+
+                // 更新分页控件
+                updatePagination(currentPage, totalPages);
+
+                // 更新总数
+                document.getElementById('total-count').textContent = filteredLogs.length;
+
+                // 显示成功通知
+                showNotification('成功', '日志数据已加载', 'success');
+            }, 300);
+        }
+
+        /**
+         * 更新日志表格
+         */
+        function updateLogsTable(logs) {
+            const tableBody = document.getElementById('logs-table-body');
+            tableBody.innerHTML = '';
+
+            if (logs.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="5" class="text-center">没有日志数据</td></tr>';
+                return;
+            }
+
+            logs.forEach(log => {
+                const row = document.createElement('tr');
+                row.className = 'log-row';
+                row.setAttribute('data-log-id', log.id);
+                
+                // 创建日志级别标签
+                let levelClass = 'bg-info';
+                let levelText = '信息';
+                if (log.level === 'warning') {
+                    levelClass = 'bg-warning';
+                    levelText = '警告';
+                } else if (log.level === 'error') {
+                    levelClass = 'bg-danger';
+                    levelText = '错误';
+                }
+
+                // 设置行内容
+                row.innerHTML = `
+                    <td>${formatDateTime(log.timestamp)}</td>
+                    <td><span class="badge ${levelClass}">${levelText}</span></td>
+                    <td>${log.source}</td>
+                    <td>${log.message}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-info view-log-btn" data-log-id="${log.id}">
+                            <i class="bi bi-eye"></i> 详情
+                        </button>
+                    </td>
+                `;
+
+                tableBody.appendChild(row);
+            });
+
+            // 添加按钮事件
+            document.querySelectorAll('.view-log-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const logId = this.getAttribute('data-log-id');
+                    viewLogDetails(logId);
+                });
+            });
+        }
+
+        /**
+         * 更新分页控件
+         */
+        function updatePagination(currentPage, totalPages) {
+            const paginationContainer = document.getElementById('pagination');
+            paginationContainer.innerHTML = '';
+
+            if (totalPages <= 1) return;
+
+            const ul = document.createElement('ul');
+            ul.className = 'pagination';
+
+            // 上一页按钮
+            const prevLi = document.createElement('li');
+            prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+            const prevLink = document.createElement('a');
+            prevLink.className = 'page-link';
+            prevLink.href = '#';
+            prevLink.innerHTML = '&laquo;';
+            if (currentPage > 1) {
+                prevLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    goToPage(currentPage - 1);
+                });
+            }
+            prevLi.appendChild(prevLink);
+            ul.appendChild(prevLi);
+
+            // 页码按钮
+            for (let i = 1; i <= totalPages; i++) {
+                const pageLi = document.createElement('li');
+                pageLi.className = `page-item ${i === currentPage ? 'active' : ''}`;
+                const pageLink = document.createElement('a');
+                pageLink.className = 'page-link';
+                pageLink.href = '#';
+                pageLink.textContent = i;
+                if (i !== currentPage) {
+                    pageLink.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        goToPage(i);
+                    });
+                }
+                pageLi.appendChild(pageLink);
+                ul.appendChild(pageLi);
+            }
+
+            // 下一页按钮
+            const nextLi = document.createElement('li');
+            nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+            const nextLink = document.createElement('a');
+            nextLink.className = 'page-link';
+            nextLink.href = '#';
+            nextLink.innerHTML = '&raquo;';
+            if (currentPage < totalPages) {
+                nextLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    goToPage(currentPage + 1);
+                });
+            }
+            nextLi.appendChild(nextLink);
+            ul.appendChild(nextLi);
+
+            paginationContainer.appendChild(ul);
+        }
+
+        /**
+         * 跳转到指定页
+         */
+        function goToPage(page) {
+            currentPage = page;
+            loadLogs();
+        }
+
+        /**
+         * 搜索日志
+         */
+        function searchLogs() {
+            const searchInput = document.getElementById('log-search-input');
+            const searchTerm = searchInput.value.trim().toLowerCase();
+
+            if (searchTerm === '') {
+                loadLogs();
+                return;
+            }
+
+            // 获取过滤器值
+            const levelFilter = document.getElementById('level-filter').value;
+            const sourceFilter = document.getElementById('source-filter').value;
+            const dateFrom = document.getElementById('date-from').value;
+            const dateTo = document.getElementById('date-to').value;
+
+            // 过滤日志
+            let filteredLogs = mockLogs;
+            
+            // 先按其他条件过滤
+            if (levelFilter !== 'all') {
+                filteredLogs = filteredLogs.filter(log => log.level === levelFilter);
+            }
+            
+            if (sourceFilter !== 'all') {
+                filteredLogs = filteredLogs.filter(log => log.source === sourceFilter);
+            }
+            
+            if (dateFrom) {
+                const fromDate = new Date(dateFrom);
+                filteredLogs = filteredLogs.filter(log => new Date(log.timestamp) >= fromDate);
+            }
+            
+            if (dateTo) {
+                const toDate = new Date(dateTo);
+                toDate.setHours(23, 59, 59, 999);
+                filteredLogs = filteredLogs.filter(log => new Date(log.timestamp) <= toDate);
+            }
+            
+            // 再按搜索词过滤
+            filteredLogs = filteredLogs.filter(log => {
+                return log.message.toLowerCase().includes(searchTerm) || 
+                       log.source.toLowerCase().includes(searchTerm) ||
+                       log.level.toLowerCase().includes(searchTerm) ||
+                       (log.relatedId && log.relatedId.toLowerCase().includes(searchTerm)) ||
+                       (log.user && log.user.toLowerCase().includes(searchTerm));
+            });
+
+            // 更新表格
+            updateLogsTable(filteredLogs);
+
+            // 更新总数
+            document.getElementById('total-count').textContent = filteredLogs.length;
+
+            // 重置分页
+            document.getElementById('pagination').innerHTML = '';
+
+            // 显示通知
+            showNotification('信息', `找到 ${filteredLogs.length} 条匹配的日志记录`, 'info');
+        }
+
+        /**
+         * 查看日志详情
+         */
+        function viewLogDetails(logId) {
+            // 查找日志
+            const log = mockLogs.find(l => l.id === logId);
+            if (!log) {
+                showNotification('错误', '找不到指定的日志', 'error');
+                return;
+            }
+
+            // 更新模态框内容
+            document.getElementById('detail-log-id').textContent = log.id;
+            document.getElementById('detail-timestamp').textContent = formatDateTime(log.timestamp);
+            
+            // 设置级别标签
+            const levelElement = document.getElementById('detail-level');
+            let levelClass = 'bg-info';
+            let levelText = '信息';
+            if (log.level === 'warning') {
+                levelClass = 'bg-warning';
+                levelText = '警告';
+            } else if (log.level === 'error') {
+                levelClass = 'bg-danger';
+                levelText = '错误';
+            }
+            levelElement.textContent = levelText;
+            levelElement.className = `badge ${levelClass}`;
+            
+            document.getElementById('detail-source').textContent = log.source;
+            document.getElementById('detail-related-id').textContent = log.relatedId || '-';
+            document.getElementById('detail-user').textContent = log.user || '-';
+            document.getElementById('detail-message').textContent = log.message;
+            
+            // 格式化上下文数据
+            if (log.context) {
+                document.getElementById('detail-context').textContent = JSON.stringify(log.context, null, 2);
+            } else {
+                document.getElementById('detail-context').textContent = '{}';
+            }
+
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('log-detail-modal'));
+            modal.show();
+        }
+
+        /**
+         * 显示审计报表
+         */
+        function showAuditReport() {
+            // 获取过滤器值
+            const dateFrom = document.getElementById('date-from').value;
+            const dateTo = document.getElementById('date-to').value;
+            
+            // 过滤日志
+            let filteredLogs = mockLogs;
+            
+            if (dateFrom) {
+                const fromDate = new Date(dateFrom);
+                filteredLogs = filteredLogs.filter(log => new Date(log.timestamp) >= fromDate);
+            }
+            
+            if (dateTo) {
+                const toDate = new Date(dateTo);
+                toDate.setHours(23, 59, 59, 999);
+                filteredLogs = filteredLogs.filter(log => new Date(log.timestamp) <= toDate);
+            }
+            
+            // 准备图表数据
+            const levelCounts = {
+                info: filteredLogs.filter(log => log.level === 'info').length,
+                warning: filteredLogs.filter(log => log.level === 'warning').length,
+                error: filteredLogs.filter(log => log.level === 'error').length
+            };
+            
+            const sourceCounts = {};
+            filteredLogs.forEach(log => {
+                if (!sourceCounts[log.source]) {
+                    sourceCounts[log.source] = 0;
+                }
+                sourceCounts[log.source]++;
+            });
+            
+            // 按小时统计日志数量
+            const hourCounts = Array(24).fill(0);
+            filteredLogs.forEach(log => {
+                const hour = new Date(log.timestamp).getHours();
+                hourCounts[hour]++;
+            });
+            
+            // 创建图表
+            createLevelChart(levelCounts);
+            createSourceChart(sourceCounts);
+            createTimeChart(hourCounts);
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('audit-report-modal'));
+            modal.show();
+        }
+
+        /**
+         * 创建日志级别分布图表
+         */
+        function createLevelChart(levelCounts) {
+            const ctx = document.getElementById('level-chart').getContext('2d');
+            
+            // 销毁旧图表
+            if (window.levelChart) {
+                window.levelChart.destroy();
+            }
+            
+            window.levelChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: ['信息', '警告', '错误'],
+                    datasets: [{
+                        data: [levelCounts.info, levelCounts.warning, levelCounts.error],
+                        backgroundColor: ['#0dcaf0', '#ffc107', '#dc3545']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * 创建日志来源分布图表
+         */
+        function createSourceChart(sourceCounts) {
+            const ctx = document.getElementById('source-chart').getContext('2d');
+            
+            // 销毁旧图表
+            if (window.sourceChart) {
+                window.sourceChart.destroy();
+            }
+            
+            const labels = Object.keys(sourceCounts);
+            const data = Object.values(sourceCounts);
+            const backgroundColors = [
+                '#0d6efd', '#6f42c1', '#d63384', '#fd7e14', '#20c997'
+            ];
+            
+            window.sourceChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: backgroundColors.slice(0, labels.length)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * 创建日志时间分布图表
+         */
+        function createTimeChart(hourCounts) {
+            const ctx = document.getElementById('time-chart').getContext('2d');
+            
+            // 销毁旧图表
+            if (window.timeChart) {
+                window.timeChart.destroy();
+            }
+            
+            const labels = Array(24).fill().map((_, i) => `${i}:00`);
+            
+            window.timeChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '日志数量',
+                        data: hourCounts,
+                        backgroundColor: '#0d6efd'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                precision: 0
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * 导出审计报表
+         */
+        function exportAuditReport() {
+            // 在实际应用中，这里会生成并下载报表文件
+            alert('报表导出功能将在实际应用中实现');
+        }
+
+        /**
+         * 显示通知
+         */
+        function showNotification(title, message, type = 'info') {
+            const container = document.getElementById('notification-container');
+            
+            // 创建通知元素
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show`;
+            notification.innerHTML = `
+                <strong>${title}</strong> ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            
+            // 添加到容器
+            container.appendChild(notification);
+            
+            // 自动关闭
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    notification.remove();
+                }, 300);
+            }, 3000);
+        }
+
+        /**
+         * 格式化日期时间
+         */
+        function formatDateTime(dateTimeStr) {
+            if (!dateTimeStr) return '-';
+            
+            const date = new Date(dateTimeStr);
+            
+            if (isNaN(date.getTime())) return dateTimeStr;
+            
+            return date.toLocaleString();
+        }
+    </script>
+</body>
+</html>

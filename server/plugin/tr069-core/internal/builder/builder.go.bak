@@ -1,0 +1,187 @@
+// Package builder implements the TR069 message builder.
+package builder
+
+import (
+ "context"
+ "encoding/xml"
+ "fmt"
+ 
+ "github.com/example/tr069/errors"
+ "github.com/example/tr069/interfaces"
+ "github.com/example/tr069/internal/types"
+)
+
+// Builder implements the interface.Builder interface.
+type Builder struct {
+ prettyPrint bool
+}
+
+// New creates a new Builder.
+func New() *Builder {
+ return &Builder{
+  prettyPrint: false,
+ }
+}
+
+// BuildMessage builds a TR069 message from a Message struct.
+func (b *Builder) BuildMessage(ctx context.Context, msg *interfaces.Message) ([]byte, error) {
+ // Create the envelope
+ envelope := &types.Envelope{
+  Header: types.Header{
+   SessionID:      msg.SessionID,
+   HoldRequests:   msg.HoldRequests,
+   NoMoreRequests: msg.NoMoreRequests,
+  },
+ }
+ 
+ // Build the body based on the method
+ switch msg.Method {
+ case interfaces.MethodInform:
+  // For Inform responses
+  envelope.Body.Contents = b.buildInformResponse()
+  
+ case interfaces.MethodGetParameterValues:
+  // For GetParameterValues responses
+  envelope.Body.Contents = b.buildGetParameterValuesResponse(msg.Parameters)
+  
+ case interfaces.MethodSetParameterValues:
+  // For SetParameterValues responses
+  envelope.Body.Contents = b.buildSetParameterValuesResponse()
+  
+ default:
+  // For other methods, build a generic response
+  envelope.Body.Contents = b.buildGenericResponse()
+ }
+ 
+ // Marshal the envelope
+ data, err := xml.Marshal(envelope)
+ if err != nil {
+  return nil, errors.ErrInvalidMessage
+ }
+ 
+ // Add XML header
+ result := []byte(xml.Header)
+ result = append(result, data...)
+ 
+ return result, nil
+}
+
+// BuildRPCResponse builds a TR069 RPC response.
+func (b *Builder) BuildRPCResponse(ctx context.Context, method string, params map[string]interface{}) ([]byte, error) {
+ // Create the envelope
+ envelope := &types.Envelope{}
+ 
+ // Build the body based on the method
+ switch method {
+ case interfaces.MethodInform:
+  envelope.Body.Contents = b.buildInformResponse()
+  
+ case interfaces.MethodGetParameterValues:
+  // Convert params to parameters
+  var parameters []interfaces.Parameter
+  if params != nil {
+   parameters = make([]interfaces.Parameter, 0, len(params))
+   for name, value := range params {
+    parameters = append(parameters, interfaces.Parameter{
+     Name:  name,
+     Value: value,
+     Type:  "string", // Simplified for now
+    })
+   }
+  }
+  envelope.Body.Contents = b.buildGetParameterValuesResponse(parameters)
+  
+ case interfaces.MethodSetParameterValues:
+  envelope.Body.Contents = b.buildSetParameterValuesResponse()
+  
+ default:
+  envelope.Body.Contents = b.buildGenericResponse()
+ }
+ 
+ // Marshal the envelope
+ data, err := xml.Marshal(envelope)
+ if err != nil {
+  return nil, errors.ErrInvalidMessage
+ }
+ 
+ // Add XML header
+ result := []byte(xml.Header)
+ result = append(result, data...)
+ 
+ return result, nil
+}
+
+// BuildFault builds a TR069 fault response.
+func (b *Builder) BuildFault(ctx context.Context, code int, faultString string) ([]byte, error) {
+ fault := `<Fault><FaultCode>%d</FaultCode><FaultString>%s</FaultString></Fault>`
+ faultXML := fmt.Sprintf(fault, code, faultString)
+ 
+ // Create the envelope
+ envelope := &types.Envelope{
+  Body: types.Body{
+   Contents: []byte(faultXML),
+  },
+ }
+ 
+ // Marshal the envelope
+ data, err := xml.Marshal(envelope)
+ if err != nil {
+  return nil, errors.ErrInvalidMessage
+ }
+ 
+ // Add XML header
+ result := []byte(xml.Header)
+ result = append(result, data...)
+ 
+ return result, nil
+}
+
+// SetPrettyPrint sets whether the output should be formatted for readability.
+func (b *Builder) SetPrettyPrint(pretty bool) {
+ b.prettyPrint = pretty
+}
+
+// GetPrettyPrint returns the current pretty print setting.
+func (b *Builder) GetPrettyPrint() bool {
+ return b.prettyPrint
+}
+
+// Helper methods
+
+func (b *Builder) buildInformResponse() []byte {
+ response := `<InformResponse><MaxEnvelopes>1</MaxEnvelopes></InformResponse>`
+ return []byte(response)
+}
+
+func (b *Builder) buildGetParameterValuesResponse(parameters []interfaces.Parameter) []byte {
+ if len(parameters) == 0 {
+  return []byte(`<GetParameterValuesResponse><ParameterList></ParameterList></GetParameterValuesResponse>`)
+ }
+ 
+ response := `<GetParameterValuesResponse><ParameterList>`
+ for _, param := range parameters {
+  response += fmt.Sprintf(
+   `<ParameterValueStruct><Name>%s</Name><Value type="%s">%v</Value></ParameterValueStruct>`,
+   param.Name, param.Type, param.Value)
+ }
+ response += `</ParameterList></GetParameterValuesResponse>`
+ 
+ return []byte(response)
+}
+
+func (b *Builder) buildSetParameterValuesResponse() []byte {
+ response := `<SetParameterValuesResponse><Status>0</Status></SetParameterValuesResponse>`
+ return []byte(response)
+}
+
+func (b *Builder) buildGenericResponse() []byte {
+ return []byte(`<GenericResponse></GenericResponse>`)
+}
+
+func (b *Builder) marshalToBytes(v interface{}) []byte {
+ data, err := xml.Marshal(v)
+ if err != nil {
+  return nil
+ }
+ return data
+}

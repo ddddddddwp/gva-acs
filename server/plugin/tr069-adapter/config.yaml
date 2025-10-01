@@ -1,0 +1,7 @@
+# TR069-Adapter 插件配置
+enabled: true      # 是否启用TR069服务
+server_port: 7547  # TR069服务器端口
+log_level: info    # 日志级别：debug, info, warn, error
+max_devices: 1000  # 最大设备数量
+enable_cache: true # 是否启用缓存
+cache_ttl: 3600    # 缓存过期时间(秒)
