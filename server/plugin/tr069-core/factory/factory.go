@@ -2,10 +2,10 @@
 package factory
 
 import (
- "github.com/root/demo/tr069/config"
- "github.com/root/demo/tr069/interfaces"
- "github.com/root/demo/tr069/internal/builder"
- "github.com/root/demo/tr069/internal/parser"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/config"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/builder"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/parser"
 )
 
 // NewParser creates a new Parser with the given options.

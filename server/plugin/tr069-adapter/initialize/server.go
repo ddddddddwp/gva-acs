@@ -1,18 +1,21 @@
 package initialize
 
 import (
+	"context"
 	"fmt"
-	"github.com/flipped-aurora/gin-vue-admin/server/global"
-	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter/global"
-	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
+	"io"
 	"net/http"
-	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/flipped-aurora/gin-vue-admin/server/global"
+	adapterGlobal "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter/global"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter/service"
+	"go.uber.org/zap"
 )
 
 // InitializeTR069Server 初始化TR069服务器
 func InitializeTR069Server() {
-	if !tr069global.TR069Config.Enabled {
+	if !adapterGlobal.TR069Config.Enabled {
 		global.GVA_LOG.Info("TR069服务器未启用")
 		return
 	}
@@ -24,37 +27,29 @@ func InitializeTR069Server() {
 	// 注册TR069请求处理路由
 	router.POST("/tr069", func(c *gin.Context) {
 		// 读取请求体
-		body, err := c.GetRawData()
+		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			global.GVA_LOG.Error("读取TR069请求体失败", zap.Error(err))
 			c.Status(400)
 			return
 		}
 		
-		// 使用tr069-core处理请求
-		resp, err := tr069global.TR069Parser.ParseInform(body)
+		// 使用适配器服务处理请求
+		ctx := context.Background()
+		resp, err := service.ServiceGroupApp.ProcessInform(ctx, body)
 		if err != nil {
-			global.GVA_LOG.Error("解析TR069请求失败", zap.Error(err))
+			global.GVA_LOG.Error("处理TR069请求失败", zap.Error(err))
 			c.Status(500)
 			return
 		}
 		
-		// 构建响应
-		response := tr069global.TR069Builder.BuildInformResponse(resp)
-		
-		// 触发事件
-		tr069global.TR069EventManager.TriggerEvent("inform_received", map[string]interface{}{
-			"deviceId": resp.DeviceID,
-			"timestamp": time.Now(),
-		})
-		
 		// 设置响应头
 		c.Header("Content-Type", "text/xml; charset=utf-8")
-		c.Writer.Write(response)
+		c.Writer.Write(resp)
 	})
 	
 	// 启动TR069服务器
-	addr := fmt.Sprintf(":%d", tr069global.TR069Config.ServerPort)
+	addr := fmt.Sprintf(":%d", adapterGlobal.TR069Config.ServerPort)
 	server := &http.Server{
 		Addr:    addr,
 		Handler: router,

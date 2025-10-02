@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/root/demo/tr069/internal/stream"
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/stream"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // StreamParserOption represents an option for configuring a stream parser.

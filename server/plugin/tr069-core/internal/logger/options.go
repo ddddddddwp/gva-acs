@@ -3,7 +3,7 @@ package logger
 
 import (
 "io"
-"github.com/root/demo/tr069/interfaces"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // WithLogLevel 设置日志级别

@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"strings"
 	
-	"github.com/root/demo/tr069/interfaces"
-	"github.com/root/demo/tr069/internal/rpc"
-	"github.com/root/demo/tr069/internal/types"
-	"github.com/root/demo/tr069/internal/version"
-	"github.com/root/demo/tr069/pkg/crypto/encryption"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/rpc"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/types"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/version"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/pkg/crypto/encryption"
 )
 
 // Parser implements the interfaces.Parser interface.

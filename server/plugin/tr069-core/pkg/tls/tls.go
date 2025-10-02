@@ -7,7 +7,7 @@ import (
  "fmt"
  "os"
  
- "github.com/root/demo/tr069/interfaces"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // LoadTLSConfig loads TLS configuration from the provided setup.

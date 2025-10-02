@@ -4,7 +4,7 @@ import (
 "fmt"
 "os"
 "path/filepath"
-"github.com/root/demo/tr069/internal/config"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/config"
 "testing"
 "time"
 )

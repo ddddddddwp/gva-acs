@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // JSONConverter 提供TR069消息和JSON格式之间的转换

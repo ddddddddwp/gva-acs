@@ -2,8 +2,8 @@
 package factory
 
 import (
-	"github.com/root/demo/tr069/interfaces"
-	"github.com/root/demo/tr069/internal/task"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/task"
 )
 
 // CreateTaskQueue creates a new task queue with default configuration.

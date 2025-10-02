@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/root/demo/tr069/interfaces"
-	"github.com/root/demo/tr069/pkg/api/rest"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/pkg/api/rest"
 )
 
 // DeviceHandler 处理设备相关的API请求

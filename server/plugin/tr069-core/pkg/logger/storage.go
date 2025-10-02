@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"

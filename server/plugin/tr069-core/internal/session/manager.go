@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // sessionManager implements the SessionManager interface.

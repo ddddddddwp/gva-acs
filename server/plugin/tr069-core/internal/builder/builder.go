@@ -7,8 +7,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	
-	interfaces "github.com/root/demo/tr069/interfaces"
-	"github.com/root/demo/tr069/internal/types"
+	interfaces "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/types"
 )
 
 // Builder implements the interfaces.Builder interface.

@@ -4,9 +4,9 @@ import (
  "context"
  "encoding/xml"
  "fmt"
- "github.com/root/demo/tr069/factory"
- "github.com/root/demo/tr069/interfaces"
- "github.com/root/demo/tr069/errors"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/factory"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/errors"
 )
 
 // DebugParserExample demonstrates how to use the parser with a sample message

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/root/demo/tr069/interfaces"
-	"github.com/root/demo/tr069/pkg/api/rest"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/pkg/api/rest"
 )
 
 // SessionHandler 处理TR069会话相关的API请求

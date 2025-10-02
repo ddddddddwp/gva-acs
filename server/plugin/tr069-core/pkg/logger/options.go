@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // Option 定义日志记录器的配置选项

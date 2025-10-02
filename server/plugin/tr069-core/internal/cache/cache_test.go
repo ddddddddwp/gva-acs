@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // TestCache_SetAndGet tests the Set and Get methods of the cache.

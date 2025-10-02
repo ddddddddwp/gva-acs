@@ -1,7 +1,7 @@
 // Package config provides configuration options.
 package config
 
-import "github.com/root/demo/tr069/interfaces"
+import "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 
 // Option represents a configuration option.
 type Option func(interfaces.Config)

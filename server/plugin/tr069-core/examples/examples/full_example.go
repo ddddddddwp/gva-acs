@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/root/demo/tr069/factory"
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/factory"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // FullTR069Example 演示TR069库的完整使用流程

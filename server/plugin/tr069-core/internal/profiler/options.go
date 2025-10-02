@@ -2,7 +2,7 @@
 package profiler
 
 import (
-"github.com/root/demo/tr069/interfaces"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // WithOutputDirectory 设置性能分析输出目录

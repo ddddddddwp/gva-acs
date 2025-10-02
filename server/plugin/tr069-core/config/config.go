@@ -4,7 +4,7 @@ package config
 import (
  "sync"
  
- "github.com/root/demo/tr069/interfaces"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // Config implements the interfaces.Config interface.

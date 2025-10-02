@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // CORSMiddleware 创建CORS中间件

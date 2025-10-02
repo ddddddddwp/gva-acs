@@ -7,7 +7,7 @@ import (
 "os"
 "path/filepath"
 
-"github.com/root/demo/tr069/interfaces"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // Exporter 定义了指标导出器接口

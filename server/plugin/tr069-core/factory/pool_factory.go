@@ -2,8 +2,8 @@
 package factory
 
 import (
-	"github.com/root/demo/tr069/interfaces"
-	"github.com/root/demo/tr069/pool"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/pool"
 )
 
 // PoolFactory 提供创建和管理各种对象池的工厂

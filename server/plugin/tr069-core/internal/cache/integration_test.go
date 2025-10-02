@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // TestCacheIntegration tests the complete cache flow with different eviction policies.

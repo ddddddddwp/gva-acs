@@ -2,7 +2,7 @@ package main
 
 import (
         "fmt"
-        "github.com/root/demo/tr069/examples/examples"
+        "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/examples/examples"
 )
 
 func main() {

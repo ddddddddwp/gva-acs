@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // TR069Converter 实现TR069协议与HTTP/JSON的转换

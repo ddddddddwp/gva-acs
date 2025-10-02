@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/root/demo/tr069/factory"
-	"github.com/root/demo/tr069/interfaces"
-	"github.com/root/demo/tr069/pkg/tls"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/factory"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/pkg/tls"
 )
 
 // FullSecurityExample 演示完整的安全配置功能

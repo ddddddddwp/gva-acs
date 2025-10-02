@@ -103,7 +103,7 @@ func (api *TR069Api) GetDeviceEvents(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	limitStr := c.DefaultQuery("limit", "10")
 	limit, _ := strconv.Atoi(limitStr)
-
+	
 	events, err := service.ServiceGroupApp.GetDeviceEvents(uint(id), limit)
 	if err != nil {
 		global.GVA_LOG.Error("获取设备事件失败!", zap.Error(err))
@@ -129,7 +129,7 @@ func (api *TR069Api) SetDeviceParameters(c *gin.Context) {
 		response.FailWithMessage(err.Error(), c)
 		return
 	}
-
+	
 	err = service.ServiceGroupApp.SetDeviceParameters(req)
 	if err != nil {
 		global.GVA_LOG.Error("设置设备参数失败!", zap.Error(err))
@@ -167,7 +167,7 @@ func (api *TR069Api) HandleTR069Request(c *gin.Context) {
 		c.Status(400)
 		return
 	}
-
+	
 	// 处理TR069请求
 	resp, err := service.ServiceGroupApp.ProcessInform(c, body)
 	if err != nil {
@@ -175,7 +175,7 @@ func (api *TR069Api) HandleTR069Request(c *gin.Context) {
 		c.Status(500)
 		return
 	}
-
+	
 	// 设置响应头
 	c.Header("Content-Type", "text/xml; charset=utf-8")
 	c.Writer.Write(resp)

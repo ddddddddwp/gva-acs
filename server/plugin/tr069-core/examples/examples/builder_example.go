@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/root/demo/tr069/factory"
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/factory"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // BuildTR069Message 演示如何使用构建器构建TR069消息

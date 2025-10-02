@@ -4,7 +4,7 @@ package config
 import (
  "testing"
  
- "github.com/root/demo/tr069/interfaces"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 func TestConfig(t *testing.T) {

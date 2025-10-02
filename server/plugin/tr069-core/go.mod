@@ -1,6 +1,6 @@
-module github.com/root/demo/tr069
+module github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core
 
-go 1.24
+go 1.23
 
 require (
 	github.com/google/uuid v1.6.0

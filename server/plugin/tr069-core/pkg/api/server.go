@@ -8,7 +8,7 @@ import (
 "time"
 
 "github.com/gorilla/mux"
-"github.com/root/demo/tr069/interfaces"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // Server 实现HTTP服务器

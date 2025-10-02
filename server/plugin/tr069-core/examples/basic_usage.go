@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/root/demo/tr069/factory"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/factory"
 )
 
 func main() {

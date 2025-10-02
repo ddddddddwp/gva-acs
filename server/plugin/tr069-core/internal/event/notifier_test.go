@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // TestNotifier_Notify tests the Notify method of the notifier.

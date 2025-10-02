@@ -5,7 +5,7 @@ import (
  "bytes"
  "sync"
  
- "github.com/root/demo/tr069/interfaces"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // BufferPool is a pool of bytes.Buffer objects.

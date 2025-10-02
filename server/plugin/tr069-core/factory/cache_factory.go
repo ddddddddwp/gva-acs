@@ -3,8 +3,8 @@
 package factory
 
 import (
-	"github.com/root/demo/tr069/internal/cache"
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/cache"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // CreateCacheManager creates a new cache manager.

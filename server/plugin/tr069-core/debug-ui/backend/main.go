@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 
 	"github.com/gorilla/mux"
-	"github.com/root/demo/tr069/factory"
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/factory"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 type ParseRequest struct {

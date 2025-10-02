@@ -6,7 +6,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

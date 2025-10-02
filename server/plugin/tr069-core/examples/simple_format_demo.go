@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/root/demo/tr069/interfaces"
-	"github.com/root/demo/tr069/pkg/logger"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/pkg/logger"
 )
 
 func main() {

@@ -4,7 +4,7 @@ package monitor
 import (
 "time"
 
-"github.com/root/demo/tr069/interfaces"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // WithExportInterval 设置导出间隔的选项

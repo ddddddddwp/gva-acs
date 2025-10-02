@@ -3,8 +3,8 @@
 package factory
 
 import (
-	"github.com/root/demo/tr069/internal/event"
-	"github.com/root/demo/tr069/interfaces"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/event"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 // CreateEventNotifier creates a new event notifier.

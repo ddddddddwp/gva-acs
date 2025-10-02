@@ -3,7 +3,7 @@ package initialize
 import (
 	"github.com/flipped-aurora/gin-vue-admin/server/global"
 	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter/config"
-	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter/global"
+	tr069global "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter/global"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"os"

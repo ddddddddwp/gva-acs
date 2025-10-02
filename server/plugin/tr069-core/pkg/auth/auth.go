@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	httputil "github.com/root/demo/tr069/pkg/http"
+	httputil "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/pkg/http"
 )
 
 // AuthManager manages authentication for TR069 communication.

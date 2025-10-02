@@ -10,9 +10,9 @@ import (
 "os/signal"
 "time"
 
-"github.com/root/demo/tr069/interfaces"
-"github.com/root/demo/tr069/factory"
-"github.com/root/demo/tr069/pkg/api"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/factory"
+"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/pkg/api"
 )
 
 // DeviceHandler 处理设备相关API
