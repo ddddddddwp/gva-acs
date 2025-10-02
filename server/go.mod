@@ -4,7 +4,7 @@ go 1.23.0
 
 toolchain go1.24.1
 
-replace github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core => ./plugin/tr069-core
+replace github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core => ./tr069-core
 
 replace github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter => ./plugin/tr069-adapter
 

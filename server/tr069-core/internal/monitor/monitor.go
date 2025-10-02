@@ -30,9 +30,9 @@ type metricData struct {
 	name       string
 	metricType interfaces.MetricType
 	value      float64
-	labels    map[string]string
-	timestamp time.Time
-	mutex     sync.RWMutex
+	labels     map[string]string
+	timestamp  time.Time
+	mutex      sync.RWMutex
 }
 
 // NewMonitor 创建一个新的监控实例
@@ -82,11 +82,11 @@ func (m *monitor) RegisterMetric(name string, metricType interfaces.MetricType, 
 
 	// 创建并存储指标
 	m.metrics[name] = &metricData{
-		name:      name,
+		name:       name,
 		metricType: metricType,
-		value:     initialValue,
-		labels:    labelsCopy,
-		timestamp: time.Now(),
+		value:      initialValue,
+		labels:     labelsCopy,
+		timestamp:  time.Now(),
 	}
 
 	return nil

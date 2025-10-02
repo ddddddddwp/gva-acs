@@ -5,7 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 
-	tr069core "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
+	tr069core "github.com/flipped-aurora/gin-vue-admin/server/tr069-core/interfaces"
 	"go.uber.org/zap"
 )
 
@@ -13,6 +13,8 @@ import (
 type SOAPHandler struct {
 	logger       *zap.Logger
 	tr069Builder tr069core.Builder
+	tr069Parser  tr069core.Parser
+	deviceService *service.DeviceService
 }
 
 // NewSOAPHandler 创建SOAP处理器

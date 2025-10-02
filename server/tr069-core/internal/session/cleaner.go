@@ -25,7 +25,7 @@ type SessionCleaner struct {
 // NewSessionCleaner creates a new session cleaner.
 func NewSessionCleaner(manager *sessionManager) *SessionCleaner {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &SessionCleaner{
 		manager:         manager,
 		cleanupInterval: 5 * time.Minute,  // Default cleanup interval
@@ -81,23 +81,23 @@ func (c *SessionCleaner) RunCleanup() int {
 	}
 	c.cleanupInProgress = true
 	c.cleanupMutex.Unlock()
-	
+
 	defer func() {
 		c.cleanupMutex.Lock()
 		c.cleanupInProgress = false
 		c.cleanupMutex.Unlock()
 	}()
-	
+
 	return c.cleanupExpiredSessions()
 }
 
 // cleanupLoop periodically cleans up expired sessions.
 func (c *SessionCleaner) cleanupLoop() {
 	defer c.wg.Done()
-	
+
 	ticker := time.NewTicker(c.cleanupInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -113,43 +113,43 @@ func (c *SessionCleaner) cleanupExpiredSessions() int {
 	now := time.Now()
 	idleDeadline := now.Add(-c.idleTimeout)
 	ageDeadline := now.Add(-c.maxSessionAge)
-	
+
 	// Get all sessions
 	sessions := c.manager.getAllSessions()
-	
+
 	// Track sessions to close
 	sessionsToClose := make([]string, 0)
-	
+
 	// Check each session
 	for sessionID, session := range sessions {
 		// Skip already closed sessions
 		if session.State == interfaces.SessionStateClosed {
 			continue
 		}
-		
+
 		// Check for idle timeout
 		if session.LastActiveAt.Before(idleDeadline) {
 			sessionsToClose = append(sessionsToClose, sessionID)
 			continue
 		}
-		
+
 		// Check for max age
 		if session.CreatedAt.Before(ageDeadline) {
 			sessionsToClose = append(sessionsToClose, sessionID)
 			continue
 		}
 	}
-	
+
 	// Close expired sessions
 	for _, sessionID := range sessionsToClose {
 		// Emit timeout event before closing
 		if session, err := c.manager.GetSession(context.Background(), sessionID); err == nil {
 			c.manager.emitSessionEvent(interfaces.SessionEventTimeout, sessionID, session.DeviceID)
 		}
-		
+
 		// Close the session
 		_ = c.manager.CloseSession(context.Background(), sessionID)
 	}
-	
+
 	return len(sessionsToClose)
 }

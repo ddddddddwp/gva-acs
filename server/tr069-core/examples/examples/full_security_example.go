@@ -46,7 +46,7 @@ func FullSecurityExample() {
 		fmt.Printf("  TLS启用: %v\n", secConfig.EnableTLS)
 		fmt.Printf("  签名验证启用: %v\n", secConfig.EnableSignatureVerification)
 		fmt.Printf("  参数加密启用: %v\n", secConfig.EnableParameterEncryption)
-		
+
 		if secConfig.TLSSetup != nil {
 			fmt.Printf("  TLS服务器名称: %s\n", secConfig.TLSSetup.ServerName)
 			fmt.Printf("  跳过证书验证: %v\n", secConfig.TLSSetup.InsecureSkipVerify)
@@ -60,7 +60,7 @@ func FullSecurityExample() {
 		fmt.Printf("  TLS启用: %v\n", secConfig.EnableTLS)
 		fmt.Printf("  签名验证启用: %v\n", secConfig.EnableSignatureVerification)
 		fmt.Printf("  参数加密启用: %v\n", secConfig.EnableParameterEncryption)
-		
+
 		if secConfig.TLSSetup != nil {
 			fmt.Printf("  TLS服务器名称: %s\n", secConfig.TLSSetup.ServerName)
 			fmt.Printf("  跳过证书验证: %v\n", secConfig.TLSSetup.InsecureSkipVerify)

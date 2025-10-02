@@ -70,7 +70,7 @@ func CreateStreamParserWithFunctionalOptions(options ...StreamParserOption) inte
 func ParseWithTimeout(parser interfaces.StreamParser, reader io.Reader, timeout time.Duration) (*interfaces.Message, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	
+
 	return parser.ParseStream(ctx, reader)
 }
 

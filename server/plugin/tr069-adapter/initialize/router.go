@@ -15,4 +15,5 @@ func InitializeRouter(Router *gin.RouterGroup) {
 	router.RouterGroupApp.ParameterRouter.InitParameterRouter(Router)
 	router.RouterGroupApp.SessionRouter.InitSessionRouter(Router)
 	router.RouterGroupApp.OperationLogRouter.InitOperationLogRouter(Router)
+	router.RouterGroupApp.TR069Router.InitTR069Router(Router)
 }

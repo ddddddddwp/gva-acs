@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	
+
 	interfaces "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/types"
 )
@@ -43,7 +43,7 @@ func (b *Builder) BuildMessage(ctx context.Context, msg *interfaces.Message) ([]
 			HoldRequests   bool   `xml:"HoldRequests,omitempty"`
 			NoMoreRequests int    `xml:"NoMoreRequests,omitempty"`
 		} `xml:"SOAP-ENV:Header"`
-		Body    struct {
+		Body struct {
 			XMLName  xml.Name `xml:"SOAP-ENV:Body"`
 			Contents []byte   `xml:",innerxml"`
 		} `xml:"SOAP-ENV:Body"`
@@ -63,7 +63,7 @@ func (b *Builder) BuildMessage(ctx context.Context, msg *interfaces.Message) ([]
 			NoMoreRequests: 0,
 		},
 	}
-	
+
 	// Handle fault messages
 	if msg.Fault != nil {
 		fault := types.Fault{
@@ -94,7 +94,7 @@ func (b *Builder) BuildMessage(ctx context.Context, msg *interfaces.Message) ([]
 				parameterList := types.ParameterValueList{
 					Parameters: make([]types.ParameterValueStruct, len(msg.Parameters)),
 				}
-				
+
 				for i, param := range msg.Parameters {
 					parameterList.Parameters[i] = types.ParameterValueStruct{
 						Name: param.Name,
@@ -104,7 +104,7 @@ func (b *Builder) BuildMessage(ctx context.Context, msg *interfaces.Message) ([]
 						},
 					}
 				}
-				
+
 				// Create a simple response with the parameters
 				response := struct {
 					XMLName       xml.Name                 `xml:"Response"`
@@ -112,7 +112,7 @@ func (b *Builder) BuildMessage(ctx context.Context, msg *interfaces.Message) ([]
 				}{
 					ParameterList: parameterList,
 				}
-				
+
 				responseXML, err := xml.Marshal(response)
 				if err != nil {
 					return nil, fmt.Errorf("failed to marshal response: %w", err)
@@ -121,11 +121,11 @@ func (b *Builder) BuildMessage(ctx context.Context, msg *interfaces.Message) ([]
 			}
 		}
 	}
-	
+
 	// Marshal the envelope
 	var result []byte
 	var err error
-	
+
 	if b.prettyPrint {
 		result, err = xml.MarshalIndent(envelope, "", "\t")
 	} else {
@@ -161,14 +161,14 @@ func (b *Builder) BuildRPCRequest(ctx context.Context, method string, params map
 
 	// Create SOAP envelope
 	envelope := struct {
-		XMLName xml.Name `xml:"SOAP-ENV:Envelope"`
-		SoapEnv string   `xml:"xmlns:SOAP-ENV,attr"`
-		SoapEnc string   `xml:"xmlns:SOAP-ENC,attr"`
-		XSD     string   `xml:"xmlns:xsd,attr"`
-		XSI     string   `xml:"xmlns:xsi,attr"`
-		CWMP   string       `xml:"xmlns:cwmp,attr"`
-		Header types.Header `xml:"SOAP-ENV:Header"`
-		Body   struct {
+		XMLName xml.Name     `xml:"SOAP-ENV:Envelope"`
+		SoapEnv string       `xml:"xmlns:SOAP-ENV,attr"`
+		SoapEnc string       `xml:"xmlns:SOAP-ENC,attr"`
+		XSD     string       `xml:"xmlns:xsd,attr"`
+		XSI     string       `xml:"xmlns:xsi,attr"`
+		CWMP    string       `xml:"xmlns:cwmp,attr"`
+		Header  types.Header `xml:"SOAP-ENV:Header"`
+		Body    struct {
 			XMLName  xml.Name `xml:"SOAP-ENV:Body"`
 			Contents []byte   `xml:",innerxml"`
 		} `xml:"SOAP-ENV:Body"`
@@ -192,7 +192,7 @@ func (b *Builder) BuildRPCResponse(ctx context.Context, method string, params ma
 	msg := &interfaces.Message{
 		Method: method,
 	}
-	
+
 	// Convert params to Parameter slice
 	var parameters []interfaces.Parameter
 	for name, value := range params {
@@ -203,7 +203,7 @@ func (b *Builder) BuildRPCResponse(ctx context.Context, method string, params ma
 		})
 	}
 	msg.Parameters = parameters
-	
+
 	// Build the message
 	return b.BuildMessage(ctx, msg)
 }
@@ -218,7 +218,7 @@ func (b *Builder) BuildFault(ctx context.Context, code int, faultString string) 
 			FaultString: faultString,
 		},
 	}
-	
+
 	// Build the message
 	return b.BuildMessage(ctx, msg)
 }
@@ -248,7 +248,7 @@ func (b *Builder) BuildCustomRPCResponse(ctx context.Context, method string, res
 	msg := &interfaces.Message{
 		Method: method,
 	}
-	
+
 	// Convert result to Parameter slice if it's a map
 	if params, ok := result.(map[string]interface{}); ok {
 		var parameters []interfaces.Parameter
@@ -261,7 +261,7 @@ func (b *Builder) BuildCustomRPCResponse(ctx context.Context, method string, res
 		}
 		msg.Parameters = parameters
 	}
-	
+
 	// Build the message
 	return b.BuildMessage(ctx, msg)
 }

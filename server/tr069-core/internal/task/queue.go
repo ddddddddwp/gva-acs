@@ -39,7 +39,7 @@ func NewTaskQueue(concurrency int) interfaces.TaskQueue {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	queue := &taskQueue{
 		tasks:        make(map[string]*interfaces.TaskInfo),
 		handlers:     make(map[string]interfaces.TaskHandler),
@@ -50,12 +50,12 @@ func NewTaskQueue(concurrency int) interfaces.TaskQueue {
 		ctx:          ctx,
 		cancel:       cancel,
 	}
-	
+
 	// Initialize priority manager
 	queue.priorityManager = NewPriorityManager(queue)
 	// Initialize retry manager
 	queue.retryManager = NewRetryManager(queue)
-	
+
 	return queue
 }
 
@@ -156,9 +156,9 @@ func (q *taskQueue) CancelTask(ctx context.Context, taskID string) error {
 	}
 
 	// Check if task is already completed or cancelled
-	if task.Status == interfaces.TaskStatusCompleted || 
-	   task.Status == interfaces.TaskStatusFailed || 
-	   task.Status == interfaces.TaskStatusCancelled {
+	if task.Status == interfaces.TaskStatusCompleted ||
+		task.Status == interfaces.TaskStatusFailed ||
+		task.Status == interfaces.TaskStatusCancelled {
 		return interfaces.ErrTaskAlreadyCompleted
 	}
 
@@ -288,7 +288,7 @@ func (q *taskQueue) SetConcurrency(concurrency int) {
 func (q *taskQueue) GetConcurrency() int {
 	q.tasksMutex.RLock()
 	defer q.tasksMutex.RUnlock()
-	
+
 	return q.concurrency
 }
 
@@ -432,13 +432,13 @@ func (q *taskQueue) processTask(task *interfaces.TaskInfo) {
 		if task.RetryCount < task.MaxRetries {
 			task.Status = interfaces.TaskStatusRetrying
 			task.RetryCount++
-			
+
 			// Put the task back in the queue for retry
 			q.pendingTaskMutex.Lock()
 			q.pendingTasks = append(q.pendingTasks, task)
 			q.sortPendingTasksByPriority()
 			q.pendingTaskMutex.Unlock()
-			
+
 			q.tasksMutex.Unlock()
 			q.emitTaskEvent(interfaces.TaskRetrying, task)
 		} else {

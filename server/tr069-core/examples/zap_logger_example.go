@@ -19,9 +19,9 @@ func main() {
 		logger.WithLogLevel(interfaces.LogLevelDebug),
 		logger.WithLogFormat(interfaces.LogFormatJSON),
 	)
-	
+
 	customLogger.Debug("这是一条调试日志")
-	customLogger.Info("这是一条信息日志", 
+	customLogger.Info("这是一条信息日志",
 		interfaces.LogField{Key: "module", Value: "parser"},
 		interfaces.LogField{Key: "version", Value: "1.0.0"},
 	)
@@ -30,40 +30,40 @@ func main() {
 	config := zap.NewProductionConfig()
 	config.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
 	config.OutputPaths = []string{"stdout"}
-	
+
 	zapLogger, _ := config.Build()
 	sugar := zapLogger.Sugar()
-	
+
 	// 使用适配器将zap.SugaredLogger适配到interfaces.Logger
 	adaptedLogger := logger.NewZapAdapter(sugar)
-	
+
 	adaptedLogger.Info("使用适配器创建的日志记录器")
-	
+
 	// 添加上下文字段
 	sessionLogger := adaptedLogger.WithFields(
 		interfaces.LogField{Key: "session_id", Value: "session-123"},
 		interfaces.LogField{Key: "device_id", Value: "device-456"},
 	)
-	
+
 	sessionLogger.Info("处理设备请求")
-	sessionLogger.Error("设备连接失败", 
+	sessionLogger.Error("设备连接失败",
 		interfaces.LogField{Key: "error", Value: "connection timeout"},
 		interfaces.LogField{Key: "retry_count", Value: 3},
 	)
-	
+
 	// 使用全局日志函数
 	logger.SetGlobalLogger(customLogger)
 	logger.Info("使用全局日志函数", interfaces.LogField{Key: "global", Value: true})
 	logger.Error("全局错误日志", interfaces.LogField{Key: "error_code", Value: 500})
-	
+
 	// 创建开发环境日志记录器
 	devLogger := logger.NewDevelopmentZapLogger()
 	devLogger.Debug("开发环境调试日志")
-	
+
 	// 演示不同日志级别
 	devLogger.SetLevel(interfaces.LogLevelWarn)
-	devLogger.Debug("此消息不会显示") // 不会显示，因为级别已设置为Warn
-	devLogger.Info("此消息不会显示")  // 不会显示，因为级别已设置为Warn
-	devLogger.Warn("此警告消息会显示") // 会显示
+	devLogger.Debug("此消息不会显示")  // 不会显示，因为级别已设置为Warn
+	devLogger.Info("此消息不会显示")   // 不会显示，因为级别已设置为Warn
+	devLogger.Warn("此警告消息会显示")  // 会显示
 	devLogger.Error("此错误消息会显示") // 会显示
 }

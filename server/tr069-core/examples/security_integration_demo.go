@@ -24,11 +24,15 @@ func main() {
 	builder := factory.NewBuilder(factory.WithSecurityConfig(securityConfig))
 
 	// 设置安全配置
-	if securityParser, ok := parser.(interface{ SetSecurityConfig(*interfaces.SecurityConfig) }); ok {
+	if securityParser, ok := parser.(interface {
+		SetSecurityConfig(*interfaces.SecurityConfig)
+	}); ok {
 		securityParser.SetSecurityConfig(securityConfig)
 	}
 
-	if securityBuilder, ok := builder.(interface{ SetSecurityConfig(*interfaces.SecurityConfig) }); ok {
+	if securityBuilder, ok := builder.(interface {
+		SetSecurityConfig(*interfaces.SecurityConfig)
+	}); ok {
 		securityBuilder.SetSecurityConfig(securityConfig)
 	}
 

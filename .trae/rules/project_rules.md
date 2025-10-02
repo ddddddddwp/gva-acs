@@ -761,446 +761,323 @@ web/src/plugin/[插件名]/
 6. **重视安全性**：实现完善的权限控制和数据验证机制
 
 
-# TR069 Core Library - AI 使用指南
 
-## 功能描述
+TR069 系统架构设计文档
 
-TR069 Core Library 是一个高性能、模块化的 TR069 协议解析与构建基础库，专为 AI 系统和自动化应用程序设计。本库提供了完整的 TR069 协议实现，使 AI 系统能够与 TR069 设备进行高效通信。
+## 1. 系统概述,这是核心的tr069的设计原则,所有代码都必须遵守这些原则
 
-### 核心功能模块
+TR069 系统采用三层架构设计，将TR069协议处理、设备通信和用户管理功能分为三个独立的组件：
 
-#### 1. 协议解析器 (Parser)
-- **功能**：解析 TR069 XML 消息，提取设备信息、参数和事件
-- **AI 应用场景**：
-  - 设备状态监控和分析
-  - 参数变化检测
-  - 异常事件识别
-  - 设备性能数据收集
+- **TR069-Core**: 核心库，提供TR069协议解析、构建和处理的基础功能, 包含协议解析、数据模型、状态机等核心组件, 不可以包含任何与设备通信相关的代码, 也不可以包含任何与用户交互相关的代码,一般情况下,不允许修改核心组件的代码, 如果有改动需求,请列出来,有人工修改
+- **TR069-Adapter**: GVA插件，负责与CPE设备通信，调用TR069-Core处理协议, 并将处理结果返回给CPE设备, 同时处理CPE设备的请求,绝对不可以给TR069-Adapter插件增加前端代码, 只可以增加后端代码,只能讲CPE上传的数据写入数据库, 并从数据库查询数据,
+- **TR069-Management**: GVA插件，负责数据查询和用户交互界面,主要服务于用户,用户可以通过该插件查询设备状态, 如果用户需要操作CPE设备,只能通过TR069-Adapter插件进行操作, 不可以直接调用TR069-Adapter插件的接口
 
-#### 2. 消息构建器 (Builder)
-- **功能**：构建标准 TR069 消息和响应
-- **AI 应用场景**：
-  - 自动化设备配置
-  - 批量参数设置
-  - 远程命令执行
-  - 故障诊断响应
+## 2. 架构设计图
 
-#### 3. 事件通知系统 (Event System)
-- **功能**：实时事件订阅和通知机制
-- **AI 应用场景**：
-  - 实时设备监控
-  - 异常预警系统
-  - 自动化故障处理
-  - 设备生命周期管理
-
-#### 4. 智能缓存系统 (Cache System)
-- **功能**：高效缓存设备数据和配置信息
-- **AI 应用场景**：
-  - 快速数据访问
-  - 减少网络开销
-  - 提升响应速度
-  - 离线数据分析
-
-#### 5. 流式处理 (Stream Processing)
-- **功能**：处理大型 XML 消息，最小化内存使用
-- **AI 应用场景**：
-  - 大规模设备数据处理
-  - 实时数据流分析
-  - 内存优化处理
-  - 高并发场景支持
-
-## 必要性描述
-
-### 为什么 AI 系统需要 TR069 Core Library？
-
-#### 1. **设备管理自动化**
-现代网络设备管理需要大规模自动化，AI 系统需要能够：
-- 自动发现和配置设备
-- 实时监控设备状态
-- 预测性维护和故障处理
-- 智能参数优化
-
-#### 2. **数据驱动决策**
-AI 系统依赖大量设备数据进行决策：
-- 需要高效解析设备上报的参数
-- 实时处理设备事件和告警
-- 分析设备性能趋势
-- 构建设备行为模型
-
-#### 3. **高性能要求**
-AI 系统通常需要处理大量设备：
-- 支持数千台设备并发通信
-- 毫秒级响应时间要求
-- 最小化内存和 CPU 使用
-- 高可用性和稳定性
-
-#### 4. **标准化接口**
-TR069 是电信设备管理的标准协议：
-- 确保与各厂商设备兼容
-- 提供统一的设备管理接口
-- 支持标准化的数据格式
-- 便于系统集成和扩展
-
-## AI 系统接口使用指南
-
-### 1. 基础初始化
-
-```go
-import (
-    "context"
-    "github.com/root/demo/tr069/factory"
-    "github.com/root/demo/tr069/interfaces"
-)
-
-// 创建解析器和构建器
-func initTR069Components() (interfaces.Parser, interfaces.Builder) {
-    // 配置选项
-    opts := []interfaces.Option{
-        interfaces.WithStrictMode(true),        // 启用严格模式
-        interfaces.WithValidation(true),        // 启用数据验证
-        interfaces.WithMaxDepth(100),          // 设置最大解析深度
-        interfaces.WithPrettyPrint(false),     // 关闭格式化输出（性能优化）
-    }
-    
-    parser := factory.NewParser(opts...)
-    builder := factory.NewBuilder(opts...)
-    
-    return parser, builder
-}
+```
+┌─────────────────┐    7547端口     ┌──────────────────┐      调用接口     ┌──────────────────┐
+│   CPE 设备      │ ◄──────────────► │  TR069-Adapter   │◄──────────────────►│   TR069-Core     │
+│                 │    SOAP/HTTP     │  GVA插件         │                   │   核心库         │
+└─────────────────┘                  └──────────────────┘                   └──────────────────┘
+                                              │
+                                              │ 数据存储
+                                              ▼
+                                     ┌──────────────────┐
+                                     │   数据库          │
+                                     │   (MySQL/PG)     │
+                                     └──────────────────┘
+                                              ▲
+                                              │ 数据查询
+                                              │
+┌─────────────────┐    HTTP API     ┌──────────────────┐
+│   前端用户      │ ◄──────────────► │ TR069-Management │
+│   (Web界面)     │    8888端口      │  GVA插件         │
+└─────────────────┘                  └──────────────────┘
 ```
 
-### 2. 设备消息解析
+## 3. 组件详细设计
 
-```go
-// AI 系统解析设备上报的 Inform 消息
-func parseDeviceInform(parser interfaces.Parser, xmlData []byte) (*interfaces.Message, error) {
-    ctx := context.Background()
-    
-    // 解析完整消息
-    message, err := parser.ParseMessage(ctx, xmlData)
-    if err != nil {
-        return nil, fmt.Errorf("解析消息失败: %w", err)
-    }
-    
-    // 提取设备信息用于 AI 分析
-    if message.DeviceID != nil {
-        // 设备标识信息
-        manufacturer := message.DeviceID.Manufacturer
-        model := message.DeviceID.ProductClass
-        serialNumber := message.DeviceID.SerialNumber
-        
-        // AI 系统可以基于设备信息进行分类和处理
-        processDeviceInfo(manufacturer, model, serialNumber)
-    }
-    
-    // 提取事件信息
-    for _, event := range message.Events {
-        // AI 系统分析设备事件
-        analyzeDeviceEvent(event)
-    }
-    
-    // 提取参数信息
-    for _, param := range message.Parameters {
-        // AI 系统处理设备参数
-        processDeviceParameter(param)
-    }
-    
-    return message, nil
-}
+### 3.1 TR069-Core (核心库)
+
+#### 职责范围
+- **提供TR069协议的核心实现**
+- 解析和构建TR069/CWMP消息
+- 处理TR069会话和事件
+- 提供接口供适配器调用
+- 不直接与设备或数据库交互
+
+#### 技术架构
+```
+TR069-Core 库
+├── 接口层 (interfaces/)
+│   ├── API接口
+│   ├── 构建器接口
+│   ├── 解析器接口
+│   ├── 会话接口
+│   └── 事件接口
+├── 实现层 (internal/)
+│   ├── 消息解析器
+│   ├── 消息构建器
+│   ├── 会话管理
+│   ├── 事件处理
+│   └── RPC方法实现
+└── 工具层
+    ├── 日志系统
+    ├── 缓存系统
+    ├── 错误处理
+    └── 配置管理
 ```
 
-### 3. 智能参数设置
+#### 核心功能模块
+1. **消息解析与构建**
+   - TR069 SOAP消息解析
+   - TR069 SOAP消息构建
+   - XML流处理
 
-```go
-// AI 系统根据分析结果自动设置设备参数
-func setDeviceParameters(builder interfaces.Builder, deviceParams map[string]interface{}) ([]byte, error) {
-    ctx := context.Background()
-    
-    // 构建 SetParameterValues 请求
-    request, err := builder.BuildRPCRequest(ctx, interfaces.MethodSetParameterValues, deviceParams)
-    if err != nil {
-        return nil, fmt.Errorf("构建参数设置请求失败: %w", err)
-    }
-    
-    return request, nil
-}
+2. **会话管理**
+   - 会话状态跟踪
+   - 会话超时处理
+   - 会话恢复机制
 
-// AI 决策示例：根据设备性能自动优化参数
-func aiOptimizeDeviceParameters(deviceID string, performanceMetrics map[string]float64) map[string]interface{} {
-    params := make(map[string]interface{})
-    
-    // AI 算法分析性能指标并生成优化参数
-    if performanceMetrics["cpu_usage"] > 80.0 {
-        params["Device.DeviceInfo.ProcessorNumberOfEntries"] = "2"
-    }
-    
-    if performanceMetrics["memory_usage"] > 90.0 {
-        params["Device.MemoryStatus.Total"] = "1024000000"
-    }
-    
-    // 网络优化参数
-    if performanceMetrics["network_latency"] > 100.0 {
-        params["Device.IP.Interface.1.Stats.BytesSent"] = "auto"
-    }
-    
-    return params
-}
+3. **事件系统**
+   - 事件发布/订阅
+   - 事件处理回调
+   - 事件优先级管理
+
+### 3.2 TR069-Adapter (GVA插件)
+
+#### 职责范围
+- **负责与CPE设备通信**
+- 监听7547端口，处理CPE的SOAP请求
+- 调用TR069-Core进行协议处理
+- 将CPE数据存储到数据库
+- 提供设备管理API
+
+#### 技术架构
+```
+TR069-Adapter 插件
+├── API层 (api/)
+│   ├── 设备API
+│   ├── 参数API
+│   ├── 会话API
+│   └── 操作日志API
+├── 服务层 (service/)
+│   ├── 设备服务
+│   ├── 参数服务
+│   ├── 会话服务
+│   ├── 操作日志服务
+│   └── TR069桥接服务
+├── 数据模型层 (model/)
+│   ├── 设备模型
+│   ├── 参数模型
+│   ├── 会话模型
+│   └── 操作日志模型
+├── 路由层 (router/)
+│   ├── 设备路由
+│   ├── 参数路由
+│   ├── 会话路由
+│   └── 操作日志路由
+└── TR069服务器 (tr069server/)
+    ├── SOAP处理器
+    ├── 会话管理
+    └── CWMP类型定义
 ```
 
-### 4. 事件驱动的 AI 处理
+#### 核心功能模块
+1. **SOAP服务器**
+   - 监听7547端口
+   - 处理CPE的HTTP/SOAP请求
+   - 支持基本认证和摘要认证
 
-```go
-// 注册事件监听器，实现 AI 系统的实时响应
-func setupEventHandling() {
-    eventManager := factory.NewEventManager()
-    
-    // 订阅设备事件
-    eventManager.Subscribe("device.alarm", func(event interfaces.Event) {
-        // AI 系统处理设备告警
-        handleDeviceAlarm(event)
-    })
-    
-    eventManager.Subscribe("device.performance", func(event interfaces.Event) {
-        // AI 系统分析设备性能
-        analyzePerformance(event)
-    })
-    
-    eventManager.Subscribe("device.config_change", func(event interfaces.Event) {
-        // AI 系统跟踪配置变更
-        trackConfigurationChange(event)
-    })
-}
+2. **设备管理**
+   - 设备注册和发现
+   - 设备状态监控
+   - 设备操作(重启、恢复出厂设置等)
 
-// AI 告警处理示例
-func handleDeviceAlarm(event interfaces.Event) {
-    // 提取告警信息
-    alarmData := event.Data.(map[string]interface{})
-    severity := alarmData["severity"].(string)
-    message := alarmData["message"].(string)
-    
-    // AI 决策：根据告警严重程度自动处理
-    switch severity {
-    case "critical":
-        // 立即执行故障恢复流程
-        executeFailoverProcedure(event.DeviceID)
-    case "major":
-        // 发送通知并准备维护
-        scheduleMaintenanceTask(event.DeviceID)
-    case "minor":
-        // 记录日志用于趋势分析
-        logForTrendAnalysis(event)
-    }
-}
+3. **参数管理**
+   - 参数值获取
+   - 参数值设置
+   - 参数历史记录
+
+4. **会话管理**
+   - 会话创建和跟踪
+   - 会话状态维护
+   - 会话超时处理
+
+5. **操作日志**
+   - 设备操作记录
+   - 参数变更记录
+   - 系统事件记录
+
+#### 配置示例
+```yaml
+# tr069-adapter.yaml
+server:
+  port: 7547
+  host: "0.0.0.0"
+  
+database:
+  host: "localhost"
+  port: 3306
+  dbname: "tr069_data"
+  username: "tr069_user"
+  password: "password"
+
+tr069:
+  session_timeout: 300
+  max_envelopes: 1
+  connection_request_url: "http://acs.example.com:7547"
 ```
 
-### 5. 批量设备管理
+### 3.3 TR069-Management (GVA插件)
 
-```go
-// AI 系统批量管理多个设备
-func batchDeviceManagement(devices []string, operation string) error {
-    parser := factory.NewParser()
-    builder := factory.NewBuilder()
-    
-    // 并发处理多个设备
-    var wg sync.WaitGroup
-    errorChan := make(chan error, len(devices))
-    
-    for _, deviceID := range devices {
-        wg.Add(1)
-        go func(id string) {
-            defer wg.Done()
-            
-            if err := processDevice(parser, builder, id, operation); err != nil {
-                errorChan <- fmt.Errorf("设备 %s 处理失败: %w", id, err)
-            }
-        }(deviceID)
-    }
-    
-    wg.Wait()
-    close(errorChan)
-    
-    // 收集错误
-    var errors []error
-    for err := range errorChan {
-        errors = append(errors, err)
-    }
-    
-    if len(errors) > 0 {
-        return fmt.Errorf("批量操作部分失败: %v", errors)
-    }
-    
-    return nil
-}
+#### 职责范围
+- **专门负责数据查询和用户交互**
+- 提供Web管理界面
+- 查询和展示CPE设备信息
+- 配置管理和监控功能
+- 集成到GVA权限系统
+
+#### 技术架构
+```
+TR069-Management 插件
+├── API层 (GVA集成)
+│   ├── 设备查询API
+│   ├── 参数查询API
+│   ├── 配置管理API
+│   └── 统计报表API
+├── 服务层
+│   ├── 设备管理服务
+│   ├── 参数管理服务
+│   ├── 配置管理服务
+│   └── 报表统计服务
+├── 数据模型层
+│   ├── 设备信息模型
+│   ├── 参数值模型
+│   ├── 配置模板模型
+│   └── 操作日志模型
+└── 前端界面
+    ├── 设备列表页面
+    ├── 设备详情页面
+    ├── 参数配置页面
+    └── 监控仪表盘
 ```
 
-### 6. 自定义 RPC 方法
+#### 核心功能模块
+1. **设备管理**
+   - 设备列表查询和筛选
+   - 设备详细信息展示
+   - 设备状态监控
 
-```go
-// AI 系统注册自定义 RPC 方法
-func registerAICustomMethods(parser interfaces.Parser) error {
-    // 注册 AI 诊断方法
-    err := parser.RegisterCustomMethod("AI.DiagnosticAnalysis", func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-        // AI 执行设备诊断分析
-        result := performAIDiagnostic(params)
-        return result, nil
-    })
-    if err != nil {
-        return err
-    }
-    
-    // 注册 AI 优化建议方法
-    err = parser.RegisterCustomMethod("AI.OptimizationSuggestion", func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-        // AI 生成优化建议
-        suggestions := generateOptimizationSuggestions(params)
-        return suggestions, nil
-    })
-    
-    return err
-}
+2. **参数管理**
+   - 参数树结构展示
+   - 参数值查询和历史记录
+   - 批量参数配置
 
-// AI 诊断分析实现
-func performAIDiagnostic(params map[string]interface{}) map[string]interface{} {
-    // 模拟 AI 诊断逻辑
-    deviceData := params["deviceData"].(map[string]interface{})
-    
-    result := map[string]interface{}{
-        "health_score":    calculateHealthScore(deviceData),
-        "risk_factors":    identifyRiskFactors(deviceData),
-        "recommendations": generateRecommendations(deviceData),
-        "predicted_issues": predictPotentialIssues(deviceData),
-    }
-    
-    return result
-}
+3. **配置管理**
+   - 配置模板管理
+   - 批量配置下发
+   - 配置任务跟踪
+
+4. **监控报表**
+   - 设备在线状态统计
+   - 参数变化趋势图
+   - 操作日志查询
+
+## 4. 数据库设计
+
+### 4.1 核心数据表
+
+```sql
+-- CPE设备信息表
+CREATE TABLE cpe_devices (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    device_id VARCHAR(255) UNIQUE NOT NULL,
+    manufacturer VARCHAR(100),
+    oui VARCHAR(6),
+    product_class VARCHAR(100),
+    serial_number VARCHAR(100),
+    hardware_version VARCHAR(50),
+    software_version VARCHAR(50),
+    connection_request_url VARCHAR(500),
+    last_inform_time TIMESTAMP,
+    online_status TINYINT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- 参数信息表
+CREATE TABLE cpe_parameters (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    device_id VARCHAR(255) NOT NULL,
+    parameter_name VARCHAR(500) NOT NULL,
+    parameter_value TEXT,
+    parameter_type VARCHAR(50),
+    writable TINYINT DEFAULT 0,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_device_param (device_id, parameter_name)
+);
+
+-- 操作日志表
+CREATE TABLE cpe_operation_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    device_id VARCHAR(255) NOT NULL,
+    operation_type VARCHAR(50) NOT NULL,
+    operation_data JSON,
+    result_status VARCHAR(20),
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_device_time (device_id, created_at)
+);
+
+-- 会话记录表
+CREATE TABLE cpe_sessions (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id VARCHAR(100) UNIQUE NOT NULL,
+    device_id VARCHAR(255) NOT NULL,
+    session_type VARCHAR(50),
+    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    end_time TIMESTAMP NULL,
+    status VARCHAR(20) DEFAULT 'active',
+    INDEX idx_device_session (device_id, session_id)
+);
 ```
 
-### 7. 高级配置和优化
+## 5. 接口规范
+
+### 5.1 TR069-Core 接口
+
+TR069-Core 提供以下核心接口供 TR069-Adapter 调用：
 
 ```go
-// AI 系统的高级配置
-func setupAdvancedConfiguration() interfaces.Config {
-    // 安全配置
-    securityConfig := &interfaces.SecurityConfig{
-        EnableTLS:                   true,
-        EnableSignatureVerification: true,
-        EnableParameterEncryption:   true,
-        EncryptionKey:              []byte("your-encryption-key"),
-    }
-    
-    // 创建配置
-    config := factory.NewConfig(
-        interfaces.WithStrictMode(true),
-        interfaces.WithValidation(true),
-        interfaces.WithMaxDepth(200),
-        interfaces.WithSecurityConfig(securityConfig),
-    )
-    
-    return config
+// 构建器接口
+type Builder interface {
+    BuildInform(deviceInfo DeviceInfo, events []Event) ([]byte, error)
+    BuildGetParameterValuesResponse(parameters []ParameterValueStruct) ([]byte, error)
+    BuildSetParameterValuesResponse(status int) ([]byte, error)
+    // 其他消息构建方法...
 }
 
-// 性能监控和优化
-func setupPerformanceMonitoring() {
-    monitor := factory.NewMonitor()
-    
-    // 监控解析性能
-    monitor.RegisterMetric("parse_duration", func() float64 {
-        // 返回解析耗时
-        return getCurrentParseDuration()
-    })
-    
-    // 监控内存使用
-    monitor.RegisterMetric("memory_usage", func() float64 {
-        // 返回内存使用情况
-        return getCurrentMemoryUsage()
-    })
-    
-    // 设置性能告警
-    monitor.SetThreshold("parse_duration", 100.0) // 100ms 告警阈值
-    monitor.SetThreshold("memory_usage", 80.0)    // 80% 内存使用告警
-}
-```
-
-## 最佳实践
-
-### 1. 错误处理
-```go
-// 统一的错误处理策略
-func handleTR069Error(err error) {
-    switch e := err.(type) {
-    case *interfaces.ParseError:
-        // 解析错误 - 记录并重试
-        logParseError(e)
-        scheduleRetry()
-    case *interfaces.ValidationError:
-        // 验证错误 - 数据清洗
-        cleanAndRetry(e)
-    case *interfaces.NetworkError:
-        // 网络错误 - 重连机制
-        handleNetworkFailure(e)
-    default:
-        // 未知错误 - 告警处理
-        alertUnknownError(e)
-    }
-}
-```
-
-### 2. 资源管理
-```go
-// 使用对象池优化内存使用
-func useObjectPool() {
-    pool := factory.NewPool()
-    
-    // 获取对象
-    message := pool.GetMessage()
-    defer pool.PutMessage(message)
-    
-    // 使用对象进行处理
-    processMessage(message)
-}
-```
-
-### 3. 并发安全
-```go
-// 确保并发安全的设备管理
-type AIDeviceManager struct {
-    parser   interfaces.Parser
-    builder  interfaces.Builder
-    devices  sync.Map // 线程安全的设备映射
-    mutex    sync.RWMutex
+// 解析器接口
+type Parser interface {
+    ParseInform(data []byte) (*InformRequest, error)
+    ParseGetParameterValues(data []byte) (*GetParameterValuesRequest, error)
+    ParseSetParameterValues(data []byte) (*SetParameterValuesRequest, error)
+    // 其他消息解析方法...
 }
 
-func (m *AIDeviceManager) ProcessDevice(deviceID string, data []byte) error {
-    m.mutex.RLock()
-    defer m.mutex.RUnlock()
-    
-    // 线程安全的设备处理
-    return m.processDeviceSafely(deviceID, data)
+// 会话接口
+type Session interface {
+    NewSession(deviceID string) (string, error)
+    GetSession(sessionID string) (SessionData, error)
+    UpdateSession(sessionID string, data SessionData) error
+    CloseSession(sessionID string) error
 }
-```
 
-## 性能指标
-
-### 预期性能表现
-- **解析速度**：单消息解析时间 < 100μs
-- **内存效率**：每消息内存分配 ≤ 5次
-- **并发能力**：支持 1000+ 并发解析
-- **吞吐量**：> 10,000 msg/s (单核)
-
-### 性能优化建议
-1. 使用对象池减少内存分配
-2. 启用流式处理处理大型消息
-3. 合理配置缓存策略
-4. 使用批量操作提升效率
-5. 监控和调优关键性能指标
-
-## 总结
-
-TR069 Core Library 为 AI 系统提供了强大而灵活的 TR069 协议处理能力。通过其模块化设计和丰富的接口，AI 系统可以：
-
-1. **高效处理**大规模设备通信
-2. **实时响应**设备事件和状态变化
-3. **智能分析**设备数据和性能指标
-4. **自动化执行**设备管理和优化任务
-5. **扩展定制**满足特定业务需求
-
-本库的设计理念是为 AI 系统提供一个可靠、高性能的 TR069 协议基础设施，让 AI 开发者能够专注于业务逻辑和算法实现，而无需关心底层协议细节。
+// API处理接口
+type APIHandler interface {
+    HandleInform(inform *InformRequest) (*InformResponse, error)
+    HandleGetParameterValues(req *GetParameterValuesRequest) (*GetParameterValuesResponse, error)
+    HandleSetParameterValues(req *SetParameterValuesRequest) (*SetParameterValuesResponse, error)
+    // 其他API处理方法...
+}

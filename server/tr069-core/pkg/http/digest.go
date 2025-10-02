@@ -34,20 +34,20 @@ func ParseDigestAuth(authHeader string) (*DigestAuth, error) {
 	if !strings.HasPrefix(authHeader, "Digest ") {
 		return nil, fmt.Errorf("not a digest auth header")
 	}
-	
+
 	authData := strings.TrimPrefix(authHeader, "Digest ")
 	auth := &DigestAuth{}
-	
+
 	// Parse key-value pairs
 	re := regexp.MustCompile(`(\w+)="([^"]*)"`)
 	matches := re.FindAllStringSubmatch(authData, -1)
-	
+
 	for _, match := range matches {
 		if len(match) != 3 {
 			continue
 		}
 		key, value := match[1], match[2]
-		
+
 		switch key {
 		case "username":
 			auth.Username = value
@@ -69,7 +69,7 @@ func ParseDigestAuth(authHeader string) (*DigestAuth, error) {
 			auth.Algorithm = value
 		}
 	}
-	
+
 	return auth, nil
 }
 
@@ -78,10 +78,10 @@ func ParseDigestAuth(authHeader string) (*DigestAuth, error) {
 func GenerateDigestResponse(username, password, realm, method, uri, nonce, qop, nc, cnonce string) string {
 	// HA1 = MD5(username:realm:password)
 	ha1 := fmt.Sprintf("%x", md5.Sum([]byte(username+":"+realm+":"+password)))
-	
+
 	// HA2 = MD5(method:uri)
 	ha2 := fmt.Sprintf("%x", md5.Sum([]byte(method+":"+uri)))
-	
+
 	// Response = MD5(HA1:nonce:nc:cnonce:qop:HA2)
 	var response string
 	if qop == "auth" || qop == "auth-int" {
@@ -89,7 +89,7 @@ func GenerateDigestResponse(username, password, realm, method, uri, nonce, qop, 
 	} else {
 		response = fmt.Sprintf("%x", md5.Sum([]byte(ha1+":"+nonce+":"+ha2)))
 	}
-	
+
 	return response
 }
 
@@ -100,7 +100,7 @@ func ValidateDigestAuth(auth *DigestAuth, password, method string) bool {
 		auth.Username, password, auth.Realm, method, auth.URI,
 		auth.Nonce, auth.QOP, auth.NC, auth.CNonce,
 	)
-	
+
 	return auth.Response == expectedResponse
 }
 
@@ -125,13 +125,13 @@ func AddDigestAuth(req *http.Request, username, password, realm, nonce string) {
 	qop := "auth"
 	nc := "00000001"
 	cnonce := GenerateNonce()
-	
+
 	response := GenerateDigestResponse(username, password, realm, method, uri, nonce, qop, nc, cnonce)
-	
+
 	authHeader := fmt.Sprintf(
 		`Digest username="%s", realm="%s", nonce="%s", uri="%s", qop="%s", nc=%s, cnonce="%s", response="%s", algorithm="MD5"`,
 		username, realm, nonce, uri, qop, nc, cnonce, response,
 	)
-	
+
 	req.Header.Set("Authorization", authHeader)
 }

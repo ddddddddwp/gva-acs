@@ -50,9 +50,9 @@ func DefaultLogStorageConfig() LogStorageConfig {
 func DefaultCoreLogStorageConfig() LogStorageConfig {
 	return LogStorageConfig{
 		FilePath:      "/var/log/tr069/tr069.log",
-		MaxSize:       50,  // 单个文件50MB
-		MaxBackups:    20,  // 保留20个备份文件
-		MaxAge:        90,  // 保留90天
+		MaxSize:       50, // 单个文件50MB
+		MaxBackups:    20, // 保留20个备份文件
+		MaxAge:        90, // 保留90天
 		Compress:      true,
 		ConsoleOutput: false, // 专门存储到文件，不输出到控制台
 		Level:         interfaces.LogLevelInfo,
@@ -170,7 +170,7 @@ func WithLogStorage(config LogStorageConfig) Option {
 func RotateLogFiles() error {
 	// 获取全局日志记录器
 	logger := GetGlobalLogger()
-	
+
 	// 尝试转换为zapAdapter
 	if zapLogger, ok := logger.(*zapAdapter); ok {
 		// 尝试获取底层的lumberjack logger
@@ -180,6 +180,6 @@ func RotateLogFiles() error {
 		_ = core
 		return nil
 	}
-	
+
 	return fmt.Errorf("无法获取日志轮转器")
 }

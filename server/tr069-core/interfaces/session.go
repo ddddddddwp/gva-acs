@@ -46,34 +46,34 @@ type SessionInfo struct {
 type SessionManager interface {
 	// CreateSession creates a new session for the specified device.
 	CreateSession(ctx context.Context, deviceID string, options ...SessionOption) (*SessionInfo, error)
-	
+
 	// GetSession retrieves a session by its ID.
 	GetSession(ctx context.Context, sessionID string) (*SessionInfo, error)
-	
+
 	// UpdateSession updates an existing session.
 	UpdateSession(ctx context.Context, sessionID string, options ...SessionOption) (*SessionInfo, error)
-	
+
 	// CloseSession closes a session.
 	CloseSession(ctx context.Context, sessionID string) error
-	
+
 	// ListSessions lists all active sessions.
 	ListSessions(ctx context.Context) ([]*SessionInfo, error)
-	
+
 	// ListSessionsByDevice lists all sessions for a specific device.
 	ListSessionsByDevice(ctx context.Context, deviceID string) ([]*SessionInfo, error)
-	
+
 	// CleanupExpiredSessions removes all expired sessions.
 	CleanupExpiredSessions(ctx context.Context) (int, error)
-	
+
 	// SetSessionTimeout sets the default timeout duration for new sessions.
 	SetSessionTimeout(duration time.Duration)
-	
+
 	// GetSessionTimeout gets the current default timeout duration.
 	GetSessionTimeout() time.Duration
-	
+
 	// RegisterSessionListener registers a listener for session events.
 	RegisterSessionListener(listener SessionEventListener)
-	
+
 	// UnregisterSessionListener unregisters a session event listener.
 	UnregisterSessionListener(listener SessionEventListener)
 }

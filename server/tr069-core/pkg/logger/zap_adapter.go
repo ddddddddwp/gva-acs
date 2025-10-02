@@ -91,7 +91,7 @@ func (l *zapAdapter) Fatal(msg string, fields ...interfaces.LogField) {
 func (l *zapAdapter) WithFields(fields ...interfaces.LogField) interfaces.Logger {
 	args := convertFields(fields)
 	newSugar := l.sugar.With(args...)
-	
+
 	return &zapAdapter{
 		sugar:  newSugar,
 		level:  l.level,
@@ -102,7 +102,7 @@ func (l *zapAdapter) WithFields(fields ...interfaces.LogField) interfaces.Logger
 // WithContext 创建带有上下文的新日志记录器
 func (l *zapAdapter) WithContext(ctx interface{}) interfaces.Logger {
 	newSugar := l.sugar.With("context", ctx)
-	
+
 	return &zapAdapter{
 		sugar:  newSugar,
 		level:  l.level,
@@ -113,7 +113,7 @@ func (l *zapAdapter) WithContext(ctx interface{}) interfaces.Logger {
 // SetLevel 设置日志级别
 func (l *zapAdapter) SetLevel(level interfaces.LogLevel) {
 	l.level = level
-	
+
 	// 同时设置zap的日志级别
 	switch level {
 	case interfaces.LogLevelDebug:
@@ -158,11 +158,11 @@ func convertFields(fields []interfaces.LogField) []interface{} {
 	if len(fields) == 0 {
 		return nil
 	}
-	
+
 	args := make([]interface{}, 0, len(fields)*2)
 	for _, field := range fields {
 		args = append(args, field.Key, field.Value)
 	}
-	
+
 	return args
 }

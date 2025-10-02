@@ -89,46 +89,46 @@ type TaskHandler func(ctx context.Context, task *TaskInfo) (interface{}, error)
 type TaskQueue interface {
 	// EnqueueTask adds a task to the queue.
 	EnqueueTask(ctx context.Context, taskType string, data interface{}, options ...TaskOption) (*TaskInfo, error)
-	
+
 	// GetTask retrieves a task by its ID.
 	GetTask(ctx context.Context, taskID string) (*TaskInfo, error)
-	
+
 	// CancelTask cancels a task.
 	CancelTask(ctx context.Context, taskID string) error
-	
+
 	// ListTasks lists all tasks.
 	ListTasks(ctx context.Context) ([]*TaskInfo, error)
-	
+
 	// ListTasksByStatus lists tasks with the specified status.
 	ListTasksByStatus(ctx context.Context, status TaskStatus) ([]*TaskInfo, error)
-	
+
 	// ListTasksByDevice lists tasks for a specific device.
 	ListTasksByDevice(ctx context.Context, deviceID string) ([]*TaskInfo, error)
-	
+
 	// ListTasksBySession lists tasks for a specific session.
 	ListTasksBySession(ctx context.Context, sessionID string) ([]*TaskInfo, error)
-	
+
 	// RegisterTaskHandler registers a handler for a specific task type.
 	RegisterTaskHandler(taskType string, handler TaskHandler)
-	
+
 	// UnregisterTaskHandler unregisters a handler for a specific task type.
 	UnregisterTaskHandler(taskType string)
-	
+
 	// SetConcurrency sets the maximum number of concurrent tasks.
 	SetConcurrency(concurrency int)
-	
+
 	// GetConcurrency gets the current maximum number of concurrent tasks.
 	GetConcurrency() int
-	
+
 	// Start starts the task queue processing.
 	Start()
-	
+
 	// Stop stops the task queue processing.
 	Stop()
-	
+
 	// RegisterTaskListener registers a listener for task events.
 	RegisterTaskListener(listener TaskEventListener)
-	
+
 	// UnregisterTaskListener unregisters a task event listener.
 	UnregisterTaskListener(listener TaskEventListener)
 }

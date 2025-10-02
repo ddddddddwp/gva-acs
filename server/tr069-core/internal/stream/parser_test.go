@@ -13,7 +13,7 @@ func TestStreamParser_ParseStream(t *testing.T) {
 	// Create a stream parser
 	// 创建流式解析器
 	parser := NewStreamParser(1024, 1024*1024) // 1KB buffer, 1MB max memory
-	
+
 	// Create a test XML input
 	// 创建测试 XML 输入
 	xmlInput := `<root>
@@ -21,18 +21,18 @@ func TestStreamParser_ParseStream(t *testing.T) {
 	<element2>value2</element2>
 	<element3>value3</element3>
 </root>`
-	
+
 	// Parse the stream
 	// 解析流
 	reader := strings.NewReader(xmlInput)
 	elements, err := parser.ParseStream(reader)
-	
+
 	// Check for errors
 	// 检查错误
 	if err != nil {
 		t.Errorf("ParseStream failed: %v", err)
 	}
-	
+
 	// Check that we got the expected elements
 	// 检查是否获得了预期的元素
 	expectedElements := 3
@@ -47,7 +47,7 @@ func TestStreamParser_ParseStreamWithCallback(t *testing.T) {
 	// Create a stream parser
 	// 创建流式解析器
 	parser := NewStreamParser(1024, 1024*1024) // 1KB buffer, 1MB max memory
-	
+
 	// Create a test XML input
 	// 创建测试 XML 输入
 	xmlInput := `<root>
@@ -55,29 +55,29 @@ func TestStreamParser_ParseStreamWithCallback(t *testing.T) {
 	<element2>value2</element2>
 	<element3>value3</element3>
 </root>`
-	
+
 	// Counter for processed elements
 	// 已处理元素的计数器
 	count := 0
-	
+
 	// Define a callback function
 	// 定义回调函数
 	callback := func(elementName string, elementValue string) error {
 		count++
 		return nil
 	}
-	
+
 	// Parse the stream with callback
 	// 使用回调解析流
 	reader := strings.NewReader(xmlInput)
 	err := parser.ParseStreamWithCallback(reader, callback)
-	
+
 	// Check for errors
 	// 检查错误
 	if err != nil {
 		t.Errorf("ParseStreamWithCallback failed: %v", err)
 	}
-	
+
 	// Check that all elements were processed
 	// 检查所有元素都已处理
 	expectedCount := 3
@@ -92,7 +92,7 @@ func TestStreamParser_ParseLargeStream(t *testing.T) {
 	// Create a stream parser with small buffer to test memory management
 	// 创建具有小缓冲区的流式解析器以测试内存管理
 	parser := NewStreamParser(128, 1024) // 128B buffer, 1KB max memory
-	
+
 	// Create a large XML input
 	// 创建大型 XML 输入
 	var xmlBuilder strings.Builder
@@ -103,20 +103,20 @@ func TestStreamParser_ParseLargeStream(t *testing.T) {
 		xmlBuilder.WriteString("</element>\n")
 	}
 	xmlBuilder.WriteString("</root>")
-	
+
 	xmlInput := xmlBuilder.String()
-	
+
 	// Parse the stream
 	// 解析流
 	reader := strings.NewReader(xmlInput)
 	elements, err := parser.ParseStream(reader)
-	
+
 	// Check for errors
 	// 检查错误
 	if err != nil {
 		t.Errorf("ParseStream failed: %v", err)
 	}
-	
+
 	// Check that we got the expected elements
 	// 检查是否获得了预期的元素
 	expectedElements := 100
@@ -131,22 +131,22 @@ func TestStreamParser_ParseStreamWithMemoryLimit(t *testing.T) {
 	// Create a stream parser with very small memory limit
 	// 创建具有非常小内存限制的流式解析器
 	parser := NewStreamParser(64, 128) // 64B buffer, 128B max memory
-	
+
 	// Create a large XML input that will exceed memory limit
 	// 创建将超出内存限制的大型 XML 输入
 	xmlInput := "<root>" + strings.Repeat("<element>value</element>", 100) + "</root>"
-	
+
 	// Parse the stream
 	// 解析流
 	reader := strings.NewReader(xmlInput)
 	_, err := parser.ParseStream(reader)
-	
+
 	// Check that we got a memory limit error
 	// 检查是否出现内存限制错误
 	if err == nil {
 		t.Error("Expected memory limit error, but got none")
 	}
-	
+
 	// Check that the error is related to memory limit
 	// 检查错误是否与内存限制相关
 	if !strings.Contains(err.Error(), "memory") {
@@ -160,7 +160,7 @@ func TestStreamParser_ParseStreamInvalidXML(t *testing.T) {
 	// Create a stream parser
 	// 创建流式解析器
 	parser := NewStreamParser(1024, 1024*1024)
-	
+
 	// Create invalid XML input
 	// 创建无效 XML 输入
 	xmlInput := `<root>
@@ -169,12 +169,12 @@ func TestStreamParser_ParseStreamInvalidXML(t *testing.T) {
 	<element3>value3</element3>
 	<!-- Missing closing tag -->
 `
-	
+
 	// Parse the stream
 	// 解析流
 	reader := strings.NewReader(xmlInput)
 	_, err := parser.ParseStream(reader)
-	
+
 	// Check that we got an error
 	// 检查是否出现错误
 	if err == nil {
@@ -188,18 +188,18 @@ func TestStreamParser_ParseStreamEmpty(t *testing.T) {
 	// Create a stream parser
 	// 创建流式解析器
 	parser := NewStreamParser(1024, 1024*1024)
-	
+
 	// Parse an empty stream
 	// 解析空流
 	reader := strings.NewReader("")
 	elements, err := parser.ParseStream(reader)
-	
+
 	// Check for errors
 	// 检查错误
 	if err != nil {
 		t.Errorf("ParseStream failed: %v", err)
 	}
-	
+
 	// Check that we got no elements
 	// 检查是否没有元素
 	if len(elements) != 0 {
@@ -213,7 +213,7 @@ func TestStreamParser_ParseStreamWithNestedElements(t *testing.T) {
 	// Create a stream parser
 	// 创建流式解析器
 	parser := NewStreamParser(1024, 1024*1024)
-	
+
 	// Create XML with nested elements
 	// 创建具有嵌套元素的 XML
 	xmlInput := `<root>
@@ -226,18 +226,18 @@ func TestStreamParser_ParseStreamWithNestedElements(t *testing.T) {
 		<child4>value4</child4>
 	</parent>
 </root>`
-	
+
 	// Parse the stream
 	// 解析流
 	reader := strings.NewReader(xmlInput)
 	elements, err := parser.ParseStream(reader)
-	
+
 	// Check for errors
 	// 检查错误
 	if err != nil {
 		t.Errorf("ParseStream failed: %v", err)
 	}
-	
+
 	// Check that we got the expected elements
 	// 检查是否获得了预期的元素
 	// Note: The parser should handle nested elements appropriately
@@ -254,31 +254,31 @@ func TestStreamParser_BufferManagement(t *testing.T) {
 	// Create a stream parser
 	// 创建流式解析器
 	parser := NewStreamParser(256, 1024) // 256B buffer, 1KB max memory
-	
+
 	// Check initial buffer size
 	// 检查初始缓冲区大小
 	if parser.GetBufferSize() != 256 {
 		t.Errorf("Expected buffer size 256, got %d", parser.GetBufferSize())
 	}
-	
+
 	// Check initial memory usage
 	// 检查初始内存使用情况
 	if parser.GetCurrentMemoryUsage() != 0 {
 		t.Errorf("Expected initial memory usage 0, got %d", parser.GetCurrentMemoryUsage())
 	}
-	
+
 	// Parse a small stream
 	// 解析小流
 	xmlInput := "<root><element>value</element></root>"
 	reader := strings.NewReader(xmlInput)
 	_, err := parser.ParseStream(reader)
-	
+
 	// Check for errors
 	// 检查错误
 	if err != nil {
 		t.Errorf("ParseStream failed: %v", err)
 	}
-	
+
 	// Check final memory usage (should be 0 after parsing completes)
 	// 检查最终内存使用情况（解析完成后应为 0）
 	if parser.GetCurrentMemoryUsage() != 0 {

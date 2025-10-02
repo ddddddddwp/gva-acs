@@ -250,3 +250,76 @@ export const upgradeFirmware = (params) => {
     params
   })
 }
+
+// 设备状态和操作API
+export const getDeviceStatus = (id) => {
+  return service({
+    url: `/tr069-management/device/status/${id}`,
+    method: 'get'
+  })
+}
+
+export const triggerDeviceAction = (data) => {
+  return service({
+    url: '/tr069-management/device/action',
+    method: 'post',
+    data
+  })
+}
+
+export const getDeviceEvents = (params) => {
+  return service({
+    url: '/tr069-management/device/events',
+    method: 'get',
+    params
+  })
+}
+
+export const getDeviceSessions = (params) => {
+  return service({
+    url: '/tr069-management/device/sessions',
+    method: 'get',
+    params
+  })
+}
+
+export const getDeviceOperationLogs = (params) => {
+  return service({
+    url: '/tr069-management/device/logs',
+    method: 'get',
+    params
+  })
+}
+
+// 参数管理API
+export const getDeviceParameters = (params) => {
+  return service({
+    url: '/tr069-management/parameter/list',
+    method: 'get',
+    params
+  })
+}
+
+export const setDeviceParameter = (data) => {
+  return service({
+    url: '/tr069-management/parameter/set',
+    method: 'post',
+    data
+  })
+}
+
+// 分组管理API补充
+export const getGroupByID = (id) => {
+  return service({
+    url: `/tr069-management/group/detail/${id}`,
+    method: 'get'
+  })
+}
+
+// 配置管理API补充
+export const getConfigProfileByID = (id) => {
+  return service({
+    url: `/tr069-management/config/detail/${id}`,
+    method: 'get'
+  })
+}

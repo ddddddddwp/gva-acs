@@ -90,13 +90,13 @@ func (p *ImprovedParser) ParseRPCMethod(ctx context.Context, data []byte) (strin
 		XMLName xml.Name    `xml:"Envelope"`
 		Body    RawSOAPBody `xml:"Body"`
 	}
-	
+
 	if err := xml.Unmarshal(data, &envelope); err != nil {
 		return "", fmt.Errorf("failed to unmarshal SOAP envelope: %w", err)
 	}
 
 	bodyContent := string(envelope.Body.Content)
-	
+
 	// 使用更精确的XML解析来确定方法名
 	method, err := p.extractMethodFromXML(bodyContent)
 	if err != nil {
@@ -110,18 +110,18 @@ func (p *ImprovedParser) ParseRPCMethod(ctx context.Context, data []byte) (strin
 func (p *ImprovedParser) extractMethodFromXML(xmlContent string) (string, error) {
 	// 定义支持的TR069方法及其可能的命名空间前缀
 	methods := map[string][]string{
-		"Inform": {"Inform", "cwmp:Inform", "soap-env:Inform"},
-		"GetRPCMethods": {"GetRPCMethods", "cwmp:GetRPCMethods"},
+		"Inform":             {"Inform", "cwmp:Inform", "soap-env:Inform"},
+		"GetRPCMethods":      {"GetRPCMethods", "cwmp:GetRPCMethods"},
 		"SetParameterValues": {"SetParameterValues", "cwmp:SetParameterValues"},
 		"GetParameterValues": {"GetParameterValues", "cwmp:GetParameterValues"},
-		"GetParameterNames": {"GetParameterNames", "cwmp:GetParameterNames"},
-		"AddObject": {"AddObject", "cwmp:AddObject"},
-		"DeleteObject": {"DeleteObject", "cwmp:DeleteObject"},
-		"Download": {"Download", "cwmp:Download"},
-		"Upload": {"Upload", "cwmp:Upload"},
-		"Reboot": {"Reboot", "cwmp:Reboot"},
-		"FactoryReset": {"FactoryReset", "cwmp:FactoryReset"},
-		"InformResponse": {"InformResponse", "cwmp:InformResponse"},
+		"GetParameterNames":  {"GetParameterNames", "cwmp:GetParameterNames"},
+		"AddObject":          {"AddObject", "cwmp:AddObject"},
+		"DeleteObject":       {"DeleteObject", "cwmp:DeleteObject"},
+		"Download":           {"Download", "cwmp:Download"},
+		"Upload":             {"Upload", "cwmp:Upload"},
+		"Reboot":             {"Reboot", "cwmp:Reboot"},
+		"FactoryReset":       {"FactoryReset", "cwmp:FactoryReset"},
+		"InformResponse":     {"InformResponse", "cwmp:InformResponse"},
 	}
 
 	// 查找匹配的方法标签
@@ -130,7 +130,7 @@ func (p *ImprovedParser) extractMethodFromXML(xmlContent string) (string, error)
 			// 查找开始标签
 			startTag := fmt.Sprintf("<%s", variant)
 			endTag := fmt.Sprintf("</%s>", variant)
-			
+
 			if strings.Contains(xmlContent, startTag) || strings.Contains(xmlContent, endTag) {
 				return method, nil
 			}
@@ -152,24 +152,24 @@ func (p *ImprovedParser) extractFirstTag(xmlContent string) string {
 	if start == -1 {
 		return ""
 	}
-	
+
 	end := strings.Index(xmlContent[start:], ">")
 	if end == -1 {
 		return ""
 	}
-	
+
 	tag := xmlContent[start+1 : start+end]
-	
+
 	// 移除命名空间前缀
 	if colonIndex := strings.Index(tag, ":"); colonIndex != -1 {
 		tag = tag[colonIndex+1:]
 	}
-	
+
 	// 移除属性
 	if spaceIndex := strings.Index(tag, " "); spaceIndex != -1 {
 		tag = tag[:spaceIndex]
 	}
-	
+
 	return tag
 }
 
@@ -183,7 +183,7 @@ func (p *ImprovedParser) parseInformMessage(data []byte) (*types.Inform, error) 
 			Inform  types.Inform `xml:"Inform"`
 		} `xml:"Body"`
 	}
-	
+
 	if err := xml.Unmarshal(data, &envelope); err != nil {
 		// 如果完整解析失败，尝试只解析Body内容
 		var bodyEnvelope struct {
@@ -193,20 +193,20 @@ func (p *ImprovedParser) parseInformMessage(data []byte) (*types.Inform, error) 
 				Content []byte   `xml:",innerxml"`
 			} `xml:"Body"`
 		}
-		
+
 		if err := xml.Unmarshal(data, &bodyEnvelope); err != nil {
 			return nil, fmt.Errorf("failed to parse SOAP envelope: %w", err)
 		}
-		
+
 		// 尝试直接解析Inform内容
 		var inform types.Inform
 		if err := xml.Unmarshal(bodyEnvelope.Body.Content, &inform); err != nil {
 			return nil, fmt.Errorf("failed to parse Inform content: %w", err)
 		}
-		
+
 		return &inform, nil
 	}
-	
+
 	return &envelope.Body.Inform, nil
 }
 
@@ -216,12 +216,12 @@ func (p *ImprovedParser) ParseParameterList(ctx context.Context, data []byte) ([
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Inform message: %w", err)
 	}
-	
+
 	var params []interfaces.Parameter
 	for _, param := range inform.ParameterList.Parameters {
 		params = append(params, param.ToInterface())
 	}
-	
+
 	return params, nil
 }
 

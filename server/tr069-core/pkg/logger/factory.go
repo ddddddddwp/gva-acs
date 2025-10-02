@@ -21,10 +21,10 @@ func NewZapLoggerFactory() func(options ...interfaces.LoggerOption) interfaces.L
 func newZapLoggerWithOptions(options ...Option) interfaces.Logger {
 	opts := defaultOptions()
 	applyOptions(opts, options...)
-	
+
 	// 创建zap配置
 	zapConfig := zap.NewProductionConfig()
-	
+
 	// 设置日志级别
 	switch opts.level {
 	case interfaces.LogLevelDebug:
@@ -38,7 +38,7 @@ func newZapLoggerWithOptions(options ...Option) interfaces.Logger {
 	case interfaces.LogLevelFatal:
 		zapConfig.Level = zap.NewAtomicLevelAt(zapcore.FatalLevel)
 	}
-	
+
 	// 设置日志格式
 	switch opts.format {
 	case interfaces.LogFormatJSON:
@@ -46,17 +46,17 @@ func newZapLoggerWithOptions(options ...Option) interfaces.Logger {
 	case interfaces.LogFormatText:
 		zapConfig.Encoding = "console"
 	}
-	
+
 	// 创建zap logger
 	logger, err := zapConfig.Build()
 	if err != nil {
 		// 如果创建失败，使用默认配置
 		logger, _ = zap.NewProduction()
 	}
-	
+
 	// 创建SugaredLogger
 	sugar := logger.Sugar()
-	
+
 	// 创建适配器
 	return NewZapAdapter(sugar)
 }

@@ -5,6 +5,7 @@ type RouterGroup struct {
 	ParameterRouter
 	SessionRouter
 	OperationLogRouter
+	TR069Router
 }
 
 var RouterGroupApp = new(RouterGroup)

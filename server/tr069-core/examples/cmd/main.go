@@ -1,23 +1,23 @@
 package main
 
 import (
-        "fmt"
+	"fmt"
 	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/examples/examples"
 )
 
 func main() {
-        fmt.Println("TR069 Library Examples")
-        fmt.Println("======================")
+	fmt.Println("TR069 Library Examples")
+	fmt.Println("======================")
 
-        // Run basic example
-        fmt.Println("\n1. Running Basic Example:")
-        examples.Example()
+	// Run basic example
+	fmt.Println("\n1. Running Basic Example:")
+	examples.Example()
 
-        // Run security example
-        fmt.Println("\n2. Running Security Example:")
-        examples.SecurityExample()
+	// Run security example
+	fmt.Println("\n2. Running Security Example:")
+	examples.SecurityExample()
 
-        // Run full security example
-        fmt.Println("\n3. Running Full Security Example:")
-        examples.FullSecurityExample()
+	// Run full security example
+	fmt.Println("\n3. Running Full Security Example:")
+	examples.FullSecurityExample()
 }

@@ -12,10 +12,10 @@ import (
 // cacheItem represents an item in the cache.
 // cacheItem 表示缓存中的一个项目。
 type cacheItem struct {
-	key        string
-	value      interface{}
-	expiration int64 // Unix timestamp in nanoseconds
-	lastAccess int64 // Unix timestamp in nanoseconds
+	key         string
+	value       interface{}
+	expiration  int64 // Unix timestamp in nanoseconds
+	lastAccess  int64 // Unix timestamp in nanoseconds
 	accessCount int64 // Number of times this item has been accessed
 }
 
@@ -83,16 +83,16 @@ func (c *cache) startCleanupRoutine() {
 // cleanupExpired 从缓存中删除过期的项目。
 func (c *cache) cleanupExpired() {
 	now := time.Now().UnixNano()
-	
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	for key, item := range c.items {
 		if item.expiration > 0 && item.expiration <= now {
 			// Item has expired
 			delete(c.items, key)
 			c.stats.Evictions++
-			
+
 			// Emit event
 			c.emitEvent(interfaces.CacheEventItemExpired, key, item.value)
 		}
@@ -105,14 +105,14 @@ func (c *cache) Get(key string) (interface{}, bool) {
 	c.mutex.RLock()
 	item, found := c.items[key]
 	c.mutex.RUnlock()
-	
+
 	if !found {
 		c.mutex.Lock()
 		c.stats.Misses++
 		c.mutex.Unlock()
 		return nil, false
 	}
-	
+
 	// Check if the item has expired
 	if item.expiration > 0 && item.expiration <= time.Now().UnixNano() {
 		c.mutex.Lock()
@@ -120,20 +120,20 @@ func (c *cache) Get(key string) (interface{}, bool) {
 		c.stats.Misses++
 		c.stats.Evictions++
 		c.mutex.Unlock()
-		
+
 		// Emit event
 		c.emitEvent(interfaces.CacheEventItemExpired, key, item.value)
-		
+
 		return nil, false
 	}
-	
+
 	// Update access time and count
 	c.mutex.Lock()
 	item.lastAccess = time.Now().UnixNano()
 	item.accessCount++
 	c.stats.Hits++
 	c.mutex.Unlock()
-	
+
 	return item.value, true
 }
 
@@ -144,43 +144,43 @@ func (c *cache) Set(key string, value interface{}, ttl time.Duration) error {
 	if ttl > 0 {
 		expiration = time.Now().Add(ttl).UnixNano()
 	}
-	
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	// Check if we need to evict an item
 	if len(c.items) >= c.capacity && c.items[key] == nil {
 		c.evict()
 	}
-	
+
 	// Check if the item already exists
 	if item, found := c.items[key]; found {
 		// Update existing item
 		item.value = value
 		item.expiration = expiration
 		item.lastAccess = time.Now().UnixNano()
-		
+
 		// Emit event
 		c.emitEvent(interfaces.CacheEventItemUpdated, key, value)
 	} else {
 		// Add new item
 		c.items[key] = &cacheItem{
-			key:        key,
-			value:      value,
-			expiration: expiration,
-			lastAccess: time.Now().UnixNano(),
+			key:         key,
+			value:       value,
+			expiration:  expiration,
+			lastAccess:  time.Now().UnixNano(),
 			accessCount: 0,
 		}
-		
+
 		// Update stats
 		if c.stats.Size < c.capacity {
 			c.stats.Size++
 		}
-		
+
 		// Emit event
 		c.emitEvent(interfaces.CacheEventItemAdded, key, value)
 	}
-	
+
 	return nil
 }
 
@@ -189,15 +189,15 @@ func (c *cache) Set(key string, value interface{}, ttl time.Duration) error {
 func (c *cache) Delete(key string) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	if item, found := c.items[key]; found {
 		delete(c.items, key)
 		c.stats.Size--
-		
+
 		// Emit event
 		c.emitEvent(interfaces.CacheEventItemRemoved, key, item.value)
 	}
-	
+
 	return nil
 }
 
@@ -206,17 +206,17 @@ func (c *cache) Delete(key string) error {
 func (c *cache) Exists(key string) bool {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	item, found := c.items[key]
 	if !found {
 		return false
 	}
-	
+
 	// Check if the item has expired
 	if item.expiration > 0 && item.expiration <= time.Now().UnixNano() {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -225,13 +225,13 @@ func (c *cache) Exists(key string) bool {
 func (c *cache) Clear() error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	c.items = make(map[string]*cacheItem)
 	c.stats.Size = 0
-	
+
 	// Emit event
 	c.emitEvent(interfaces.CacheEventCleared, "", nil)
-	
+
 	return nil
 }
 
@@ -240,7 +240,7 @@ func (c *cache) Clear() error {
 func (c *cache) Size() int {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	return len(c.items)
 }
 
@@ -249,12 +249,12 @@ func (c *cache) Size() int {
 func (c *cache) Keys() []string {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	keys := make([]string, 0, len(c.items))
 	for key := range c.items {
 		keys = append(keys, key)
 	}
-	
+
 	return keys
 }
 
@@ -263,14 +263,14 @@ func (c *cache) Keys() []string {
 func (c *cache) GetStats() interfaces.CacheStats {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	// Calculate hit rate
 	totalAccess := c.stats.Hits + c.stats.Misses
 	hitRate := 0.0
 	if totalAccess > 0 {
 		hitRate = float64(c.stats.Hits) / float64(totalAccess)
 	}
-	
+
 	// Create a copy of stats to avoid race conditions
 	stats := interfaces.CacheStats{
 		Hits:          c.stats.Hits,
@@ -281,7 +281,7 @@ func (c *cache) GetStats() interfaces.CacheStats {
 		AvgAccessTime: c.stats.AvgAccessTime,
 		HitRate:       hitRate,
 	}
-	
+
 	return stats
 }
 
@@ -290,7 +290,7 @@ func (c *cache) GetStats() interfaces.CacheStats {
 func (c *cache) ResetStats() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	c.stats.Hits = 0
 	c.stats.Misses = 0
 	c.stats.Evictions = 0
@@ -303,10 +303,10 @@ func (c *cache) ResetStats() {
 func (c *cache) Close() error {
 	// Stop the cleanup routine
 	close(c.stopCleanup)
-	
+
 	// Clear the cache
 	c.Clear()
-	
+
 	return nil
 }
 
@@ -315,7 +315,7 @@ func (c *cache) Close() error {
 func (c *cache) AddEventListener(listener interfaces.CacheEventListener) {
 	c.listenerMutex.Lock()
 	defer c.listenerMutex.Unlock()
-	
+
 	c.eventListeners = append(c.eventListeners, listener)
 }
 
@@ -324,7 +324,7 @@ func (c *cache) AddEventListener(listener interfaces.CacheEventListener) {
 func (c *cache) RemoveEventListener(listener interfaces.CacheEventListener) {
 	c.listenerMutex.Lock()
 	defer c.listenerMutex.Unlock()
-	
+
 	for i, l := range c.eventListeners {
 		if l == listener {
 			// Remove the listener by replacing it with the last element and truncating the slice
@@ -344,13 +344,13 @@ func (c *cache) emitEvent(eventType interfaces.CacheEventType, key string, value
 		Value:     value,
 		Timestamp: time.Now(),
 	}
-	
+
 	// Notify listeners
 	c.listenerMutex.RLock()
 	listeners := make([]interfaces.CacheEventListener, len(c.eventListeners))
 	copy(listeners, c.eventListeners)
 	c.listenerMutex.RUnlock()
-	
+
 	for _, listener := range listeners {
 		go listener.OnCacheEvent(event)
 	}
@@ -362,9 +362,9 @@ func (c *cache) evict() {
 	if len(c.items) == 0 {
 		return
 	}
-	
+
 	var keyToEvict string
-	
+
 	switch c.evictionPolicy {
 	case interfaces.EvictionPolicyLRU:
 		// Least Recently Used
@@ -375,7 +375,7 @@ func (c *cache) evict() {
 				keyToEvict = key
 			}
 		}
-	
+
 	case interfaces.EvictionPolicyLFU:
 		// Least Frequently Used
 		var leastCount int64 = 1<<63 - 1 // Max int64
@@ -385,7 +385,7 @@ func (c *cache) evict() {
 				keyToEvict = key
 			}
 		}
-	
+
 	case interfaces.EvictionPolicyFIFO:
 		// First In First Out (we'll use the oldest item)
 		var oldest int64 = time.Now().UnixNano()
@@ -395,7 +395,7 @@ func (c *cache) evict() {
 				keyToEvict = key
 			}
 		}
-	
+
 	default:
 		// Default to LRU
 		var oldest int64 = time.Now().UnixNano()
@@ -406,13 +406,13 @@ func (c *cache) evict() {
 			}
 		}
 	}
-	
+
 	// Evict the selected item
 	if keyToEvict != "" {
 		item := c.items[keyToEvict]
 		delete(c.items, keyToEvict)
 		c.stats.Evictions++
-		
+
 		// Emit event
 		c.emitEvent(interfaces.CacheEventEvicted, keyToEvict, item.value)
 	}

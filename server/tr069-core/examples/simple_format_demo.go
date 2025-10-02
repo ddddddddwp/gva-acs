@@ -27,13 +27,13 @@ func main() {
 	log := logger.NewFileLogger(config)
 
 	// 演示各种日志级别
-	log.Info("TR069连接建立成功", 
+	log.Info("TR069连接建立成功",
 		interfaces.LogField{Key: "device_id", Value: "CPE-001"})
-	
-	log.Warn("参数值验证失败", 
+
+	log.Warn("参数值验证失败",
 		interfaces.LogField{Key: "parameter", Value: "Device.WiFi.Radio.1.Channel"})
-	
-	log.Error("RPC调用超时", 
+
+	log.Error("RPC调用超时",
 		interfaces.LogField{Key: "method", Value: "GetParameterValues"})
 
 	fmt.Println()

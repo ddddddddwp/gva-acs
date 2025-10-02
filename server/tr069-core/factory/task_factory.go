@@ -43,10 +43,10 @@ func WithTaskListener(listener interfaces.TaskEventListener) TaskQueueOption {
 // CreateTaskQueueWithOptions creates a new task queue with the specified options.
 func CreateTaskQueueWithOptions(options ...TaskQueueOption) interfaces.TaskQueue {
 	queue := CreateTaskQueue()
-	
+
 	for _, option := range options {
 		option(queue)
 	}
-	
+
 	return queue
 }

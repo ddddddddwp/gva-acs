@@ -37,7 +37,7 @@ func NewSessionManager() interfaces.SessionManager {
 	// Create and start the session monitor
 	sm.monitor = NewSessionMonitor(sm)
 	sm.monitor.Start()
-	
+
 	// Create and start the session cleaner
 	sm.cleaner = NewSessionCleaner(sm)
 	sm.cleaner.Start()
@@ -126,7 +126,7 @@ func (sm *sessionManager) UpdateSession(ctx context.Context, sessionID string, o
 
 	// Update last active time
 	session.LastActiveAt = time.Now()
-	
+
 	// Set state to active
 	session.State = interfaces.SessionStateActive
 
@@ -171,7 +171,7 @@ func (sm *sessionManager) CloseSession(ctx context.Context, sessionID string) er
 
 	// Remove from maps
 	delete(sm.sessions, sessionID)
-	
+
 	// Remove from device sessions
 	deviceID := session.DeviceID
 	if sessions, exists := sm.deviceSessions[deviceID]; exists {
@@ -248,7 +248,7 @@ func (sm *sessionManager) CleanupExpiredSessions(ctx context.Context) (int, erro
 	// Process expired sessions
 	for _, sessionID := range expiredSessions {
 		session := sm.sessions[sessionID]
-		
+
 		// Update session state
 		session.State = interfaces.SessionStateExpired
 
@@ -263,7 +263,7 @@ func (sm *sessionManager) CleanupExpiredSessions(ctx context.Context) (int, erro
 
 		// Remove from maps
 		delete(sm.sessions, sessionID)
-		
+
 		// Remove from device sessions
 		deviceID := session.DeviceID
 		if sessions, exists := sm.deviceSessions[deviceID]; exists {
@@ -310,7 +310,7 @@ func (sm *sessionManager) RegisterSessionListener(listener interfaces.SessionEve
 func (sm *sessionManager) UnregisterSessionListener(listener interfaces.SessionEventListener) {
 	sm.sessionsMutex.Lock()
 	defer sm.sessionsMutex.Unlock()
-	
+
 	for i, l := range sm.listeners {
 		if l == listener {
 			sm.listeners = append(sm.listeners[:i], sm.listeners[i+1:]...)
@@ -345,7 +345,7 @@ func (sm *sessionManager) cleanupRoutine() {
 func (sm *sessionManager) getAllSessions() map[string]*interfaces.SessionInfo {
 	sm.sessionsMutex.RLock()
 	defer sm.sessionsMutex.RUnlock()
-	
+
 	// Return a copy to avoid race conditions
 	sessions := make(map[string]*interfaces.SessionInfo)
 	for id, session := range sm.sessions {

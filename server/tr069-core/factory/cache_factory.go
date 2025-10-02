@@ -24,7 +24,7 @@ func CreateCache(name string, policy interfaces.EvictionPolicy) (interfaces.Cach
 // CreateCacheWithMaxSize 创建具有指定名称、驱逐策略和最大容量的新缓存。
 func CreateCacheWithMaxSize(name string, policy interfaces.EvictionPolicy, maxSize int) (interfaces.Cache, error) {
 	cm := cache.NewCacheManager()
-	return cm.CreateCache(name, 
+	return cm.CreateCache(name,
 		interfaces.WithEvictionPolicy(policy),
 		interfaces.WithCapacity(maxSize),
 	)

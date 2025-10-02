@@ -11,10 +11,10 @@ import (
 func main() {
 	// 创建解析器实例
 	p := factory.NewParser()
-	
+
 	// 创建构建器实例
 	b := factory.NewBuilder()
-	
+
 	// 示例TR-069 Inform消息
 	xmlData := []byte(`<?xml version="1.0" encoding="UTF-8"?>
 	<soap-env:Envelope
@@ -56,34 +56,34 @@ func main() {
 			</cwmp:Inform>
 		</soap-env:Body>
 	</soap-env:Envelope>`)
-	
+
 	// 解析消息
 	msg, err := p.ParseMessage(context.Background(), xmlData)
 	if err != nil {
 		log.Fatalf("Failed to parse message: %v", err)
 	}
-	
+
 	fmt.Printf("Parsed message method: %s\n", msg.Method)
 	fmt.Printf("Number of parameters: %d\n", len(msg.Parameters))
-	
+
 	// 打印参数
 	for _, param := range msg.Parameters {
 		fmt.Printf("Parameter: %s = %v (%s)\n", param.Name, param.Value, param.Type)
 	}
-	
+
 	// 构建响应消息
 	responseData, err := b.BuildMessage(context.Background(), msg)
 	if err != nil {
 		log.Fatalf("Failed to build response: %v", err)
 	}
-	
+
 	fmt.Printf("Response XML:\n%s\n", responseData)
-	
+
 	// 构建故障响应示例
 	faultData, err := b.BuildFault(context.Background(), 9001, "Invalid parameter")
 	if err != nil {
 		log.Fatalf("Failed to build fault: %v", err)
 	}
-	
+
 	fmt.Printf("Fault XML:\n%s\n", faultData)
 }

@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/flipped-aurora/gin-vue-admin/server/global"
+	tr069core "github.com/flipped-aurora/gin-vue-admin/server/tr069-core/interfaces"
 	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter/model"
 	"github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-adapter/model/request"
-	tr069core "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
 )
 
 type DeviceService struct {

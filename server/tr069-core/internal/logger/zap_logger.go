@@ -14,11 +14,11 @@ import (
 // zapLogger 实现了interfaces.Logger接口，使用zap.SugaredLogger作为底层实现
 type zapLogger struct {
 	mu       sync.Mutex
-	sugar  *zap.SugaredLogger
-	level  interfaces.LogLevel
-	format interfaces.LogFormat
-	fields []interfaces.LogField
-	ctx    interface{}
+	sugar    *zap.SugaredLogger
+	level    interfaces.LogLevel
+	format   interfaces.LogFormat
+	fields   []interfaces.LogField
+	ctx      interface{}
 	zapLevel zap.AtomicLevel
 }
 
@@ -26,7 +26,7 @@ type zapLogger struct {
 func NewZapLogger(options ...interfaces.LoggerOption) interfaces.Logger {
 	// 创建默认的zap配置
 	zapLevel := zap.NewAtomicLevelAt(zapcore.InfoLevel)
-	
+
 	// 默认输出到标准输出
 	encoderConfig := zapcore.EncoderConfig{
 		TimeKey:        "time",
@@ -44,10 +44,10 @@ func NewZapLogger(options ...interfaces.LoggerOption) interfaces.Logger {
 
 	// 默认使用JSON编码器
 	encoder := zapcore.NewJSONEncoder(encoderConfig)
-	
+
 	// 默认输出到标准输出
 	core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapLevel)
-	
+
 	// 创建zap logger
 	zapLogger := zap.New(core)
 	sugar := zapLogger.Sugar()
@@ -156,9 +156,9 @@ func (l *zapLogger) WithContext(ctx interface{}) interfaces.Logger {
 func (l *zapLogger) SetLevel(level interfaces.LogLevel) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	l.level = level
-	
+
 	// 同时设置zap的日志级别
 	switch level {
 	case interfaces.LogLevelDebug:
@@ -185,10 +185,10 @@ func (l *zapLogger) GetLevel() interfaces.LogLevel {
 func (l *zapLogger) SetFormat(format interfaces.LogFormat) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	// 保存格式设置
 	l.format = format
-	
+
 	// 重新创建logger以应用新格式
 	// 注意：这里简化处理，实际应用中可能需要更复杂的重建逻辑
 	var encoder zapcore.Encoder
@@ -205,7 +205,7 @@ func (l *zapLogger) SetFormat(format interfaces.LogFormat) {
 		EncodeDuration: zapcore.StringDurationEncoder,
 		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
-	
+
 	switch format {
 	case interfaces.LogFormatJSON:
 		encoder = zapcore.NewJSONEncoder(encoderConfig)
@@ -215,7 +215,7 @@ func (l *zapLogger) SetFormat(format interfaces.LogFormat) {
 		// 默认使用JSON
 		encoder = zapcore.NewJSONEncoder(encoderConfig)
 	}
-	
+
 	// 获取当前的输出
 	core := l.sugar.Desugar().Core()
 	// 这里简化处理，实际应用中需要更复杂的逻辑来保留现有的输出目标
@@ -234,7 +234,7 @@ func (l *zapLogger) GetFormat() interfaces.LogFormat {
 func (l *zapLogger) SetOutput(output interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	var writer zapcore.WriteSyncer
 	if w, ok := output.(io.Writer); ok {
 		writer = zapcore.AddSync(w)
@@ -242,7 +242,7 @@ func (l *zapLogger) SetOutput(output interface{}) {
 		// 默认输出到标准输出
 		writer = zapcore.AddSync(os.Stdout)
 	}
-	
+
 	// 获取当前的编码器和日志级别
 	oldCore := l.sugar.Desugar().Core()
 	// 这里简化处理，实际应用中需要更复杂的逻辑来提取现有的编码器
@@ -276,7 +276,7 @@ func (l *zapLogger) SetOutput(output interface{}) {
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		})
 	}
-	
+
 	// 创建新的core和logger
 	core := zapcore.NewCore(encoder, writer, l.zapLevel)
 	zapLogger := zap.New(core)
@@ -288,11 +288,11 @@ func (l *zapLogger) convertFields(fields []interfaces.LogField) []interface{} {
 	if len(fields) == 0 {
 		return nil
 	}
-	
+
 	args := make([]interface{}, 0, len(fields)*2)
 	for _, field := range fields {
 		args = append(args, field.Key, field.Value)
 	}
-	
+
 	return args
 }

@@ -25,7 +25,7 @@ type cacheManager struct {
 // NewCacheManager 创建一个新的缓存管理器。
 func NewCacheManager() interfaces.CacheManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &cacheManager{
 		caches:         make(map[string]interfaces.Cache),
 		preloadEnabled: false,
@@ -40,18 +40,18 @@ func NewCacheManager() interfaces.CacheManager {
 func (cm *cacheManager) CreateCache(name string, options ...interfaces.CacheOption) (interfaces.Cache, error) {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
-	
+
 	// Check if cache already exists
 	// 检查缓存是否已存在
 	if _, exists := cm.caches[name]; exists {
 		return nil, errors.New("cache already exists")
 	}
-	
+
 	// Create new cache
 	// 创建新缓存
 	cache := NewCache(name, options...)
 	cm.caches[name] = cache
-	
+
 	// Preload data if enabled
 	// 如果启用，则预加载数据
 	if cm.preloadEnabled {
@@ -61,7 +61,7 @@ func (cm *cacheManager) CreateCache(name string, options ...interfaces.CacheOpti
 			}
 		}
 	}
-	
+
 	return cache, nil
 }
 
@@ -70,12 +70,12 @@ func (cm *cacheManager) CreateCache(name string, options ...interfaces.CacheOpti
 func (cm *cacheManager) GetCache(name string) (interfaces.Cache, error) {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
-	
+
 	cache, exists := cm.caches[name]
 	if !exists {
 		return nil, errors.New("cache not found")
 	}
-	
+
 	return cache, nil
 }
 
@@ -84,22 +84,22 @@ func (cm *cacheManager) GetCache(name string) (interfaces.Cache, error) {
 func (cm *cacheManager) DeleteCache(name string) error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
-	
+
 	cache, exists := cm.caches[name]
 	if !exists {
 		return errors.New("cache not found")
 	}
-	
+
 	// Close the cache to release resources
 	// 关闭缓存以释放资源
 	if err := cache.Close(); err != nil {
 		return err
 	}
-	
+
 	// Remove from caches map
 	// 从缓存映射中删除
 	delete(cm.caches, name)
-	
+
 	return nil
 }
 
@@ -108,7 +108,7 @@ func (cm *cacheManager) DeleteCache(name string) error {
 func (cm *cacheManager) CacheExists(name string) bool {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
-	
+
 	_, exists := cm.caches[name]
 	return exists
 }
@@ -118,12 +118,12 @@ func (cm *cacheManager) CacheExists(name string) bool {
 func (cm *cacheManager) GetCacheNames() []string {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
-	
+
 	names := make([]string, 0, len(cm.caches))
 	for name := range cm.caches {
 		names = append(names, name)
 	}
-	
+
 	return names
 }
 
@@ -132,12 +132,12 @@ func (cm *cacheManager) GetCacheNames() []string {
 func (cm *cacheManager) GetAllCacheStats() map[string]interfaces.CacheStats {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
-	
+
 	stats := make(map[string]interfaces.CacheStats)
 	for name, cache := range cm.caches {
 		stats[name] = cache.GetStats()
 	}
-	
+
 	return stats
 }
 
@@ -146,11 +146,11 @@ func (cm *cacheManager) GetAllCacheStats() map[string]interfaces.CacheStats {
 func (cm *cacheManager) Close() error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
-	
+
 	// Cancel context to stop background tasks
 	// 取消上下文以停止后台任务
 	cm.cancel()
-	
+
 	// Close all caches
 	// 关闭所有缓存
 	for _, cache := range cm.caches {
@@ -158,12 +158,12 @@ func (cm *cacheManager) Close() error {
 			return err
 		}
 	}
-	
+
 	// Clear maps
 	// 清除映射
 	cm.caches = make(map[string]interfaces.Cache)
 	cm.preloadData = make(map[string]map[string]interface{})
-	
+
 	return nil
 }
 
@@ -172,7 +172,7 @@ func (cm *cacheManager) Close() error {
 func (cm *cacheManager) EnablePreloading(enabled bool) {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
-	
+
 	cm.preloadEnabled = enabled
 }
 
@@ -181,7 +181,7 @@ func (cm *cacheManager) EnablePreloading(enabled bool) {
 func (cm *cacheManager) IsPreloadingEnabled() bool {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
-	
+
 	return cm.preloadEnabled
 }
 
@@ -190,11 +190,11 @@ func (cm *cacheManager) IsPreloadingEnabled() bool {
 func (cm *cacheManager) PreloadCache(name string, data map[string]interface{}) error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
-	
+
 	// Store preload data
 	// 存储预加载数据
 	cm.preloadData[name] = data
-	
+
 	// If cache exists and preloading is enabled, load data into cache
 	// 如果缓存存在且预加载已启用，则将数据加载到缓存中
 	if cm.preloadEnabled {
@@ -204,6 +204,6 @@ func (cm *cacheManager) PreloadCache(name string, data map[string]interface{}) e
 			}
 		}
 	}
-	
+
 	return nil
 }

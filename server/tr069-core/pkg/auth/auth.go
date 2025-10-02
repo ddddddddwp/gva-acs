@@ -42,7 +42,7 @@ func NewAuthManager() *AuthManager {
 func (am *AuthManager) SetDefaultCredential(username, password string) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	
+
 	am.defaultAuth = &Credential{
 		Username: username,
 		Password: password,
@@ -55,7 +55,7 @@ func (am *AuthManager) SetDefaultCredential(username, password string) {
 func (am *AuthManager) AddCredential(realm, username, password string) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	
+
 	am.credentials[realm] = &Credential{
 		Username: username,
 		Password: password,
@@ -69,18 +69,18 @@ func (am *AuthManager) AddCredential(realm, username, password string) {
 func (am *AuthManager) GetCredential(realm string) *Credential {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	
+
 	if cred, exists := am.credentials[realm]; exists {
 		cred.LastUsed = time.Now()
 		return cred
 	}
-	
+
 	// Return default credential if realm-specific not found
 	if am.defaultAuth != nil {
 		am.defaultAuth.LastUsed = time.Now()
 		return am.defaultAuth
 	}
-	
+
 	return nil
 }
 
@@ -91,7 +91,7 @@ func (am *AuthManager) AuthenticateRequest(req *http.Request, realm, nonce strin
 	if cred == nil {
 		return fmt.Errorf("no credential found for realm: %s", realm)
 	}
-	
+
 	httputil.AddDigestAuth(req, cred.Username, cred.Password, realm, nonce)
 	return nil
 }
@@ -103,16 +103,16 @@ func (am *AuthManager) ValidateDigestAuth(authHeader, method string) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("failed to parse digest auth: %w", err)
 	}
-	
+
 	cred := am.GetCredential(digestAuth.Realm)
 	if cred == nil {
 		return false, fmt.Errorf("no credential found for realm: %s", digestAuth.Realm)
 	}
-	
+
 	if digestAuth.Username != cred.Username {
 		return false, fmt.Errorf("username mismatch")
 	}
-	
+
 	return httputil.ValidateDigestAuth(digestAuth, cred.Password, method), nil
 }
 
@@ -120,14 +120,14 @@ func (am *AuthManager) ValidateDigestAuth(authHeader, method string) (bool, erro
 // CreateChallenge 创建 digest 认证质询。
 func (am *AuthManager) CreateChallenge(realm string) string {
 	nonce := httputil.GenerateNonce()
-	
+
 	// Update nonce for the realm
 	am.mu.Lock()
 	if cred, exists := am.credentials[realm]; exists {
 		cred.Nonce = nonce
 	}
 	am.mu.Unlock()
-	
+
 	return httputil.CreateDigestChallenge(realm, nonce)
 }
 
@@ -136,7 +136,7 @@ func (am *AuthManager) CreateChallenge(realm string) string {
 func (am *AuthManager) CleanupExpiredCredentials(expiry time.Duration) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	
+
 	now := time.Now()
 	for realm, cred := range am.credentials {
 		if now.Sub(cred.LastUsed) > expiry {

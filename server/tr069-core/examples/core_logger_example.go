@@ -38,28 +38,28 @@ func main() {
 
 	// 2. 使用Core专用日志函数
 	fmt.Println("\n2. 使用Core专用日志函数...")
-	logger.LogCoreInfo("TR069 Core服务启动", 
+	logger.LogCoreInfo("TR069 Core服务启动",
 		interfaces.LogField{Key: "version", Value: "1.0.0"},
 		interfaces.LogField{Key: "pid", Value: os.Getpid()},
 	)
 
-	logger.LogCoreDebug("解析器初始化", 
+	logger.LogCoreDebug("解析器初始化",
 		interfaces.LogField{Key: "parser_type", Value: "xml"},
 		interfaces.LogField{Key: "strict_mode", Value: true},
 	)
 
-	logger.LogCoreWarn("配置文件未找到，使用默认配置", 
+	logger.LogCoreWarn("配置文件未找到，使用默认配置",
 		interfaces.LogField{Key: "config_path", Value: "/etc/tr069/config.yaml"},
 	)
 
 	// 3. 使用全局日志函数
 	fmt.Println("\n3. 使用全局日志函数...")
-	logger.Info("处理TR069消息", 
+	logger.Info("处理TR069消息",
 		interfaces.LogField{Key: "message_type", Value: "GetParameterValues"},
 		interfaces.LogField{Key: "session_id", Value: "sess_12345"},
 	)
 
-	logger.Error("消息解析失败", 
+	logger.Error("消息解析失败",
 		interfaces.LogField{Key: "error", Value: "invalid XML format"},
 		interfaces.LogField{Key: "raw_data", Value: "<invalid>"},
 	)
@@ -67,26 +67,26 @@ func main() {
 	// 4. 获取专用Core日志记录器
 	fmt.Println("\n4. 使用专用Core日志记录器...")
 	coreLogger := logger.GetCoreLogger()
-	coreLogger.Info("使用专用Core日志记录器", 
+	coreLogger.Info("使用专用Core日志记录器",
 		interfaces.LogField{Key: "component", Value: "parser"},
 		interfaces.LogField{Key: "operation", Value: "parse_message"},
 	)
 
 	// 5. 演示不同日志级别
 	fmt.Println("\n5. 演示不同日志级别...")
-	logger.Debug("调试信息：内存使用情况", 
+	logger.Debug("调试信息：内存使用情况",
 		interfaces.LogField{Key: "memory_mb", Value: 128},
 	)
 
-	logger.Info("信息：连接建立成功", 
+	logger.Info("信息：连接建立成功",
 		interfaces.LogField{Key: "remote_addr", Value: "192.168.1.100"},
 	)
 
-	logger.Warn("警告：连接超时，正在重试", 
+	logger.Warn("警告：连接超时，正在重试",
 		interfaces.LogField{Key: "retry_count", Value: 2},
 	)
 
-	logger.Error("错误：数据库连接失败", 
+	logger.Error("错误：数据库连接失败",
 		interfaces.LogField{Key: "db_host", Value: "localhost"},
 		interfaces.LogField{Key: "error_code", Value: 1045},
 	)
@@ -94,7 +94,7 @@ func main() {
 	// 6. 演示日志轮转
 	fmt.Println("\n6. 演示日志轮转...")
 	for i := 0; i < 100; i++ {
-		logger.LogCoreInfo(fmt.Sprintf("批量日志测试 %d", i), 
+		logger.LogCoreInfo(fmt.Sprintf("批量日志测试 %d", i),
 			interfaces.LogField{Key: "batch_id", Value: i},
 			interfaces.LogField{Key: "timestamp", Value: time.Now().Unix()},
 		)

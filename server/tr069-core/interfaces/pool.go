@@ -7,7 +7,7 @@ import "bytes"
 type BufferPool interface {
 	// Get 从对象池获取一个缓冲区
 	Get() *bytes.Buffer
-	
+
 	// Put 将缓冲区放回对象池
 	Put(*bytes.Buffer)
 }
@@ -16,7 +16,7 @@ type BufferPool interface {
 type MessagePool interface {
 	// Get 从对象池获取一个消息对象
 	Get() *Message
-	
+
 	// Put 将消息对象放回对象池
 	Put(*Message)
 }
@@ -25,7 +25,7 @@ type MessagePool interface {
 type ParameterPool interface {
 	// Get 从对象池获取一个参数对象
 	Get() *Parameter
-	
+
 	// Put 将参数对象放回对象池
 	Put(*Parameter)
 }

@@ -49,34 +49,34 @@ type MonitorListener interface {
 type Monitor interface {
 	// RegisterMetric 注册一个指标
 	RegisterMetric(name string, metricType MetricType, initialValue float64, labels map[string]string) error
-	
+
 	// UpdateMetric 更新指标值
 	UpdateMetric(name string, value float64) error
-	
+
 	// IncrementMetric 增加指标值
 	IncrementMetric(name string, delta float64) error
-	
+
 	// GetMetric 获取指标值
 	GetMetric(name string) (*MetricValue, error)
-	
+
 	// GetAllMetrics 获取所有指标
 	GetAllMetrics() []MetricValue
-	
+
 	// GetSnapshot 获取指标快照
 	GetSnapshot() *MetricSnapshot
-	
+
 	// ExportMetrics 导出指标数据
 	ExportMetrics(format string) ([]byte, error)
-	
+
 	// AddListener 添加监听器
 	AddListener(listener MonitorListener)
-	
+
 	// RemoveListener 移除监听器
 	RemoveListener(listener MonitorListener)
-	
+
 	// Start 启动监控
 	Start() error
-	
+
 	// Stop 停止监控
 	Stop() error
 }

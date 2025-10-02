@@ -39,7 +39,7 @@ func SecurityConfigExample() {
 		fmt.Printf("TLS启用状态: %v\n", secConfig.EnableTLS)
 		fmt.Printf("签名验证启用状态: %v\n", secConfig.EnableSignatureVerification)
 		fmt.Printf("参数加密启用状态: %v\n", secConfig.EnableParameterEncryption)
-		
+
 		if secConfig.TLSSetup != nil {
 			fmt.Printf("服务器名称: %s\n", secConfig.TLSSetup.ServerName)
 			fmt.Printf("跳过证书验证: %v\n", secConfig.TLSSetup.InsecureSkipVerify)
@@ -136,7 +136,7 @@ func TLSConfigExample() {
 func SecurityExample() {
 	fmt.Println("=== 安全配置示例 ===")
 	SecurityConfigExample()
-	
+
 	fmt.Println("\n=== TLS配置示例 ===")
 	TLSConfigExample()
 }

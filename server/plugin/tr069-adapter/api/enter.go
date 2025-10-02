@@ -5,6 +5,7 @@ type ApiGroup struct {
 	ParameterApi
 	SessionApi
 	OperationLogApi
+	TR069Api
 }
 
 var ApiGroupApp = new(ApiGroup)

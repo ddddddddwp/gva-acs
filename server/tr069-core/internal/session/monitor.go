@@ -25,9 +25,9 @@ type SessionMonitor struct {
 // SessionStats contains statistics for a session.
 type SessionStats struct {
 	SessionID       string
-	DeviceID  string
-	State     interfaces.SessionState
-	CreatedAt time.Time
+	DeviceID        string
+	State           interfaces.SessionState
+	CreatedAt       time.Time
 	LastActivityAt  time.Time
 	RequestCount    int
 	ResponseCount   int
@@ -46,14 +46,14 @@ type SessionStats struct {
 // NewSessionMonitor creates a new session monitor.
 func NewSessionMonitor(manager *sessionManager) *SessionMonitor {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &SessionMonitor{
-		manager:    manager,
-		listeners:  make([]interfaces.SessionEventListener, 0),
-		statsMap:   make(map[string]*SessionStats),
-		ctx:        ctx,
-		cancel:     cancel,
-		interval:   5 * time.Second, // Default monitoring interval
+		manager:   manager,
+		listeners: make([]interfaces.SessionEventListener, 0),
+		statsMap:  make(map[string]*SessionStats),
+		ctx:       ctx,
+		cancel:    cancel,
+		interval:  5 * time.Second, // Default monitoring interval
 	}
 }
 
@@ -81,7 +81,7 @@ func (m *SessionMonitor) SetMonitoringInterval(interval time.Duration) {
 func (m *SessionMonitor) RegisterListener(listener interfaces.SessionEventListener) {
 	m.listenerMutex.Lock()
 	defer m.listenerMutex.Unlock()
-	
+
 	m.listeners = append(m.listeners, listener)
 }
 
@@ -89,7 +89,7 @@ func (m *SessionMonitor) RegisterListener(listener interfaces.SessionEventListen
 func (m *SessionMonitor) UnregisterListener(listener interfaces.SessionEventListener) {
 	m.listenerMutex.Lock()
 	defer m.listenerMutex.Unlock()
-	
+
 	for i, l := range m.listeners {
 		if l == listener {
 			m.listeners = append(m.listeners[:i], m.listeners[i+1:]...)
@@ -102,7 +102,7 @@ func (m *SessionMonitor) UnregisterListener(listener interfaces.SessionEventList
 func (m *SessionMonitor) GetSessionStats(sessionID string) (*SessionStats, bool) {
 	m.statsMutex.RLock()
 	defer m.statsMutex.RUnlock()
-	
+
 	stats, exists := m.statsMap[sessionID]
 	return stats, exists
 }
@@ -111,12 +111,12 @@ func (m *SessionMonitor) GetSessionStats(sessionID string) (*SessionStats, bool)
 func (m *SessionMonitor) GetAllSessionStats() []*SessionStats {
 	m.statsMutex.RLock()
 	defer m.statsMutex.RUnlock()
-	
+
 	stats := make([]*SessionStats, 0, len(m.statsMap))
 	for _, s := range m.statsMap {
 		stats = append(stats, s)
 	}
-	
+
 	return stats
 }
 
@@ -124,7 +124,7 @@ func (m *SessionMonitor) GetAllSessionStats() []*SessionStats {
 func (m *SessionMonitor) UpdateSessionActivity(sessionID string) {
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	if stats, exists := m.statsMap[sessionID]; exists {
 		stats.LastActivityAt = time.Now()
 	}
@@ -134,7 +134,7 @@ func (m *SessionMonitor) UpdateSessionActivity(sessionID string) {
 func (m *SessionMonitor) RecordRequest(sessionID string, size int) {
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	if stats, exists := m.statsMap[sessionID]; exists {
 		stats.RequestCount++
 		stats.BytesReceived += int64(size)
@@ -147,19 +147,19 @@ func (m *SessionMonitor) RecordRequest(sessionID string, size int) {
 func (m *SessionMonitor) RecordResponse(sessionID string, size int, latency time.Duration) {
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	if stats, exists := m.statsMap[sessionID]; exists {
 		stats.ResponseCount++
 		stats.BytesSent += int64(size)
 		stats.ActiveRequests--
 		stats.LastActivityAt = time.Now()
-		
+
 		// Update latency statistics
 		stats.LatencySamples = append(stats.LatencySamples, latency)
 		if len(stats.LatencySamples) > 100 {
 			stats.LatencySamples = stats.LatencySamples[1:]
 		}
-		
+
 		// Calculate average latency
 		var totalLatency time.Duration
 		for _, l := range stats.LatencySamples {
@@ -173,7 +173,7 @@ func (m *SessionMonitor) RecordResponse(sessionID string, size int, latency time
 func (m *SessionMonitor) RecordError(sessionID string) {
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	if stats, exists := m.statsMap[sessionID]; exists {
 		stats.ErrorCount++
 		stats.LastActivityAt = time.Now()
@@ -184,7 +184,7 @@ func (m *SessionMonitor) RecordError(sessionID string) {
 func (m *SessionMonitor) RecordTaskCompleted(sessionID string) {
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	if stats, exists := m.statsMap[sessionID]; exists {
 		stats.CompletedTasks++
 		stats.PendingTasks--
@@ -196,7 +196,7 @@ func (m *SessionMonitor) RecordTaskCompleted(sessionID string) {
 func (m *SessionMonitor) RecordTaskFailed(sessionID string) {
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	if stats, exists := m.statsMap[sessionID]; exists {
 		stats.FailedTasks++
 		stats.PendingTasks--
@@ -208,7 +208,7 @@ func (m *SessionMonitor) RecordTaskFailed(sessionID string) {
 func (m *SessionMonitor) RecordTaskPending(sessionID string) {
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	if stats, exists := m.statsMap[sessionID]; exists {
 		stats.PendingTasks++
 		stats.LastActivityAt = time.Now()
@@ -219,7 +219,7 @@ func (m *SessionMonitor) RecordTaskPending(sessionID string) {
 func (m *SessionMonitor) RecordConnection(sessionID string) {
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	if stats, exists := m.statsMap[sessionID]; exists {
 		stats.ConnectionCount++
 		stats.LastActivityAt = time.Now()
@@ -229,10 +229,10 @@ func (m *SessionMonitor) RecordConnection(sessionID string) {
 // monitorLoop periodically monitors sessions.
 func (m *SessionMonitor) monitorLoop() {
 	defer m.wg.Done()
-	
+
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -248,11 +248,11 @@ func (m *SessionMonitor) monitorLoop() {
 func (m *SessionMonitor) updateSessionStats() {
 	// Get all sessions
 	sessions := m.manager.getAllSessions()
-	
+
 	// Update stats map
 	m.statsMutex.Lock()
 	defer m.statsMutex.Unlock()
-	
+
 	// Remove stats for closed sessions
 	for sessionID := range m.statsMap {
 		found := false
@@ -266,7 +266,7 @@ func (m *SessionMonitor) updateSessionStats() {
 			delete(m.statsMap, sessionID)
 		}
 	}
-	
+
 	// Add or update stats for current sessions
 	for _, session := range sessions {
 		if _, exists := m.statsMap[session.ID]; !exists {
@@ -292,16 +292,16 @@ func (m *SessionMonitor) detectStateChanges() {
 		sessions = append(sessions, session)
 	}
 	m.manager.sessionsMutex.RUnlock()
-	
+
 	for _, session := range sessions {
 		m.statsMutex.RLock()
 		stats, exists := m.statsMap[session.ID]
 		m.statsMutex.RUnlock()
-		
+
 		if !exists {
 			continue
 		}
-		
+
 		// Check for inactivity
 		if session.State == interfaces.SessionStateActive {
 			inactiveThreshold := 5 * time.Minute // Configurable
@@ -309,7 +309,7 @@ func (m *SessionMonitor) detectStateChanges() {
 				m.emitSessionEvent(interfaces.SessionEventInactive, session)
 			}
 		}
-		
+
 		// Check for high error rate
 		if stats.RequestCount > 0 {
 			errorRate := float64(stats.ErrorCount) / float64(stats.RequestCount)
@@ -317,7 +317,7 @@ func (m *SessionMonitor) detectStateChanges() {
 				m.emitSessionEvent(interfaces.SessionEventHighLatency, session)
 			}
 		}
-		
+
 		// Check for high latency
 		if stats.AverageLatency > 500*time.Millisecond {
 			m.emitSessionEvent(interfaces.SessionEventHighLatency, session)
@@ -334,10 +334,10 @@ func (m *SessionMonitor) emitSessionEvent(eventType interfaces.SessionEventType,
 		Timestamp: time.Now(),
 		Data:      make(map[string]interface{}),
 	}
-	
+
 	// Add session state to event data
 	event.Data["state"] = session.State
-	
+
 	// Add stats to event data if available
 	m.statsMutex.RLock()
 	if stats, exists := m.statsMap[session.ID]; exists {
@@ -346,12 +346,12 @@ func (m *SessionMonitor) emitSessionEvent(eventType interfaces.SessionEventType,
 		event.Data["averageLatency"] = stats.AverageLatency
 	}
 	m.statsMutex.RUnlock()
-	
+
 	m.listenerMutex.RLock()
 	listeners := make([]interfaces.SessionEventListener, len(m.listeners))
 	copy(listeners, m.listeners)
 	m.listenerMutex.RUnlock()
-	
+
 	for _, listener := range listeners {
 		go listener.OnSessionEvent(event)
 	}

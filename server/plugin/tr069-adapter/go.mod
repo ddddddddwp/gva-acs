@@ -115,4 +115,4 @@ require (
 
 replace github.com/flipped-aurora/gin-vue-admin/server => ../../
 
-replace github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core => ../tr069-core
+replace github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core => ./../../tr069-core
