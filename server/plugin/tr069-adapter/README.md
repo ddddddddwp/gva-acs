@@ -1,328 +1,207 @@
-# GVA-TR069 项目
+# TR069-Adapter 插件
 
-基于 [gin-vue-admin](https://github.com/flipped-aurora/gin-vue-admin) 框架的 TR069/CWMP 协议实现，提供完整的 CPE 设备管理解决方案。
+## 概述
 
-## 🚀 项目概述
+TR069-Adapter 是一个基于 gin-vue-admin 框架开发的 TR069 协议适配器插件，提供完整的 CPE（Customer Premises Equipment）设备管理功能。
 
-GVA-TR069 是一个现代化的 TR069 设备管理系统，采用前后端分离架构，集成了完整的 TR069/CWMP 协议栈和 Web 管理界面。
+## 功能特性
 
-### 核心特性
+### 核心功能
+- **设备管理**: CPE设备的注册、配置、监控和管理
+- **参数管理**: 设备参数的读取、设置和批量操作
+- **会话管理**: TR069会话的创建、维护和监控
+- **操作日志**: 完整的操作记录和审计功能
 
-- 🔧 **完整的 TR069 协议支持** - 实现 TR069/CWMP 标准的所有核心功能
-- 🌐 **现代化 Web 界面** - 基于 Vue 3 + Element Plus 的响应式管理界面  
-- 🔐 **企业级权限管理** - 集成 GVA 的 RBAC 权限控制系统
-- 📊 **实时设备监控** - 设备状态实时监控和参数管理
-- 🔄 **自动化任务调度** - 支持批量操作和定时任务
-- 📈 **数据可视化** - 设备数据图表展示和分析
-- 🛡️ **高可用架构** - 支持集群部署和负载均衡
+### 技术特性
+- 完全遵循 TR069/CWMP 协议标准
+- 支持多种 CPE 设备类型
+- 高并发会话处理
+- 实时设备状态监控
+- 灵活的参数配置管理
+- 完整的操作审计日志
 
-## 🏗️ 架构设计
-
-### 系统架构图
+## 目录结构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    GVA Framework                            │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐    ┌─────────────────────────────────┐ │
-│  │  TR069-Adapter  │◄──►│         TR069-Core              │ │
-│  │   (GVA Plugin)  │    │    (Protocol Library)          │ │
-│  └─────────────────┘    └─────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────┐
-                    │   CPE Devices   │
-                    │  (路由器/网关)   │
-                    └─────────────────┘
+tr069-adapter/
+├── api/                    # API控制器层
+│   ├── enter.go           # API组入口
+│   ├── device_api.go      # 设备管理API
+│   ├── parameter_api.go   # 参数管理API
+│   ├── session_api.go     # 会话管理API
+│   └── operation_log_api.go # 操作日志API
+├── model/                 # 数据模型层
+│   ├── device.go         # 设备模型
+│   ├── parameter.go      # 参数模型
+│   ├── session.go        # 会话模型
+│   ├── operation_log.go  # 操作日志模型
+│   ├── request/          # 请求模型
+│   └── response/         # 响应模型
+├── service/              # 服务层
+│   ├── enter.go         # 服务组入口
+│   ├── device_service.go # 设备服务
+│   ├── parameter_service.go # 参数服务
+│   ├── session_service.go # 会话服务
+│   └── operation_log_service.go # 操作日志服务
+├── router/               # 路由层
+│   ├── enter.go         # 路由组入口
+│   ├── device_router.go # 设备路由
+│   ├── parameter_router.go # 参数路由
+│   ├── session_router.go # 会话路由
+│   └── operation_log_router.go # 操作日志路由
+├── initialize/           # 初始化层
+│   ├── register.go      # 注册器
+│   ├── gorm.go         # 数据库初始化
+│   ├── router.go       # 路由初始化
+│   ├── viper.go        # 配置初始化
+│   ├── api.go          # API初始化
+│   └── menu.go         # 菜单初始化
+├── config.yaml          # 配置文件
+├── plugin.go            # 插件入口
+└── README.md           # 说明文档
 ```
 
-### 组件说明
+## 安装配置
 
-#### TR069-Core (协议核心库)
-- **位置**: `server/plugin/tr069-core/`
-- **职责**: TR069/CWMP 协议的完整实现
-- **特性**: 
-  - 独立的 Go 库，可单独使用
-  - 支持所有标准 RPC 方法
-  - 设备会话管理和连接池
-  - 事件驱动的消息处理
+### 1. 插件安装
 
-#### TR069-Adapter (GVA 适配器)
-- **位置**: `server/plugin/tr069-adapter/`
-- **职责**: 将 TR069-Core 集成到 GVA 框架
-- **特性**:
-  - RESTful API 接口
-  - 数据持久化和缓存
-  - 权限控制和用户管理
-  - Web 界面和仪表盘
-
-## 📋 功能特性
-
-### TR069 协议支持
-
-- ✅ **设备发现和注册** - 自动发现和注册 CPE 设备
-- ✅ **参数管理** - GetParameterValues / SetParameterValues
-- ✅ **配置下发** - AddObject / DeleteObject
-- ✅ **文件传输** - Download / Upload 文件操作
-- ✅ **设备重启** - Reboot 远程重启设备
-- ✅ **固件升级** - 远程固件更新和管理
-- ✅ **诊断功能** - 网络诊断和故障排查
-
-### 管理功能
-
-- 📱 **设备管理** - 设备列表、详情、分组管理
-- 📊 **参数监控** - 实时参数监控和历史数据
-- 🔧 **配置模板** - 配置模板管理和批量下发
-- 📋 **任务管理** - 任务队列、执行状态、结果查看
-- 📈 **统计报表** - 设备统计、性能分析、趋势图表
-- 🔔 **告警通知** - 设备异常告警和通知推送
-
-## 🛠️ 技术栈
-
-### 后端技术
-- **Go 1.23** - 主要编程语言
-- **Gin 1.10.0** - Web 框架
-- **GORM 1.25.12** - ORM 框架
-- **MySQL/PostgreSQL** - 数据库支持
-- **Redis** - 缓存和会话存储
-- **Casbin** - 权限管理
-
-### 前端技术
-- **Vue 3.5.7** - 前端框架
-- **Element Plus 2.10.2** - UI 组件库
-- **Vite 6.2.3** - 构建工具
-- **Pinia 2.2.2** - 状态管理
-- **ECharts 5.5.1** - 数据可视化
-
-## 🚀 快速开始
-
-### 环境要求
-
-- Go 1.23+
-- Node.js 18+
-- MySQL 8.0+ / PostgreSQL 13+
-- Redis 6.0+
-
-### 安装步骤
-
-1. **克隆项目**
-```bash
-git clone https://github.com/ddddddddwp/gva-tr069.git
-cd gva-tr069
-```
-
-2. **后端配置**
-```bash
-cd server
-cp config.yaml.example config.yaml
-# 编辑 config.yaml 配置数据库连接信息
-go mod tidy
-go run main.go
-```
-
-3. **前端配置**
-```bash
-cd web
-npm install
-npm run dev
-```
-
-4. **访问系统**
-- 前端地址: http://localhost:3000
-- 后端API: http://localhost:8888
-- Swagger文档: http://localhost:8888/swagger/index.html
-
-### Docker 部署
+将插件目录放置到 GVA 项目的 `server/plugin/` 目录下：
 
 ```bash
-# 使用 docker-compose 一键部署
-docker-compose up -d
+cp -r tr069-adapter /path/to/gin-vue-admin/server/plugin/
 ```
 
-## 📖 使用指南
+### 2. 配置文件
 
-### 设备接入
-
-1. **配置 CPE 设备**
-   - ACS URL: `http://your-server:8888/tr069`
-   - 用户名/密码: 在系统中配置
-
-2. **设备注册**
-   - 设备首次连接时自动注册
-   - 在设备管理页面查看和管理
-
-3. **参数配置**
-   - 使用配置模板批量配置
-   - 支持单设备参数修改
-
-### API 使用
-
-#### 获取设备列表
-```bash
-curl -X POST http://localhost:8888/api/tr069/getDeviceList \
-  -H "Content-Type: application/json" \
-  -d '{"page": 1, "pageSize": 10}'
-```
-
-#### 获取设备参数
-```bash
-curl -X POST http://localhost:8888/api/tr069/getParameters \
-  -H "Content-Type: application/json" \
-  -d '{"deviceId": "device123", "parameters": ["Device.DeviceInfo.ModelName"]}'
-```
-
-#### 设置设备参数
-```bash
-curl -X POST http://localhost:8888/api/tr069/setParameters \
-  -H "Content-Type: application/json" \
-  -d '{"deviceId": "device123", "parameters": {"Device.WiFi.SSID.1.SSID": "NewSSID"}}'
-```
-
-## 🔧 配置说明
-
-### 主要配置项
+编辑 `config.yaml` 文件，配置数据库、Redis、CWMP等相关参数：
 
 ```yaml
-# config.yaml
-tr069:
-  server:
-    port: 7547              # TR069 服务端口
-    timeout: 30             # 连接超时时间
-    max_connections: 1000   # 最大连接数
-  
-  database:
-    host: localhost
-    port: 3306
-    username: root
-    password: password
-    database: gva_tr069
-  
-  redis:
-    host: localhost
-    port: 6379
-    password: ""
-    db: 0
+# 数据库配置
+database:
+  type: "mysql"
+  host: "127.0.0.1"
+  port: 3306
+  database: "gva_tr069"
+  username: "root"
+  password: "your_password"
+
+# CWMP配置
+cwmp:
+  connection_request_url: "http://localhost:7547/cwmp"
+  auth:
+    username: "admin"
+    password: "admin123"
 ```
 
-### 设备配置模板
+### 3. 数据库初始化
 
-```json
-{
-  "templateName": "基础WiFi配置",
-  "parameters": {
-    "Device.WiFi.SSID.1.SSID": "MyWiFi",
-    "Device.WiFi.SSID.1.Enable": true,
-    "Device.WiFi.AccessPoint.1.Security.ModeEnabled": "WPA2-PSK"
-  }
-}
-```
+插件会自动创建所需的数据库表：
+- `tr069_devices` - 设备信息表
+- `tr069_parameters` - 参数信息表
+- `tr069_sessions` - 会话信息表
+- `tr069_operation_logs` - 操作日志表
 
-## 📊 监控和运维
+### 4. 菜单初始化
 
-### 系统监控
+插件会自动创建管理菜单：
+- TR069适配器
+  - 设备管理
+  - 参数管理
+  - 会话管理
+  - 操作日志
+  - 监控面板
 
-- **设备状态监控** - 在线/离线状态实时监控
-- **性能指标** - CPU、内存、网络使用率
-- **连接统计** - 并发连接数、请求响应时间
-- **错误日志** - 系统错误和异常日志
+## API 接口
 
-### 日志管理
+### 设备管理 API
 
-```bash
-# 查看系统日志
-tail -f logs/server.log
+- `GET /tr069-adapter/device/list` - 获取设备列表
+- `GET /tr069-adapter/device/:id` - 获取设备详情
+- `POST /tr069-adapter/device/create` - 创建设备
+- `PUT /tr069-adapter/device/update` - 更新设备
+- `DELETE /tr069-adapter/device/delete` - 删除设备
+- `POST /tr069-adapter/device/reboot` - 重启设备
+- `POST /tr069-adapter/device/factoryReset` - 恢复出厂设置
 
-# 查看 TR069 协议日志
-tail -f logs/tr069.log
+### 参数管理 API
 
-# 查看错误日志
-tail -f logs/error.log
-```
+- `GET /tr069-adapter/parameter/list` - 获取参数列表
+- `GET /tr069-adapter/parameter/tree` - 获取参数树
+- `POST /tr069-adapter/parameter/setValue` - 设置参数值
+- `POST /tr069-adapter/parameter/getValue` - 获取参数值
+- `POST /tr069-adapter/parameter/addObject` - 添加对象
+- `POST /tr069-adapter/parameter/deleteObject` - 删除对象
 
-## 🧪 测试
+### 会话管理 API
 
-### 单元测试
-```bash
-cd server
-go test ./...
-```
+- `GET /tr069-adapter/session/list` - 获取会话列表
+- `GET /tr069-adapter/session/:id` - 获取会话详情
+- `POST /tr069-adapter/session/end` - 结束会话
+- `GET /tr069-adapter/session/active` - 获取活跃会话
 
-### 集成测试
-```bash
-cd server
-go test -tags=integration ./...
-```
+### 操作日志 API
 
-### 前端测试
-```bash
-cd web
-npm run test
-```
+- `GET /tr069-adapter/operationLog/list` - 获取操作日志列表
+- `GET /tr069-adapter/operationLog/:id` - 获取日志详情
+- `GET /tr069-adapter/operationLog/statistics` - 获取统计信息
 
-## 📚 开发文档
+## 使用说明
 
-- [架构设计文档](TR069_ARCHITECTURE.md) - 详细的系统架构说明
-- [API 文档](http://localhost:8888/swagger/index.html) - 完整的 API 接口文档
-- [开发指南](docs/DEVELOPMENT.md) - 开发环境搭建和代码规范
-- [部署指南](docs/DEPLOYMENT.md) - 生产环境部署说明
+### 设备管理
 
-## 🤝 贡献指南
+1. **设备注册**: CPE设备首次连接时会自动注册到系统
+2. **设备监控**: 实时监控设备在线状态和基本信息
+3. **设备操作**: 支持远程重启、恢复出厂设置等操作
 
-我们欢迎所有形式的贡献！请查看 [贡献指南](CONTRIBUTING.md) 了解详细信息。
+### 参数管理
 
-### 开发流程
+1. **参数读取**: 从CPE设备读取参数值
+2. **参数设置**: 向CPE设备设置参数值
+3. **批量操作**: 支持批量参数读取和设置
+4. **参数树**: 以树形结构展示设备参数
 
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
+### 会话管理
+
+1. **会话监控**: 实时监控TR069会话状态
+2. **会话控制**: 手动结束异常会话
+3. **会话历史**: 查看设备的会话历史记录
+
+### 操作日志
+
+1. **操作记录**: 记录所有设备操作和参数变更
+2. **审计功能**: 提供完整的操作审计轨迹
+3. **日志分析**: 支持按设备、时间等维度分析
+
+## 开发说明
+
+### 扩展功能
+
+如需扩展插件功能，请遵循以下步骤：
+
+1. 在对应的 `model` 目录下添加数据模型
+2. 在 `service` 层实现业务逻辑
+3. 在 `api` 层添加接口处理
+4. 在 `router` 层注册路由
+5. 更新初始化文件
 
 ### 代码规范
 
-- 遵循 Go 官方代码规范
-- 使用 `gofmt` 格式化代码
-- 添加必要的单元测试
-- 更新相关文档
+- 严格遵循 GVA 框架的分层架构
+- 使用统一的错误处理和响应格式
+- 添加完整的 Swagger 注释
+- 遵循 Go 语言编码规范
 
-## 📄 许可证
+## 注意事项
 
-本项目采用 [MIT 许可证](LICENSE)。
+1. **安全性**: 确保 CWMP 认证配置的安全性
+2. **性能**: 合理配置会话并发数和超时时间
+3. **日志**: 定期清理操作日志以避免数据库膨胀
+4. **备份**: 定期备份设备配置和参数数据
 
-## 🆘 支持和帮助
+## 版本历史
 
-### 获取帮助
+- v1.0.0: 初始版本，提供基础的TR069适配器功能
 
-- 📖 [文档中心](docs/) - 查看详细文档
-- 🐛 [问题反馈](https://github.com/ddddddddwp/gva-tr069/issues) - 报告 Bug 或提出建议
-- 💬 [讨论区](https://github.com/ddddddddwp/gva-tr069/discussions) - 技术讨论和交流
+## 技术支持
 
-### 常见问题
-
-**Q: 设备无法连接到 ACS？**
-A: 检查网络连接、防火墙设置和 ACS URL 配置。
-
-**Q: 参数设置失败？**
-A: 确认参数路径正确，设备支持该参数，且有足够权限。
-
-**Q: 系统性能问题？**
-A: 检查数据库连接池配置、Redis 缓存设置和系统资源使用情况。
-
-## 🔗 相关链接
-
-- [gin-vue-admin](https://github.com/flipped-aurora/gin-vue-admin) - 基础框架
-- [TR069 标准](https://www.broadband-forum.org/technical/download/TR-069.pdf) - 协议规范
-- [CWMP 数据模型](https://cwmp-data-models.broadband-forum.org/) - 数据模型参考
-
-## 📈 项目状态
-
-![GitHub stars](https://img.shields.io/github/stars/ddddddddwp/gva-tr069)
-![GitHub forks](https://img.shields.io/github/forks/ddddddddwp/gva-tr069)
-![GitHub issues](https://img.shields.io/github/issues/ddddddddwp/gva-tr069)
-![GitHub license](https://img.shields.io/github/license/ddddddddwp/gva-tr069)
-
----
-
-**维护者**: [@ddddddddwp](https://github.com/ddddddddwp)  
-**最后更新**: 2024年10月2日
+如有问题或建议，请联系开发团队或提交 Issue。

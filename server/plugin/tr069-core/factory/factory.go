@@ -6,6 +6,7 @@ import (
  "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/interfaces"
  "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/builder"
  "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/parser"
+ "github.com/flipped-aurora/gin-vue-admin/server/plugin/tr069-core/internal/session"
 )
 
 // NewParser creates a new Parser with the given options.
@@ -35,6 +36,11 @@ func NewConfig(opts ...interfaces.Option) interfaces.Config {
  cfg := config.New()
  cfg.ApplyOptions(opts...)
  return cfg
+}
+
+// NewSessionManager creates a new SessionManager.
+func NewSessionManager() interfaces.SessionManager {
+ return session.NewSessionManager()
 }
 
 // WithSecurityConfig 配置安全选项

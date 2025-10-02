@@ -1,7 +1,107 @@
-# TR069-Adapter 插件配置
-enabled: true      # 是否启用TR069服务
-server_port: 7547  # TR069服务器端口
-log_level: info    # 日志级别：debug, info, warn, error
-max_devices: 1000  # 最大设备数量
-enable_cache: true # 是否启用缓存
-cache_ttl: 3600    # 缓存过期时间(秒)
+# TR069-Adapter 插件配置文件
+
+# 服务器配置
+server:
+  port: 7547
+  host: "0.0.0.0"
+  timeout: 30s
+
+# 数据库配置
+database:
+  type: "mysql"
+  host: "127.0.0.1"
+  port: 3306
+  database: "gva_tr069"
+  username: "root"
+  password: ""
+  charset: "utf8mb4"
+  max_idle_conns: 10
+  max_open_conns: 100
+  log_mode: true
+
+# Redis配置
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  password: ""
+  db: 1
+  pool_size: 10
+
+# 日志配置
+log:
+  level: "info"
+  format: "json"
+  output: "stdout"
+  file_path: "./logs/tr069-adapter.log"
+  max_size: 100
+  max_age: 30
+  max_backups: 10
+  compress: true
+
+# CWMP配置
+cwmp:
+  # 连接URL
+  connection_request_url: "http://localhost:7547/cwmp"
+  
+  # 认证配置
+  auth:
+    username: "admin"
+    password: "admin123"
+    
+  # 会话配置
+  session:
+    timeout: 300s
+    max_concurrent: 100
+    
+  # 重试配置
+  retry:
+    max_attempts: 3
+    backoff_interval: 5s
+    
+  # SSL/TLS配置
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+    
+# 设备配置
+device:
+  # 设备发现配置
+  discovery:
+    enabled: true
+    interval: 60s
+    
+  # 设备监控配置
+  monitoring:
+    enabled: true
+    interval: 30s
+    
+  # 设备同步配置
+  sync:
+    enabled: true
+    interval: 300s
+    
+# 参数配置
+parameter:
+  # 参数缓存配置
+  cache:
+    enabled: true
+    ttl: 3600s
+    
+  # 参数验证配置
+  validation:
+    enabled: true
+    strict_mode: false
+    
+# 操作日志配置
+operation_log:
+  # 日志保留配置
+  retention:
+    enabled: true
+    days: 90
+    
+  # 日志压缩配置
+  compression:
+    enabled: true
+    algorithm: "gzip"

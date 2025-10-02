@@ -88,6 +88,13 @@ func WithSessionTimeout(duration time.Duration) SessionOption {
 	}
 }
 
+// WithSessionState sets the state of a session.
+func WithSessionState(state SessionState) SessionOption {
+	return func(info *SessionInfo) {
+		info.State = state
+	}
+}
+
 // WithSessionMetadata adds metadata to a session.
 func WithSessionMetadata(key string, value interface{}) SessionOption {
 	return func(info *SessionInfo) {

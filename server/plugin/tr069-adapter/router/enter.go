@@ -1,7 +1,10 @@
 package router
 
 type RouterGroup struct {
-	TR069Router
+	DeviceRouter
+	ParameterRouter
+	SessionRouter
+	OperationLogRouter
 }
 
 var RouterGroupApp = new(RouterGroup)

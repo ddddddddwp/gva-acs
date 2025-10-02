@@ -5,9 +5,9 @@ package interfaces
 // Parameter represents a TR069 parameter with its name, value and type.
 // Parameter 表示一个 TR069 参数，包含其名称、值和类型。
 type Parameter struct {
- Name  string      `json:"name"`
- Value interface{} `json:"value"`
- Type  string      `json:"type"`
+	Name  string      `json:"name"`
+	Value interface{} `json:"value"`
+	Type  string      `json:"type"`
 }
 
 // Attribute represents an XML attribute.
@@ -27,30 +27,31 @@ type Message struct {
 	SessionID      string      `json:"sessionId,omitempty"`
 	HoldRequests   bool        `json:"holdRequests,omitempty"`
 	NoMoreRequests bool        `json:"noMoreRequests,omitempty"`
-	
+
 	// Inform specific fields
-	DeviceID      *DeviceID `json:"deviceId,omitempty"`
-	Events        []Event   `json:"events,omitempty"`
-	MaxEnvelopes  int       `json:"maxEnvelopes,omitempty"`
-	CurrentTime   string    `json:"currentTime,omitempty"`
-	RetryCount    int       `json:"retryCount,omitempty"`
-	
+	DeviceID     *DeviceID `json:"deviceId,omitempty"`
+	Events       []Event   `json:"events,omitempty"`
+	MaxEnvelopes int       `json:"maxEnvelopes,omitempty"`
+	CurrentTime  string    `json:"currentTime,omitempty"`
+	RetryCount   int       `json:"retryCount,omitempty"`
+
 	// Stream parsing fields
-	Content        []string    `json:"content,omitempty"`
-	EnvelopeStart  bool        `json:"envelopeStart,omitempty"`
-	EnvelopeEnd    bool        `json:"envelopeEnd,omitempty"`
-	HasHeader      bool        `json:"hasHeader,omitempty"`
-	HasBody        bool        `json:"hasBody,omitempty"`
-	EnvelopeAttrs  []Attribute `json:"envelopeAttrs,omitempty"`
+	Content       []string    `json:"content,omitempty"`
+	EnvelopeStart bool        `json:"envelopeStart,omitempty"`
+	EnvelopeEnd   bool        `json:"envelopeEnd,omitempty"`
+	HasHeader     bool        `json:"hasHeader,omitempty"`
+	HasBody       bool        `json:"hasBody,omitempty"`
+	EnvelopeAttrs []Attribute `json:"envelopeAttrs,omitempty"`
+	Params        map[string]interface{}
 }
 
 // DeviceID represents a device identifier.
 // DeviceID 表示设备标识符。
 type DeviceID struct {
- Manufacturer string `json:"manufacturer"`
- OUI          string `json:"oui"`
- ProductClass string `json:"productClass"`
- SerialNumber string `json:"serialNumber"`
+	Manufacturer string `json:"manufacturer"`
+	OUI          string `json:"oui"`
+	ProductClass string `json:"productClass"`
+	SerialNumber string `json:"serialNumber"`
 }
 
 // Event type is defined in event.go to avoid duplication
@@ -58,30 +59,30 @@ type DeviceID struct {
 // Fault represents a TR069 fault response.
 // Fault 表示一个 TR069 故障响应。
 type Fault struct {
- FaultCode   int    `json:"faultCode"`
- FaultString string `json:"faultString"`
+	FaultCode   int    `json:"faultCode"`
+	FaultString string `json:"faultString"`
 }
 
 // Common TR069 RPC methods
 // 常见的 TR069 RPC 方法
 const (
- MethodInform               = "cwmp:Inform"
- MethodGetRPCMethods        = "cwmp:GetRPCMethods"
- MethodGetParameterValues   = "cwmp:GetParameterValues"
- MethodSetParameterValues   = "cwmp:SetParameterValues"
- MethodGetParameterNames    = "cwmp:GetParameterNames"
- MethodAddObject            = "cwmp:AddObject"
- MethodDeleteObject         = "cwmp:DeleteObject"
- MethodDownload             = "cwmp:Download"
- MethodUpload               = "cwmp:Upload"
- MethodReboot               = "cwmp:Reboot"
- MethodFactoryReset         = "cwmp:FactoryReset"
- MethodGetQueuedTransfers   = "cwmp:GetQueuedTransfers"
- MethodScheduleInform        = "cwmp:ScheduleInform"
- MethodSetVouchers          = "cwmp:SetVouchers"
- MethodGetOptions           = "cwmp:GetOptions"
- MethodTransferComplete     = "cwmp:TransferComplete"
- MethodAutonomousTransferComplete = "cwmp:AutonomousTransferComplete"
- MethodDUStateChangeComplete = "cwmp:DUStateChangeComplete"
- MethodAutonomousDUStateChangeComplete = "cwmp:AutonomousDUStateChangeComplete"
+	MethodInform                          = "cwmp:Inform"
+	MethodGetRPCMethods                   = "cwmp:GetRPCMethods"
+	MethodGetParameterValues              = "cwmp:GetParameterValues"
+	MethodSetParameterValues              = "cwmp:SetParameterValues"
+	MethodGetParameterNames               = "cwmp:GetParameterNames"
+	MethodAddObject                       = "cwmp:AddObject"
+	MethodDeleteObject                    = "cwmp:DeleteObject"
+	MethodDownload                        = "cwmp:Download"
+	MethodUpload                          = "cwmp:Upload"
+	MethodReboot                          = "cwmp:Reboot"
+	MethodFactoryReset                    = "cwmp:FactoryReset"
+	MethodGetQueuedTransfers              = "cwmp:GetQueuedTransfers"
+	MethodScheduleInform                  = "cwmp:ScheduleInform"
+	MethodSetVouchers                     = "cwmp:SetVouchers"
+	MethodGetOptions                      = "cwmp:GetOptions"
+	MethodTransferComplete                = "cwmp:TransferComplete"
+	MethodAutonomousTransferComplete      = "cwmp:AutonomousTransferComplete"
+	MethodDUStateChangeComplete           = "cwmp:DUStateChangeComplete"
+	MethodAutonomousDUStateChangeComplete = "cwmp:AutonomousDUStateChangeComplete"
 )

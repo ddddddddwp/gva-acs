@@ -1,7 +1,10 @@
 package service
 
 type ServiceGroup struct {
-	TR069Service
+	DeviceService
+	ParameterService
+	SessionService
+	TR069BridgeService
 }
 
 var ServiceGroupApp = new(ServiceGroup)

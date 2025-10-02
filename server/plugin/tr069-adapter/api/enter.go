@@ -1,7 +1,10 @@
 package api
 
 type ApiGroup struct {
-	TR069Api
+	DeviceApi
+	ParameterApi
+	SessionApi
+	OperationLogApi
 }
 
 var ApiGroupApp = new(ApiGroup)
