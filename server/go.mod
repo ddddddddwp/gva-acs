@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go v1.55.6
 	github.com/casbin/casbin/v2 v2.103.0
 	github.com/casbin/gorm-adapter/v3 v3.32.0
+	github.com/ddddddddwp/tr069-core-only v0.0.0-00010101000000-000000000000
 	github.com/dzwvip/gorm-oracle v0.1.2
 	github.com/fsnotify/fsnotify v1.8.0
 	github.com/gin-gonic/gin v1.10.0
@@ -187,3 +188,5 @@ require (
 	modernc.org/memory v1.8.2 // indirect
 	modernc.org/sqlite v1.34.5 // indirect
 )
+
+replace github.com/ddddddddwp/tr069-core-only => ./plugin/tr069/lib/core

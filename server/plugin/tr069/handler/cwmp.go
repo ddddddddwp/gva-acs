@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
-	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/lib/factory"
-	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
-	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
+
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
+	"github.com/ddddddddwp/tr069-core-only/factory"
+	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
+	"github.com/gin-gonic/gin"
 )
 
 var cwmpService = new(service.CWMPService)
@@ -19,8 +21,8 @@ func CWMPHandler(c *gin.Context) {
 		return
 	}
 
-	// 2. Parse using SDK
-	p := factory.NewParser()
+	// 2. Parse using Real SDK
+	p := factory.NewParser(tr069.WithStrictMode(false))
 	msg, err := p.ParseMessage(context.Background(), body)
 	if err != nil {
 		c.Status(http.StatusBadRequest)
@@ -34,7 +36,7 @@ func CWMPHandler(c *gin.Context) {
 		return
 	}
 
-	// 4. Build Response using SDK
+	// 4. Build Response using Real SDK
 	b := factory.NewBuilder()
 	respBytes, err := b.BuildMessage(context.Background(), respMsg)
 	if err != nil {

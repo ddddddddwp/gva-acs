@@ -249,3 +249,6 @@ zap:
     show-line: true
     log-in-console: true
     retention-day: -1
+tr069:
+    address: :7547
+    debug: true
