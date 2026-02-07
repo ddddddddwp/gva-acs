@@ -106,8 +106,8 @@ export default ({ mode }) => {
     esbuild,
     optimizeDeps,
     plugins: [
-      process.env.VITE_POSITION === 'open' &&
-      vueDevTools({ launchEditor: process.env.VITE_EDITOR }),
+      // process.env.VITE_POSITION === 'open' &&
+      // vueDevTools({ launchEditor: process.env.VITE_EDITOR }),
       legacyPlugin({
         targets: [
           'Android > 39',

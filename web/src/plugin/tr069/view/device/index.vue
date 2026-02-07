@@ -1,0 +1,229 @@
+<template>
+  <div class="device-list-container">
+    <div class="search-box">
+      <el-form :inline="true" :model="searchInfo" class="demo-form-inline">
+        <el-form-item label="序列号">
+          <el-input v-model="searchInfo.serialNumber" placeholder="请输入序列号" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" icon="el-icon-search" @click="onSubmit">查询</el-button>
+          <el-button icon="el-icon-refresh" @click="onReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </div>
+
+    <div class="table-box">
+      <div class="btn-list">
+        <el-button type="primary" icon="el-icon-plus" @click="openDialog">录入设备 (白名单)</el-button>
+      </div>
+
+      <el-table :data="tableData" style="width: 100%" v-loading="loading">
+        <el-table-column prop="ID" label="ID" width="60" />
+        <el-table-column prop="serialNumber" label="序列号" min-width="150" />
+        <el-table-column prop="oui" label="OUI" width="100" />
+        <el-table-column prop="productClass" label="产品类别" width="120" />
+        <el-table-column prop="softwareVer" label="软件版本" width="120" />
+        <el-table-column prop="ip" label="IP地址" width="130" />
+        <el-table-column label="在线状态" width="100">
+          <template #default="scope">
+            <el-tag :type="scope.row.status === 'online' ? 'success' : 'info'">
+              {{ scope.row.status === 'online' ? '在线' : '离线' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200" fixed="right">
+          <template #default="scope">
+            <el-button type="text" size="small" @click="viewDetail(scope.row)">详情/配置</el-button>
+            <el-button type="text" size="small" class="delete-btn" @click="deleteRow(scope.row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div class="pagination">
+        <el-pagination
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          :current-page="page"
+          :page-size="pageSize"
+          :page-sizes="[10, 30, 50, 100]"
+          :total="total"
+          @current-change="handleCurrentChange"
+          @size-change="handleSizeChange"
+        />
+      </div>
+    </div>
+
+    <!-- 录入设备弹窗 -->
+    <el-dialog title="录入设备 (白名单)" v-model="dialogFormVisible" width="500px">
+      <el-form :model="formData" ref="addForm" :rules="rules" label-width="100px">
+        <el-form-item label="序列号" prop="serialNumber">
+          <el-input v-model="formData.serialNumber" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="OUI" prop="oui">
+          <el-input v-model="formData.oui" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="formData.remark" type="textarea" />
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="dialogFormVisible = false">取 消</el-button>
+        <el-button type="primary" @click="enterDevice">确 定</el-button>
+      </div>
+    </el-dialog>
+
+    <!-- 设备详情抽屉 -->
+    <el-drawer
+      title="设备详情与配置"
+      v-model="drawerVisible"
+      direction="rtl"
+      size="50%">
+      <div class="drawer-content" v-if="currentRow.ID">
+        <!-- 基础信息 -->
+        <el-descriptions title="基础信息" :column="2" border class="mb-20">
+          <el-descriptions-item label="序列号">{{ currentRow.serialNumber }}</el-descriptions-item>
+          <el-descriptions-item label="OUI">{{ currentRow.oui }}</el-descriptions-item>
+          <el-descriptions-item label="IP地址">{{ currentRow.ip }}</el-descriptions-item>
+          <el-descriptions-item label="最后上线">{{ currentRow.lastOnline | formatDate }}</el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 基站无线参数组件 -->
+        <fap-info :device-id="currentRow.ID" />
+      </div>
+    </el-drawer>
+  </div>
+</template>
+
+<script>
+import { getDeviceList, createDevice, deleteDevice } from '@/plugin/tr069/api/device'
+import FapInfo from './components/fap-info.vue'
+import { formatTimeToStr } from '@/utils/date'
+import { ElMessage, ElMessageBox } from 'element-plus'
+
+export default {
+  name: 'DeviceList',
+  components: {
+    FapInfo
+  },
+  filters: {
+    formatDate(time) {
+      if (time && time !== '0001-01-01T00:00:00Z') {
+        return formatTimeToStr(time)
+      }
+      return '-'
+    }
+  },
+  data() {
+    return {
+      loading: false,
+      tableData: [],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      searchInfo: {
+        serialNumber: ''
+      },
+      dialogFormVisible: false,
+      formData: {
+        serialNumber: '',
+        oui: '',
+        remark: ''
+      },
+      rules: {
+        serialNumber: [{ required: true, message: '请输入序列号', trigger: 'blur' }],
+        oui: [{ required: true, message: '请输入OUI', trigger: 'blur' }]
+      },
+      drawerVisible: false,
+      currentRow: {}
+    }
+  },
+  created() {
+    this.getTableData()
+  },
+  methods: {
+    async getTableData() {
+      this.loading = true
+      const res = await getDeviceList({ page: this.page, pageSize: this.pageSize, ...this.searchInfo })
+      if (res.code === 0) {
+        this.tableData = res.data.list
+        this.total = res.data.total
+      }
+      this.loading = false
+    },
+    onSubmit() {
+      this.page = 1
+      this.getTableData()
+    },
+    onReset() {
+      this.searchInfo = { serialNumber: '' }
+      this.getTableData()
+    },
+    handleCurrentChange(val) {
+      this.page = val
+      this.getTableData()
+    },
+    handleSizeChange(val) {
+      this.pageSize = val
+      this.getTableData()
+    },
+    openDialog() {
+      this.formData = { serialNumber: '', oui: '', remark: '' }
+      this.dialogFormVisible = true
+    },
+    enterDevice() {
+      this.$refs.addForm.validate(async valid => {
+        if (valid) {
+          const res = await createDevice(this.formData)
+          if (res.code === 0) {
+            ElMessage.success('录入成功')
+            this.dialogFormVisible = false
+            this.getTableData()
+          }
+        }
+      })
+    },
+    deleteRow(row) {
+      ElMessageBox.confirm('确定要删除该设备吗?', '提示', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(async () => {
+        const res = await deleteDevice(row.ID)
+        if (res.code === 0) {
+          ElMessage.success('删除成功')
+          this.getTableData()
+        }
+      })
+    },
+    viewDetail(row) {
+      this.currentRow = row
+      this.drawerVisible = true
+    }
+  }
+}
+</script>
+
+<style scoped>
+.device-list-container {
+  padding: 20px;
+  background-color: #fff;
+}
+.search-box {
+  margin-bottom: 20px;
+}
+.table-box {
+  background-color: #fff;
+}
+.btn-list {
+  margin-bottom: 10px;
+}
+.delete-btn {
+  color: #f56c6c;
+}
+.drawer-content {
+  padding: 20px;
+}
+.mb-20 {
+  margin-bottom: 20px;
+}
+</style>

@@ -8,9 +8,21 @@ import (
 type DeviceRouter struct{}
 
 func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
-	deviceRouter := Router.Group("tr069/device")
+	// Device Base Management
+	deviceRouter := Router.Group("device")
 	deviceApi := new(api.DeviceApi)
 	{
 		deviceRouter.GET("list", deviceApi.GetDeviceList)
+		deviceRouter.POST("", deviceApi.CreateDevice)
+		deviceRouter.DELETE(":deviceId", deviceApi.DeleteDevice)
+	}
+
+	// FAP (Base Station) Specific Management
+	fapRouter := Router.Group("fap")
+	fapApi := new(api.FAPApi)
+	{
+		fapRouter.GET(":deviceId", fapApi.GetFAPInfo)
+		fapRouter.POST(":deviceId/sync", fapApi.SyncFAPInfo)
+		fapRouter.PUT(":deviceId", fapApi.ConfigureFAP)
 	}
 }

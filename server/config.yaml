@@ -189,7 +189,7 @@ qiniu:
 redis:
     name: ""
     addr: 127.0.0.1:6379
-    password: ""
+    password: "Qq791748"
     db: 0
     useCluster: false
     clusterAddrs:
@@ -228,7 +228,7 @@ system:
     iplimit-count: 15000
     iplimit-time: 3600
     use-multipoint: false
-    use-redis: false
+    use-redis: true
     use-mongo: false
     use-strict-auth: false
     disable-auto-migrate: false

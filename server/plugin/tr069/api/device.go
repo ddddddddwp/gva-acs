@@ -2,6 +2,7 @@ package api
 
 import (
 	"github.com/ddddddddwp/gva-acs/server/global"
+	"github.com/ddddddddwp/gva-acs/server/model/common/request"
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/gin-gonic/gin"
@@ -11,18 +12,88 @@ type DeviceApi struct{}
 
 // GetDeviceList
 // @Tags TR069
-// @Summary Get device list
+// @Summary 分页获取设备列表
 // @Security ApiKeyAuth
 // @accept application/json
 // @Produce application/json
-// @Success 200 {object} response.Response{data=object,msg=string} "Get device list"
+// @Param page query int true "页码"
+// @Param pageSize query int true "每页数量"
+// @Param serialNumber query string false "序列号"
+// @Success 200 {object} response.Response{data=response.PageResult,msg=string} "获取成功"
 // @Router /tr069/device/list [get]
 func (a *DeviceApi) GetDeviceList(c *gin.Context) {
+	var pageInfo request.PageInfo
+	_ = c.ShouldBindQuery(&pageInfo)
+	
+	// Search criteria
+	serialNumber := c.Query("serialNumber")
+
+	db := global.GVA_DB.Model(&model.Device{})
+	
+	if serialNumber != "" {
+		db = db.Where("serial_number LIKE ?", "%"+serialNumber+"%")
+	}
+
+	var total int64
+	db.Count(&total)
+
 	var devices []model.Device
-	err := global.GVA_DB.Find(&devices).Error
+	limit := pageInfo.PageSize
+	offset := pageInfo.PageSize * (pageInfo.Page - 1)
+	
+	err := db.Limit(limit).Offset(offset).Find(&devices).Error
 	if err != nil {
-		response.FailWithMessage("Failed to get device list", c)
+		response.FailWithMessage("获取设备列表失败", c)
 		return
 	}
-	response.OkWithData(devices, c)
+	
+	response.OkWithDetailed(response.PageResult{
+		List:     devices,
+		Total:    total,
+		Page:     pageInfo.Page,
+		PageSize: pageInfo.PageSize,
+	}, "获取成功", c)
+}
+
+// CreateDevice (Whitelist)
+// @Tags TR069
+// @Summary 录入设备(白名单)
+// @Security ApiKeyAuth
+// @accept application/json
+// @Produce application/json
+// @Param data body model.Device true "设备信息"
+// @Success 200 {object} response.Response{msg=string} "录入成功"
+// @Router /tr069/device [post]
+func (a *DeviceApi) CreateDevice(c *gin.Context) {
+	var device model.Device
+	_ = c.ShouldBindJSON(&device)
+	
+	// Force whitelist flag
+	device.IsWhite = true
+	
+	if err := global.GVA_DB.Create(&device).Error; err != nil {
+		global.GVA_LOG.Error("录入设备失败",  )
+		response.FailWithMessage("录入设备失败，可能序列号已存在", c)
+		return
+	}
+	response.OkWithMessage("录入成功", c)
+}
+
+// DeleteDevice
+// @Tags TR069
+// @Summary 删除设备
+// @Security ApiKeyAuth
+// @accept application/json
+// @Produce application/json
+// @Param deviceId path int true "设备ID"
+// @Success 200 {object} response.Response{msg=string} "删除成功"
+// @Router /tr069/device/{deviceId} [delete]
+func (a *DeviceApi) DeleteDevice(c *gin.Context) {
+	deviceId := c.Param("deviceId")
+	
+	if err := global.GVA_DB.Delete(&model.Device{}, deviceId).Error; err != nil {
+		response.FailWithMessage("删除失败", c)
+		return
+	}
+	response.OkWithMessage("删除成功", c)
 }

@@ -189,4 +189,4 @@ require (
 	modernc.org/sqlite v1.34.5 // indirect
 )
 
-replace github.com/ddddddddwp/tr069-core-only => ./plugin/tr069/lib/core
+replace github.com/ddddddddwp/tr069-core-only => ./plugin/tr069/lib/tr069-core-only

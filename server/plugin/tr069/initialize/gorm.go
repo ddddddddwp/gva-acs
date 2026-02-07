@@ -10,6 +10,7 @@ import (
 func Gorm(ctx context.Context) {
 	err := global.GVA_DB.WithContext(ctx).AutoMigrate(
 		new(model.Device),
+		new(model.FAPService),
 	)
 	if err != nil {
 		global.GVA_LOG.Error("TR069 Plugin AutoMigrate Failed", zap.Error(err))
