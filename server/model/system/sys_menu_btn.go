@@ -1,6 +1,6 @@
 package system
 
-import "github.com/flipped-aurora/gin-vue-admin/server/global"
+import "github.com/ddddddddwp/gva-acs/server/global"
 
 type SysBaseMenuBtn struct {
 	global.GVA_MODEL

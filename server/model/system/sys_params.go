@@ -2,7 +2,7 @@
 package system
 
 import (
-	"github.com/flipped-aurora/gin-vue-admin/server/global"
+	"github.com/ddddddddwp/gva-acs/server/global"
 )
 
 // 参数 结构体  SysParams

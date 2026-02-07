@@ -1,6 +1,6 @@
 package request
 
-import "github.com/flipped-aurora/gin-vue-admin/server/model/system"
+import "github.com/ddddddddwp/gva-acs/server/model/system"
 
 type SkillToolRequest struct {
 	Tool string `json:"tool"`

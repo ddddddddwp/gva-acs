@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/flipped-aurora/gin-vue-admin/server/utils/ast"
+	"github.com/ddddddddwp/gva-acs/server/utils/ast"
 	"github.com/pkg/errors"
 	"path"
 	"path/filepath"
@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flipped-aurora/gin-vue-admin/server/global"
-	common "github.com/flipped-aurora/gin-vue-admin/server/model/common/request"
-	model "github.com/flipped-aurora/gin-vue-admin/server/model/system"
-	request "github.com/flipped-aurora/gin-vue-admin/server/model/system/request"
-	"github.com/flipped-aurora/gin-vue-admin/server/utils"
+	"github.com/ddddddddwp/gva-acs/server/global"
+	common "github.com/ddddddddwp/gva-acs/server/model/common/request"
+	model "github.com/ddddddddwp/gva-acs/server/model/system"
+	request "github.com/ddddddddwp/gva-acs/server/model/system/request"
+	"github.com/ddddddddwp/gva-acs/server/utils"
 
 	"go.uber.org/zap"
 )
