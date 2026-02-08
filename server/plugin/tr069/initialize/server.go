@@ -2,8 +2,8 @@ package initialize
 
 import (
 	"github.com/ddddddddwp/gva-acs/server/global"
-	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/handler"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/handler"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -19,6 +19,7 @@ func StartTR069Server() {
 
 	// Register CWMP Handler
 	engine.POST("/", handler.CWMPHandler)
+	engine.POST("/acs", handler.CWMPHandler)
 
 	go func() {
 		global.GVA_LOG.Info("Starting TR069 Server", zap.String("address", addr))

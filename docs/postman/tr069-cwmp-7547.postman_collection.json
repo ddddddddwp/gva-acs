@@ -1,0 +1,148 @@
+{
+  "info": {
+    "_postman_id": "e7d5b1d0-7b29-4f12-9d73-4b9feadfe0f1",
+    "name": "TR069 CWMP (7547) - Smoke Test",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 - Inform (BOOT)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "text/xml; charset=utf-8" }
+        ],
+        "url": {
+          "raw": "{{cwmpBaseUrl}}/",
+          "host": ["{{cwmpBaseUrl}}"],
+          "path": [""]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<soap_env:Envelope xmlns:soap_env=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:soap_enc=\"http://schemas.xmlsoap.org/soap/encoding/\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:cwmp=\"urn:dslforum-org:cwmp-1-0\">\n  <soap_env:Header>\n    <cwmp:ID soap_env:mustUnderstand=\"1\">abc</cwmp:ID>\n  </soap_env:Header>\n  <soap_env:Body>\n    <cwmp:Inform>\n      <DeviceId>\n        <Manufacturer>{{manufacturer}}</Manufacturer>\n        <OUI>{{oui}}</OUI>\n        <ProductClass>{{productClass}}</ProductClass>\n        <SerialNumber>{{serialNumber}}</SerialNumber>\n      </DeviceId>\n      <Event soap_enc:arrayType=\"cwmp:EventStruct[1]\">\n        <EventStruct>\n          <EventCode>1 BOOT</EventCode>\n          <CommandKey></CommandKey>\n        </EventStruct>\n      </Event>\n      <MaxEnvelopes>1</MaxEnvelopes>\n      <CurrentTime>2023-10-27T10:00:00Z</CurrentTime>\n      <RetryCount>0</RetryCount>\n      <ParameterList soap_enc:arrayType=\"cwmp:ParameterValueStruct[1]\">\n        <ParameterValueStruct>\n          <Name>Device.RootDataModelVersion</Name>\n          <Value xsi:type=\"xsd:string\">2.0</Value>\n        </ParameterValueStruct>\n      </ParameterList>\n    </cwmp:Inform>\n  </soap_env:Body>\n</soap_env:Envelope>"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "pm.test('Has InformResponse', function () {",
+              "  pm.expect(pm.response.text()).to.include('InformResponse');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Poll (empty body)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "text/xml; charset=utf-8" }
+        ],
+        "url": {
+          "raw": "{{cwmpBaseUrl}}/",
+          "host": ["{{cwmpBaseUrl}}"],
+          "path": [""]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "const text = pm.response.text();",
+              "const m = text.match(/<ID>([^<]+)<\\/ID>/);",
+              "pm.test('Extract cwmpId', function () {",
+              "  pm.expect(m && m[1]).to.be.ok;",
+              "});",
+              "if (m && m[1]) {",
+              "  pm.environment.set('cwmpId', m[1]);",
+              "}",
+              "pm.test('Has GetParameterValues (boot onboarding)', function () {",
+              "  pm.expect(text).to.include('GetParameterValues');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - GPV Response (SerialNumber)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "text/xml; charset=utf-8" }
+        ],
+        "url": {
+          "raw": "{{cwmpBaseUrl}}/",
+          "host": ["{{cwmpBaseUrl}}"],
+          "path": [""]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<soap_env:Envelope xmlns:soap_env=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:soap_enc=\"http://schemas.xmlsoap.org/soap/encoding/\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:cwmp=\"urn:dslforum-org:cwmp-1-0\">\n  <soap_env:Header>\n    <cwmp:ID soap_env:mustUnderstand=\"1\">{{cwmpId}}</cwmp:ID>\n  </soap_env:Header>\n  <soap_env:Body>\n    <cwmp:GetParameterValuesResponse>\n      <ParameterList soap_enc:arrayType=\"cwmp:ParameterValueStruct[1]\">\n        <ParameterValueStruct>\n          <Name>Device.DeviceInfo.SerialNumber</Name>\n          <Value xsi:type=\"xsd:string\">{{serialNumber}}</Value>\n        </ParameterValueStruct>\n      </ParameterList>\n    </cwmp:GetParameterValuesResponse>\n  </soap_env:Body>\n</soap_env:Envelope>"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200 or 204', function () {",
+              "  pm.expect([200, 204]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Poll again (should be 204 if no pending cmd)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "text/xml; charset=utf-8" }
+        ],
+        "url": {
+          "raw": "{{cwmpBaseUrl}}/",
+          "host": ["{{cwmpBaseUrl}}"],
+          "path": [""]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204 or 200', function () {",
+              "  pm.expect([200, 204]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+
