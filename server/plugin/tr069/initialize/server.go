@@ -1,9 +1,13 @@
 package initialize
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/ddddddddwp/gva-acs/server/global"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/handler"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -11,11 +15,60 @@ import (
 func StartTR069Server() {
 	addr := tr069Global.GlobalConfig.Address
 	if addr == "" {
-		addr = ":7547" // Default port
+		addr = ":7458" // Default port
 	}
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+	engine.Use(middleware.EnsureRequestID())
+
+	if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.DumpRaw {
+		engine.Use(middleware.RawDump(middleware.RawDumpConfig{
+			MaxBytes:      tr069Global.GlobalConfig.DumpMaxBytes,
+			RedactAuth:    tr069Global.GlobalConfig.DumpRedactAuth,
+			RedactCookie:  tr069Global.GlobalConfig.DumpRedactCookie,
+			PrintResponse: false,
+		}))
+	}
+
+	engine.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		var statusColor, methodColor, resetColor string
+		if param.IsOutputColor() {
+			statusColor = param.StatusCodeColor()
+			methodColor = param.MethodColor()
+			resetColor = param.ResetColor()
+		}
+		if param.Latency > time.Minute {
+			param.Latency = param.Latency.Truncate(time.Second)
+		}
+		cwmpID := ""
+		if param.Keys != nil {
+			if v, ok := param.Keys["cwmpId"]; ok {
+				if s, ok := v.(string); ok {
+					cwmpID = s
+				}
+			}
+		}
+		reqPart := ""
+		if cwmpID != "" {
+			reqPart = " | cwmp:" + cwmpID
+		}
+		return fmt.Sprintf(
+			"[TR069] %s |%s %3d %s| %13v | %15s |%s %-7s %s %s%s\n%s",
+			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+			statusColor,
+			param.StatusCode,
+			resetColor,
+			param.Latency,
+			param.ClientIP,
+			methodColor,
+			param.Method,
+			param.Path,
+			resetColor,
+			reqPart,
+			param.ErrorMessage,
+		)
+	}))
 
 	// Register CWMP Handler
 	engine.POST("/", handler.CWMPHandler)

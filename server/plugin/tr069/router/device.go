@@ -25,4 +25,10 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 		fapRouter.POST(":deviceId/sync", fapApi.SyncFAPInfo)
 		fapRouter.PUT(":deviceId", fapApi.ConfigureFAP)
 	}
+
+	debugRouter := Router.Group("debug")
+	debugApi := new(api.DebugApi)
+	{
+		debugRouter.GET("trace/:requestId", debugApi.GetTrace)
+	}
 }

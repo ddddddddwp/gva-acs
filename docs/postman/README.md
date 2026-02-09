@@ -1,9 +1,9 @@
-# Postman 测试 TR-069 (CWMP) 7547
+# Postman 测试 TR-069 (CWMP) 7458
 
 ## 文件
 
-- Collection：`tr069-cwmp-7547.postman_collection.json`
-- Environment：`tr069-cwmp-7547.postman_environment.json`
+- Collection：`tr069-cwmp-7458.postman_collection.json`
+- Environment：`tr069-cwmp-7458.postman_environment.json`
 
 ## 导入
 
@@ -24,7 +24,7 @@
 
 ## 关键点
 
-- URL：默认 `http://127.0.0.1:7547/`，在环境变量 `cwmpBaseUrl` 可修改
+- URL：默认 `http://127.0.0.1:7458/`，在环境变量 `cwmpBaseUrl` 可修改
 - Header：所有请求都使用 `Content-Type: text/xml; charset=utf-8`
 - Cookie：Postman 默认会自动维护 Cookie（用于 `tr069_session` 会话粘连）。如果你关闭了 Cookie 管理，需要打开它，否则第 2/3/4 步可能无法延续会话
 
