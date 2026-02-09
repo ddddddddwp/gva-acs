@@ -22,6 +22,10 @@ type RawDumpConfig struct {
 	PrintResponse bool
 }
 
+// EnsureRequestID 是 TR069 调试辅助中间件：
+// - 优先使用请求头 X-Request-Id
+// - 否则自动生成 UUID，并写入 gin.Context(key="requestId")
+// 删除/禁用：从 TR069 server 的 middleware 链中移除此中间件即可。
 func EnsureRequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if v, ok := c.Get("requestId"); ok {
@@ -39,6 +43,12 @@ func EnsureRequestID() gin.HandlerFunc {
 	}
 }
 
+// RawDump 是 TR069 调试辅助中间件：把 CPE 发来的原始 HTTP 报文（请求行/头/Body）打印到终端。
+// 特点：
+// - 不依赖 TR069 解析，可用于定位 CPE 实际发送内容
+// - 使用 BEGIN/END 多行块输出，避免和访问日志混在同一行
+// - 支持脱敏 Authorization/Cookie，并限制最大打印字节数
+// 删除/禁用：从 TR069 server 的 middleware 链中移除或将 config.yaml 的 tr069.dumpRaw=false。
 func RawDump(cfg RawDumpConfig) gin.HandlerFunc {
 	maxBytes := cfg.MaxBytes
 	if maxBytes <= 0 {

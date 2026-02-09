@@ -13,6 +13,10 @@ type Entry struct {
 	Fields  map[string]string `json:"fields,omitempty"`
 }
 
+// Store 是 TR069 调试用 Trace 存储（内存环形队列风格）：
+// - key = requestId（来自 X-Request-Id 或自动生成的 UUID）
+// - value = 按时间顺序追加的阶段记录（解析、入库、下发等）
+// 删除/禁用：不影响核心业务，移除 trace.Add/trace.WithRequestID 调用以及 /tr069/debug/trace 接口即可。
 type Store struct {
 	mu         sync.Mutex
 	byRequest  map[string][]Entry
@@ -123,4 +127,3 @@ func Add(ctx context.Context, stage, message string, fields map[string]string) {
 func Get(ctx context.Context, requestID string) []Entry {
 	return Default.Get(requestID)
 }
-

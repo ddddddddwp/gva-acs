@@ -20,9 +20,14 @@ func StartTR069Server() {
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+	// TR069 调试辅助：确保每个请求都有 requestId（Header: X-Request-Id，缺省则自动生成）。
+	// 删除/禁用：移除这一行即可，不影响核心 TR069 处理逻辑。
 	engine.Use(middleware.EnsureRequestID())
 
 	if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.DumpRaw {
+		// TR069 调试辅助：原始报文 Dump（打印请求行/头/Body 到终端），默认关闭。
+		// 开关：config.yaml -> tr069.dumpRaw
+		// 删除/禁用：删除本段或将 dumpRaw=false 即可。
 		engine.Use(middleware.RawDump(middleware.RawDumpConfig{
 			MaxBytes:      tr069Global.GlobalConfig.DumpMaxBytes,
 			RedactAuth:    tr069Global.GlobalConfig.DumpRedactAuth,
