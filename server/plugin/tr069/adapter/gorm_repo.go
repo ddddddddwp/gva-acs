@@ -2,11 +2,14 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
+	"time"
+
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"gorm.io/gorm/clause"
-	"time"
 )
 
 type GormDeviceRepo struct{}
@@ -87,6 +90,41 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	if err != nil {
 		return "", err
 	}
+
+	// 2. Sync parameters from Inform to DataModelValue
+	if info != nil && len(info.Params) > 0 {
+		var dbDevice model.Device
+		if err := global.GVA_DB.WithContext(ctx).Select("id").Where("serial_number = ?", serial).First(&dbDevice).Error; err == nil {
+			now := time.Now()
+			var values []model.DataModelValue
+			for k, v := range info.Params {
+				// Filter out empty names and object paths
+				if k == "" || strings.HasSuffix(k, ".") {
+					continue
+				}
+
+				b, _ := json.Marshal(v)
+				values = append(values, model.DataModelValue{
+					DeviceID:        dbDevice.ID,
+					Name:            k,
+					ValueJSON:       b,
+					LastCollectedAt: now,
+					// ValueType is unknown here, leave it empty (or preserve existing on update)
+				})
+			}
+
+			if len(values) > 0 {
+				// Batch Upsert
+				// On conflict (device_id + name), update value_json and last_collected_at
+				// Preserve existing ValueType if present
+				_ = global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "device_id"}, {Name: "name"}},
+					DoUpdates: clause.AssignmentColumns([]string{"value_json", "last_collected_at", "updated_at"}),
+				}).CreateInBatches(values, 100).Error
+			}
+		}
+	}
+
 	return serial, nil
 }
 

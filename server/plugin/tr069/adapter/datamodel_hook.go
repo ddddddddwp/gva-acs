@@ -2,16 +2,16 @@ package adapter
 
 import (
 	"context"
-	"encoding/json"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
-	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
+	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/google/uuid"
 	"gorm.io/gorm/clause"
 )
@@ -173,6 +173,10 @@ func (h *DataModelHook) persistAndExpandGPN(ctx context.Context, deviceID uint, 
 	now := h.now()
 	for _, info := range infos {
 		if info.Name == "" {
+			continue
+		}
+		// Skip saving objects (paths ending with .)
+		if strings.HasSuffix(info.Name, ".") {
 			continue
 		}
 		rec := model.DataModelValue{

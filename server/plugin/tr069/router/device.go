@@ -44,5 +44,7 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 	dmApi := new(api.DataModelApi)
 	{
 		dmRouter.POST(":deviceId/sync", dmApi.FullSync)
+		dmRouter.GET(":deviceId/list", dmApi.GetDataModelList)
+		dmRouter.GET(":deviceId/structure", dmApi.GetDataModelStructure)
 	}
 }

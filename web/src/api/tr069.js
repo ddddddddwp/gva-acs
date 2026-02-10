@@ -79,3 +79,33 @@ export const tr069FullDataModelSync = (deviceId, data) => {
   })
 }
 
+// @Tags TR069
+// @Summary 查询设备的数据模型结构（仅对象路径）
+// @Security ApiKeyAuth
+// @accept application/json
+// @Produce application/json
+// @Param deviceId path int true "设备ID"
+// @Router /tr069/datamodel/{deviceId}/structure [get]
+export const tr069GetDataModelStructure = (deviceId) => {
+  return service({
+    url: `/tr069/datamodel/${deviceId}/structure`,
+    method: 'get'
+  })
+}
+
+// @Tags TR069
+// @Summary 查询设备指定路径下的参数值
+// @Security ApiKeyAuth
+// @accept application/json
+// @Produce application/json
+// @Param deviceId path int true "设备ID"
+// @Param prefix query string false "参数名前缀"
+// @Router /tr069/datamodel/{deviceId}/list [get]
+export const tr069GetDataModelList = (deviceId, params) => {
+  return service({
+    url: `/tr069/datamodel/${deviceId}/list`,
+    method: 'get',
+    params
+  })
+}
+
