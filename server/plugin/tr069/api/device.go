@@ -6,6 +6,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type DeviceApi struct{}
@@ -72,7 +73,7 @@ func (a *DeviceApi) CreateDevice(c *gin.Context) {
 	device.IsWhite = true
 	
 	if err := global.GVA_DB.Create(&device).Error; err != nil {
-		global.GVA_LOG.Error("录入设备失败",  )
+		global.GVA_LOG.Error("录入设备失败", zap.Error(err))
 		response.FailWithMessage("录入设备失败，可能序列号已存在", c)
 		return
 	}

@@ -31,4 +31,18 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 	{
 		debugRouter.GET("trace/:requestId", debugApi.GetTrace)
 	}
+
+	commandRouter := Router.Group("command")
+	commandApi := new(api.CommandApi)
+	{
+		commandRouter.POST(":deviceId/getRPCMethods", commandApi.SyncRPCMethods)
+		commandRouter.POST(":deviceId/getParameterValues", commandApi.GetParameterValues)
+		commandRouter.POST(":deviceId/setParameterValues", commandApi.SetParameterValues)
+	}
+
+	dmRouter := Router.Group("datamodel")
+	dmApi := new(api.DataModelApi)
+	{
+		dmRouter.POST(":deviceId/sync", dmApi.FullSync)
+	}
 }

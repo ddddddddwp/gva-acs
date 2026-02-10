@@ -87,15 +87,86 @@
           <el-descriptions-item label="最后上线">{{ currentRow.lastOnline | formatDate }}</el-descriptions-item>
         </el-descriptions>
 
+        <div class="mb-20">
+          <el-button type="primary" size="small" @click="handleGetRPCMethods" :loading="rpcLoading">GetRPCMethods</el-button>
+          <el-button type="primary" size="small" @click="openGPVDialog">GetParameterValues</el-button>
+          <el-button type="primary" size="small" @click="openSPVDialog">SetParameterValues</el-button>
+          <el-button type="primary" size="small" @click="openFullSyncDialog">全量同步</el-button>
+        </div>
+
         <!-- 基站无线参数组件 -->
         <fap-info :device-id="currentRow.ID" />
       </div>
     </el-drawer>
+
+    <el-dialog title="GetParameterValues" v-model="gpvDialogVisible" width="720px" append-to-body>
+      <el-form :model="gpvForm" label-width="140px">
+        <el-form-item label="参数路径(一行一个)">
+          <el-input v-model="gpvForm.pathsText" type="textarea" :rows="10" />
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="gpvDialogVisible = false">取 消</el-button>
+        <el-button type="primary" @click="submitGPV" :loading="gpvSubmitting">确 定</el-button>
+      </div>
+    </el-dialog>
+
+    <el-dialog title="SetParameterValues" v-model="spvDialogVisible" width="820px" append-to-body>
+      <el-form :model="spvForm" label-width="140px">
+        <el-form-item label="ParameterKey">
+          <el-input v-model="spvForm.parameterKey" />
+        </el-form-item>
+        <el-form-item label="参数列表">
+          <el-table :data="spvForm.parameters" size="small">
+            <el-table-column label="Name" min-width="360">
+              <template #default="scope">
+                <el-input v-model="scope.row.name" />
+              </template>
+            </el-table-column>
+            <el-table-column label="Type" min-width="160">
+              <template #default="scope">
+                <el-input v-model="scope.row.type" />
+              </template>
+            </el-table-column>
+            <el-table-column label="Value" min-width="220">
+              <template #default="scope">
+                <el-input v-model="scope.row.value" />
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="80">
+              <template #default="scope">
+                <el-button type="text" size="small" @click="removeSPVRow(scope.$index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="mt-3">
+            <el-button type="primary" size="small" @click="addSPVRow">新增一行</el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="spvDialogVisible = false">取 消</el-button>
+        <el-button type="primary" @click="submitSPV" :loading="spvSubmitting">确 定</el-button>
+      </div>
+    </el-dialog>
+
+    <el-dialog title="全量同步数据模型" v-model="fullSyncVisible" width="520px" append-to-body>
+      <el-form :model="fullSyncForm" label-width="140px">
+        <el-form-item label="最大深度">
+          <el-input-number v-model="fullSyncForm.maxDepth" :min="1" :max="64" />
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="fullSyncVisible = false">取 消</el-button>
+        <el-button type="primary" @click="submitFullSync" :loading="fullSyncSubmitting">确 定</el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script>
 import { getDeviceList, createDevice, deleteDevice } from '@/plugin/tr069/api/device'
+import { fullDataModelSync, getParameterValues, getRPCMethods, setParameterValues } from '@/plugin/tr069/api/command'
 import FapInfo from './components/fap-info.vue'
 import { formatTimeToStr } from '@/utils/date'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -134,7 +205,24 @@ export default {
         oui: [{ required: true, message: '请输入OUI', trigger: 'blur' }]
       },
       drawerVisible: false,
-      currentRow: {}
+      currentRow: {},
+      rpcLoading: false,
+      gpvDialogVisible: false,
+      gpvSubmitting: false,
+      gpvForm: {
+        pathsText: ''
+      },
+      spvDialogVisible: false,
+      spvSubmitting: false,
+      spvForm: {
+        parameterKey: '',
+        parameters: [{ name: '', type: 'xsd:string', value: '' }]
+      },
+      fullSyncVisible: false,
+      fullSyncSubmitting: false,
+      fullSyncForm: {
+        maxDepth: 16
+      }
     }
   },
   created() {
@@ -198,6 +286,100 @@ export default {
     viewDetail(row) {
       this.currentRow = row
       this.drawerVisible = true
+      this.gpvForm = { pathsText: 'Device.DeviceInfo.SerialNumber' }
+      this.spvForm = { parameterKey: '', parameters: [{ name: '', type: 'xsd:string', value: '' }] }
+    },
+    async handleGetRPCMethods() {
+      if (!this.currentRow.ID) return
+      this.rpcLoading = true
+      try {
+        const res = await getRPCMethods(this.currentRow.ID)
+        if (res.code === 0) {
+          ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
+        } else {
+          ElMessage.error(res.msg || '下发失败')
+        }
+      } finally {
+        this.rpcLoading = false
+      }
+    },
+    openGPVDialog() {
+      this.gpvDialogVisible = true
+    },
+    async submitGPV() {
+      if (!this.currentRow.ID) return
+      const paths = (this.gpvForm.pathsText || '')
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean)
+      if (paths.length === 0) {
+        ElMessage.warning('请填写参数路径')
+        return
+      }
+      this.gpvSubmitting = true
+      try {
+        const res = await getParameterValues(this.currentRow.ID, { paths })
+        if (res.code === 0) {
+          ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
+          this.gpvDialogVisible = false
+        } else {
+          ElMessage.error(res.msg || '下发失败')
+        }
+      } finally {
+        this.gpvSubmitting = false
+      }
+    },
+    openSPVDialog() {
+      this.spvDialogVisible = true
+    },
+    addSPVRow() {
+      this.spvForm.parameters = [...this.spvForm.parameters, { name: '', type: 'xsd:string', value: '' }]
+    },
+    removeSPVRow(idx) {
+      this.spvForm.parameters = this.spvForm.parameters.filter((_, i) => i !== idx)
+    },
+    async submitSPV() {
+      if (!this.currentRow.ID) return
+      const payload = {
+        parameterKey: this.spvForm.parameterKey,
+        parameters: (this.spvForm.parameters || [])
+          .map(p => ({ ...p, name: (p.name || '').trim(), type: (p.type || '').trim() }))
+          .filter(p => p.name)
+      }
+      if (payload.parameters.length === 0) {
+        ElMessage.warning('请至少填写一条参数')
+        return
+      }
+      this.spvSubmitting = true
+      try {
+        const res = await setParameterValues(this.currentRow.ID, payload)
+        if (res.code === 0) {
+          ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
+          this.spvDialogVisible = false
+        } else {
+          ElMessage.error(res.msg || '下发失败')
+        }
+      } finally {
+        this.spvSubmitting = false
+      }
+    },
+    openFullSyncDialog() {
+      this.fullSyncVisible = true
+    },
+    async submitFullSync() {
+      if (!this.currentRow.ID) return
+      this.fullSyncSubmitting = true
+      try {
+        const res = await fullDataModelSync(this.currentRow.ID, { maxDepth: this.fullSyncForm.maxDepth })
+        if (res.code === 0) {
+          ElMessage.success('已下发，等待设备上报')
+          this.fullSyncVisible = false
+        } else {
+          ElMessage.error(res.msg || '下发失败')
+        }
+      } finally {
+        this.fullSyncSubmitting = false
+      }
     }
   }
 }

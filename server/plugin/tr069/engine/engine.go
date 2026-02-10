@@ -63,7 +63,9 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 	reg := deps.ExecutorReg
 	if reg == nil {
 		r := defaults.NewExecutorRegistry()
+		r.Register("GetRPCMethods", &defaults.GetRPCMethodsExecutor{})
 		r.Register("GetParameterValues", &defaults.GetParameterValuesExecutor{})
+		r.Register("GetParameterNames", &defaults.GetParameterNamesExecutor{DefaultPath: "Device.", DefaultNextLvl: true})
 		r.Register("SetParameterValues", &defaults.SetParameterValuesExecutor{})
 		r.Register("Reboot", &defaults.RebootExecutor{})
 		r.Register("Download", &defaults.DownloadExecutor{})
@@ -80,7 +82,16 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 	}
 	hook := deps.Hook
 	if hook == nil {
-		hook = defaults.NewInflightCorrelationHook(inflight, cmdRepo)
+		base := defaults.NewInflightCorrelationHook(inflight, cmdRepo)
+		var ingest core.CommandIngest
+		if adapter.RedisAvailable() {
+			ingest = adapter.NewRedisCommandIngest("")
+		} else {
+			if mq, ok := queue.(*defaults.MemoryQueue); ok {
+				ingest = defaults.NewMemoryCommandIngest(mq)
+			}
+		}
+		hook = adapter.NewDataModelHook(base, inflight, ingest)
 	}
 	return core.NewEngine(core.Config{
 		Parser:          parser,

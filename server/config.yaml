@@ -252,7 +252,7 @@ zap:
 tr069:
     address: :7458
     debug: true
-    dumpRaw: false
+    dumpRaw: true
     dumpMaxBytes: 65536
     dumpRedactAuth: true
     dumpRedactCookie: true

@@ -13,11 +13,36 @@ import (
 )
 
 func StartTR069Server() {
+	if tr069Global.GlobalConfig != nil {
+		global.GVA_LOG.Info("TR069 Config Check",
+			zap.Bool("DumpRaw", tr069Global.GlobalConfig.DumpRaw),
+			zap.Int("DumpMaxBytes", tr069Global.GlobalConfig.DumpMaxBytes),
+		)
+		// Force print to stdout to ensure visibility even if logger is file-only
+		fmt.Printf("\n[TR069-DEBUG] Config Loaded - DumpRaw: %v\n", tr069Global.GlobalConfig.DumpRaw)
+	} else {
+		global.GVA_LOG.Error("TR069 GlobalConfig is nil")
+		fmt.Println("\n[TR069-DEBUG] GlobalConfig is nil")
+	}
+
 	addr := tr069Global.GlobalConfig.Address
 	if addr == "" {
 		addr = ":7458" // Default port
 	}
 
+	engine := SetupEngine()
+
+	go func() {
+		global.GVA_LOG.Info("Starting TR069 Server", zap.String("address", addr))
+		if err := engine.Run(addr); err != nil {
+			global.GVA_LOG.Error("TR069 Server failed to start", zap.Error(err))
+		}
+	}()
+}
+
+// SetupEngine creates and configures the gin engine for TR069
+// Exported for testing purposes
+func SetupEngine() *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	// TR069 调试辅助：确保每个请求都有 requestId（Header: X-Request-Id，缺省则自动生成）。
@@ -54,6 +79,9 @@ func StartTR069Server() {
 				}
 			}
 		}
+		if len(cwmpID) > 12 {
+			cwmpID = cwmpID[:12]
+		}
 		reqPart := ""
 		if cwmpID != "" {
 			reqPart = " | cwmp:" + cwmpID
@@ -79,10 +107,5 @@ func StartTR069Server() {
 	engine.POST("/", handler.CWMPHandler)
 	engine.POST("/acs", handler.CWMPHandler)
 
-	go func() {
-		global.GVA_LOG.Info("Starting TR069 Server", zap.String("address", addr))
-		if err := engine.Run(addr); err != nil {
-			global.GVA_LOG.Error("TR069 Server failed to start", zap.Error(err))
-		}
-	}()
+	return engine
 }
