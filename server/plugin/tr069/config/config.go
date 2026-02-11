@@ -16,4 +16,12 @@ type TR069Config struct {
 
 	// DumpRedactCookie: DumpRaw 时是否脱敏 Cookie。
 	DumpRedactCookie bool `mapstructure:"dumpRedactCookie" json:"dumpRedactCookie" yaml:"dumpRedactCookie"`
+	// InfoLogEnable: 是否将 TR069 原始报文额外写入文件（避免终端日志截断）
+	// 对应配置：config.yaml -> tr069.infoLogEnable
+	InfoLogEnable bool `mapstructure:"infoLogEnable" json:"infoLogEnable" yaml:"infoLogEnable"`
+
+	// InfoLogDir: TR069 原始报文日志根目录（相对 server 工作目录），默认 "./log"
+	// 文件路径格式：<InfoLogDir>/<YYYY-MM-DD>/tr069info.log
+	// 对应配置：config.yaml -> tr069.infoLogDir
+	InfoLogDir string `mapstructure:"infoLogDir" json:"infoLogDir" yaml:"infoLogDir"`
 }

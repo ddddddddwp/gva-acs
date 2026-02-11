@@ -79,9 +79,9 @@ rm -f "${BACKEND_LOG}" "${WEB_LOG}" >/dev/null 2>&1 || true
 (
   cd "${WEB_DIR}"
   if [[ "${1:-}" == "--no-tee" ]]; then
-    nohup npm run dev >"${WEB_LOG}" 2>&1 &
+    nohup npm run serve >"${WEB_LOG}" 2>&1 &
   else
-    stdbuf -oL -eL npm run dev 2>&1 | tee -a "${WEB_LOG}" &
+    stdbuf -oL -eL npm run serve 2>&1 | tee -a "${WEB_LOG}" &
   fi
   echo $! > "${WEB_PID_FILE}"
 )

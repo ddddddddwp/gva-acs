@@ -7,6 +7,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type DeviceApi struct{}
@@ -25,12 +26,12 @@ type DeviceApi struct{}
 func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 	var pageInfo request.PageInfo
 	_ = c.ShouldBindQuery(&pageInfo)
-	
+
 	// Search criteria
 	serialNumber := c.Query("serialNumber")
 
 	db := global.GVA_DB.Model(&model.Device{})
-	
+
 	if serialNumber != "" {
 		db = db.Where("serial_number LIKE ?", "%"+serialNumber+"%")
 	}
@@ -41,13 +42,13 @@ func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 	var devices []model.Device
 	limit := pageInfo.PageSize
 	offset := pageInfo.PageSize * (pageInfo.Page - 1)
-	
+
 	err := db.Limit(limit).Offset(offset).Find(&devices).Error
 	if err != nil {
 		response.FailWithMessage("获取设备列表失败", c)
 		return
 	}
-	
+
 	response.OkWithDetailed(response.PageResult{
 		List:     devices,
 		Total:    total,
@@ -68,10 +69,10 @@ func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 func (a *DeviceApi) CreateDevice(c *gin.Context) {
 	var device model.Device
 	_ = c.ShouldBindJSON(&device)
-	
+
 	// Force whitelist flag
 	device.IsWhite = true
-	
+
 	if err := global.GVA_DB.Create(&device).Error; err != nil {
 		global.GVA_LOG.Error("录入设备失败", zap.Error(err))
 		response.FailWithMessage("录入设备失败，可能序列号已存在", c)
@@ -91,8 +92,32 @@ func (a *DeviceApi) CreateDevice(c *gin.Context) {
 // @Router /tr069/device/{deviceId} [delete]
 func (a *DeviceApi) DeleteDevice(c *gin.Context) {
 	deviceId := c.Param("deviceId")
-	
-	if err := global.GVA_DB.Delete(&model.Device{}, deviceId).Error; err != nil {
+
+	var device model.Device
+	if err := global.GVA_DB.First(&device, deviceId).Error; err != nil {
+		response.FailWithMessage("设备不存在", c)
+		return
+	}
+
+	// Transaction to delete device and related data (alarms, values)
+	err := global.GVA_DB.Transaction(func(tx *gorm.DB) error {
+		// 1. Delete Alarms
+		if err := tx.Where("device_id = ?", device.ID).Delete(&model.Tr069Alarm{}).Error; err != nil {
+			return err
+		}
+		// 2. Delete DataModel Values
+		if err := tx.Where("device_id = ?", device.ID).Delete(&model.DataModelValue{}).Error; err != nil {
+			return err
+		}
+		// 3. Delete Device
+		if err := tx.Delete(&device).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		global.GVA_LOG.Error("删除设备失败", zap.Error(err))
 		response.FailWithMessage("删除失败", c)
 		return
 	}

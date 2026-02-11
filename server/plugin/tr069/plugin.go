@@ -17,6 +17,8 @@ type tr069Plugin struct{}
 func (p *tr069Plugin) Register(group *gin.Engine) {
 	initialize.Viper()
 	initialize.Gorm(context.Background())
+	initialize.Api(context.Background())
+	initialize.Menu(context.Background())
 	initialize.StartTR069Server()
 
 	adapter.StartRedisDispatcher(context.Background(), adapter.RedisDispatcherConfig{
@@ -30,6 +32,8 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 	r := group.Group("tr069")
 	deviceRouter := new(router.DeviceRouter)
 	deviceRouter.InitDeviceRouter(r)
+	alarmRouter := new(router.AlarmRouter)
+	alarmRouter.InitAlarmRouter(r)
 }
 
 func (p *tr069Plugin) RouterPath() string {

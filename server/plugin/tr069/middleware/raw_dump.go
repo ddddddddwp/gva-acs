@@ -10,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ddddddddwp/gva-acs/server/global"
+	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 type RawDumpConfig struct {
@@ -20,6 +23,7 @@ type RawDumpConfig struct {
 	RedactAuth    bool
 	RedactCookie  bool
 	PrintResponse bool
+	DumpToConsole bool // 新增：控制是否打印到终端
 }
 
 // EnsureRequestID 是 TR069 调试辅助中间件：
@@ -68,7 +72,16 @@ func RawDump(cfg RawDumpConfig) gin.HandlerFunc {
 		}
 
 		reqDump := dumpRequest(c.Request, reqBody, requestID, cfg.RedactAuth, cfg.RedactCookie, maxBytes)
-		_, _ = fmt.Fprintln(os.Stdout, reqDump)
+		if cfg.DumpToConsole {
+			_, _ = fmt.Fprintln(os.Stdout, reqDump)
+		}
+		if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.InfoLogEnable {
+			// 如果已开启独立文件日志，则不再打印到 GVA_LOG，避免 Zap 结构化日志将换行符转义为 \n 导致阅读困难
+			// if global.GVA_LOG != nil {
+			// 	global.GVA_LOG.Info("TR069 RAW REQUEST", zap.String("dump", reqDump))
+			// }
+			writeInfoLog(reqDump)
+		}
 		if requestID != "" {
 			trace.Default.Add(requestID, trace.Entry{
 				At:      time.Now(),
@@ -89,7 +102,15 @@ func RawDump(cfg RawDumpConfig) gin.HandlerFunc {
 
 		if capture != nil {
 			respDump := dumpResponse(c.Writer.Status(), c.Writer.Header(), capture.body.Bytes(), requestID, elapsed, maxBytes)
-			_, _ = fmt.Fprintln(os.Stdout, respDump)
+			if cfg.DumpToConsole {
+				_, _ = fmt.Fprintln(os.Stdout, respDump)
+			}
+			if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.InfoLogEnable {
+				// if global.GVA_LOG != nil {
+				// 	global.GVA_LOG.Info("TR069 RAW RESPONSE", zap.String("dump", respDump))
+				// }
+				writeInfoLog(respDump)
+			}
 			if requestID != "" {
 				trace.Default.Add(requestID, trace.Entry{
 					At:      time.Now(),
@@ -201,4 +222,30 @@ func truncateBytes(b []byte, max int) string {
 		return string(b)
 	}
 	return string(b[:max])
+}
+
+func writeInfoLog(s string) {
+	dir := tr069Global.GlobalConfig.InfoLogDir
+	if dir == "" {
+		dir = "./log"
+	}
+	date := time.Now().Format("2006-01-02")
+	base := dir + "/" + date
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		if global.GVA_LOG != nil {
+			global.GVA_LOG.Error("TR069 writeInfoLog mkdir failed", zap.Error(err), zap.String("dir", base))
+		}
+		return
+	}
+	path := base + "/tr069info.log"
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		if global.GVA_LOG != nil {
+			global.GVA_LOG.Error("TR069 writeInfoLog open failed", zap.Error(err), zap.String("path", path))
+		}
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(s)
+	_, _ = f.WriteString("\n")
 }

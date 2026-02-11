@@ -17,9 +17,15 @@ func StartTR069Server() {
 		global.GVA_LOG.Info("TR069 Config Check",
 			zap.Bool("DumpRaw", tr069Global.GlobalConfig.DumpRaw),
 			zap.Int("DumpMaxBytes", tr069Global.GlobalConfig.DumpMaxBytes),
+			zap.Bool("InfoLogEnable", tr069Global.GlobalConfig.InfoLogEnable),
+			zap.String("InfoLogDir", tr069Global.GlobalConfig.InfoLogDir),
 		)
 		// Force print to stdout to ensure visibility even if logger is file-only
-		fmt.Printf("\n[TR069-DEBUG] Config Loaded - DumpRaw: %v\n", tr069Global.GlobalConfig.DumpRaw)
+		fmt.Printf("\n[TR069-DEBUG] Config Loaded - DumpRaw: %v InfoLogEnable: %v InfoLogDir: %s\n",
+			tr069Global.GlobalConfig.DumpRaw,
+			tr069Global.GlobalConfig.InfoLogEnable,
+			tr069Global.GlobalConfig.InfoLogDir,
+		)
 	} else {
 		global.GVA_LOG.Error("TR069 GlobalConfig is nil")
 		fmt.Println("\n[TR069-DEBUG] GlobalConfig is nil")
@@ -49,7 +55,7 @@ func SetupEngine() *gin.Engine {
 	// 删除/禁用：移除这一行即可，不影响核心 TR069 处理逻辑。
 	engine.Use(middleware.EnsureRequestID())
 
-	if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.DumpRaw {
+	if tr069Global.GlobalConfig != nil && (tr069Global.GlobalConfig.DumpRaw || tr069Global.GlobalConfig.InfoLogEnable) {
 		// TR069 调试辅助：原始报文 Dump（打印请求行/头/Body 到终端），默认关闭。
 		// 开关：config.yaml -> tr069.dumpRaw
 		// 删除/禁用：删除本段或将 dumpRaw=false 即可。
@@ -58,6 +64,7 @@ func SetupEngine() *gin.Engine {
 			RedactAuth:    tr069Global.GlobalConfig.DumpRedactAuth,
 			RedactCookie:  tr069Global.GlobalConfig.DumpRedactCookie,
 			PrintResponse: false,
+			DumpToConsole: tr069Global.GlobalConfig.DumpRaw,
 		}))
 	}
 

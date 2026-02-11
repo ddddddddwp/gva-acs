@@ -84,7 +84,7 @@ hua-wei-obs:
     access-key: you-access-key
     secret-key: you-secret-key
 jwt:
-    signing-key: 5fc155b8-daf6-4f67-9d31-d1d77ffb954d
+    signing-key: 679fdd49-3ac7-4995-8ab6-25bafc579a99
     expires-time: 7d
     buffer-time: 1d
     issuer: qmPlus
@@ -252,7 +252,11 @@ zap:
 tr069:
     address: :7458
     debug: true
-    dumpRaw: true
-    dumpMaxBytes: 65536
+    dumpRaw: true           # [终端开关] true: 在控制台打印原始报文; false: 关闭控制台输出
+    # dumpMaxBytes: 日志打印的最大字节数，防止报文过大刷屏（默认65536即64KB，推荐1048576即1MB以防截断）
+    dumpMaxBytes: 1048576
     dumpRedactAuth: true
     dumpRedactCookie: true
+    infoLogEnable: true     # [文件开关] true: 写入 tr069info.log; false: 关闭文件写入
+    infoLogDir: ./log       # 日志文件存储路径 (默认 ./log/YYYY-MM-DD/tr069info.log)
+ 

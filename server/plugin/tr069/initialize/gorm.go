@@ -15,6 +15,8 @@ func Gorm(ctx context.Context) {
 		new(model.DataModelValue),
 		new(model.DeviceRPCMethods),
 		new(model.FAPService),
+		new(model.Tr069Alarm),
+		new(model.Tr069AlarmEvent),
 	)
 	if err != nil {
 		global.GVA_LOG.Error("TR069 Plugin AutoMigrate Failed", zap.Error(err))
