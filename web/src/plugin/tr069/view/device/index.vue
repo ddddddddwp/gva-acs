@@ -6,36 +6,36 @@
           <el-input v-model="searchInfo.serialNumber" placeholder="请输入序列号" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" icon="el-icon-search" @click="onSubmit">查询</el-button>
-          <el-button icon="el-icon-refresh" @click="onReset">重置</el-button>
+          <el-button type="primary" :icon="Search" @click="onSubmit">查询</el-button>
+          <el-button :icon="Refresh" @click="onReset">重置</el-button>
         </el-form-item>
       </el-form>
     </div>
 
     <div class="table-box">
       <div class="btn-list">
-        <el-button type="primary" icon="el-icon-plus" @click="openDialog">录入设备 (白名单)</el-button>
+        <el-button type="primary" :icon="Plus" @click="openDialog">录入设备 (白名单)</el-button>
       </div>
 
       <el-table :data="tableData" style="width: 100%" v-loading="loading">
-        <el-table-column prop="ID" label="ID" width="60" />
-        <el-table-column prop="serialNumber" label="序列号" min-width="150" />
-        <el-table-column prop="oui" label="OUI" width="100" />
-        <el-table-column prop="productClass" label="产品类别" width="120" />
-        <el-table-column prop="softwareVer" label="软件版本" width="120" />
-        <el-table-column prop="ip" label="IP地址" width="130" />
-        <el-table-column label="在线状态" width="100">
+        <el-table-column prop="ID" label="ID" width="80" />
+        <el-table-column prop="serialNumber" label="序列号" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="oui" label="OUI" width="120" show-overflow-tooltip />
+        <el-table-column prop="productClass" label="产品类别" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="softwareVer" label="软件版本" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="ip" label="IP地址" width="140" show-overflow-tooltip />
+        <el-table-column label="在线状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.status === 'online' ? 'success' : 'info'">
+            <el-tag :type="scope.row.status === 'online' ? 'success' : 'info'" effect="light">
               {{ scope.row.status === 'online' ? '在线' : '离线' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right" align="center">
           <template #default="scope">
-            <el-button type="text" size="small" @click="viewDetail(scope.row)">详情/配置</el-button>
-            <el-button type="text" size="small" @click="openDataModelFromRow(scope.row)">参数树</el-button>
-            <el-button type="text" size="small" class="delete-btn" @click="deleteRow(scope.row)">删除</el-button>
+            <el-button type="primary" link :icon="View" @click="viewDetail(scope.row)">详情</el-button>
+            <el-button type="primary" link :icon="Connection" @click="openDataModelFromRow(scope.row)">参数</el-button>
+            <el-button type="danger" link :icon="Delete" class="delete-btn" @click="deleteRow(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -88,12 +88,16 @@
           <el-descriptions-item label="最后上线">{{ currentRow.lastOnline | formatDate }}</el-descriptions-item>
         </el-descriptions>
 
-        <div class="mb-20">
-          <el-button type="primary" size="small" @click="handleGetRPCMethods" :loading="rpcLoading">GetRPCMethods</el-button>
-          <el-button type="primary" size="small" @click="openGPVDialog">GetParameterValues</el-button>
-          <el-button type="primary" size="small" @click="openSPVDialog">SetParameterValues</el-button>
-          <el-button type="primary" size="small" @click="openFullSyncDialog">全量同步</el-button>
-          <el-button type="primary" size="small" @click="openDataModelDrawer">参数树</el-button>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <el-button-group>
+            <el-button type="primary" plain size="small" :icon="Refresh" @click="handleGetRPCMethods" :loading="rpcLoading">刷新RPC</el-button>
+            <el-button type="primary" plain size="small" :icon="Download" @click="openGPVDialog">获取参数</el-button>
+            <el-button type="primary" plain size="small" :icon="Edit" @click="openSPVDialog">设置参数</el-button>
+          </el-button-group>
+          <el-button-group class="ml-2">
+             <el-button type="success" plain size="small" :icon="RefreshRight" @click="openFullSyncDialog">全量同步</el-button>
+             <el-button type="primary" size="small" :icon="Connection" @click="openDataModelFromRow(currentRow)">参数树</el-button>
+          </el-button-group>
         </div>
 
         <!-- 基站无线参数组件 -->
@@ -164,47 +168,28 @@
       </div>
     </el-dialog>
 
-    <el-drawer title="参数树" v-model="dmDrawerVisible" direction="rtl" size="80%" append-to-body>
-      <div style="display: flex; height: 100%">
-        <div style="width: 35%; height: 100%; border-right: 1px solid #ebeef5; padding-right: 12px; overflow: auto">
-          <el-tree
-            :data="dmTreeData"
-            :props="{ label: 'label', children: 'children' }"
-            node-key="id"
-            highlight-current
-            accordion
-            @node-click="handleDMNodeClick"
-          />
-        </div>
-        <div style="width: 65%; height: 100%; padding-left: 12px; display: flex; flex-direction: column">
-          <div v-if="dmCurrentPath" style="margin-bottom: 8px; font-weight: 600">{{ dmCurrentPath }}</div>
-          <el-table :data="dmTableData" stripe style="width: 100%" height="100%" v-loading="dmLoadingValues">
-            <el-table-column prop="name" label="参数名" min-width="320" show-overflow-tooltip />
-            <el-table-column label="值" min-width="200" show-overflow-tooltip>
-              <template #default="scope">
-                {{ formatDMValue(scope.row.valueJson) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="valueType" label="类型" width="120" />
-          </el-table>
-        </div>
-      </div>
-    </el-drawer>
+    <data-model-viewer
+      v-model="dmDrawerVisible"
+      :row="currentRow"
+    />
   </div>
 </template>
 
 <script>
 import { getDeviceList, createDevice, deleteDevice } from '@/plugin/tr069/api/device'
 import { fullDataModelSync, getParameterValues, getRPCMethods, setParameterValues } from '@/plugin/tr069/api/command'
-import { getDataModelStructure, getDataModelList } from '@/plugin/tr069/api/datamodel'
 import FapInfo from './components/fap-info.vue'
+import DataModelViewer from './components/data-model-viewer.vue'
 import { formatTimeToStr } from '@/utils/date'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh, Download, Edit, RefreshRight, Connection, View, Delete, Search, Plus } from '@element-plus/icons-vue'
 
 export default {
   name: 'DeviceList',
   components: {
-    FapInfo
+    FapInfo,
+    DataModelViewer,
+    Refresh, Download, Edit, RefreshRight, Connection, View, Delete, Search, Plus
   },
   filters: {
     formatDate(time) {
@@ -253,12 +238,7 @@ export default {
       fullSyncForm: {
         maxDepth: 16
       },
-      dmDrawerVisible: false,
-      dmTreeData: [],
-      dmTableData: [],
-      dmCurrentPath: '',
-      dmLoadingStructure: false,
-      dmLoadingValues: false
+      dmDrawerVisible: false
     }
   },
   created() {
@@ -417,76 +397,9 @@ export default {
         this.fullSyncSubmitting = false
       }
     },
-    async openDataModelDrawer() {
-      if (!this.currentRow.ID) return
-      this.dmDrawerVisible = true
-      this.dmTreeData = []
-      this.dmTableData = []
-      this.dmCurrentPath = ''
-      this.dmLoadingStructure = true
-      try {
-        const res = await getDataModelStructure(this.currentRow.ID)
-        if (res.code === 0 && Array.isArray(res.data)) {
-          this.dmTreeData = this.buildDMTree(res.data)
-        } else {
-          ElMessage.error(res.msg || '获取参数树失败')
-        }
-      } finally {
-        this.dmLoadingStructure = false
-      }
-    },
     openDataModelFromRow(row) {
       this.currentRow = row
-      this.openDataModelDrawer()
-    },
-    buildDMTree(paths) {
-      const root = []
-      const findOrCreate = (nodes, part, fullPath) => {
-        let node = nodes.find(n => n.label === part)
-        if (!node) {
-          node = {
-            id: fullPath,
-            label: part,
-            children: []
-          }
-          nodes.push(node)
-        }
-        return node
-      }
-      ;(paths || [])
-        .slice()
-        .sort()
-        .forEach(path => {
-          const parts = String(path).split('.').filter(Boolean)
-          let currentLevel = root
-          let currentPath = ''
-          parts.forEach(part => {
-            currentPath += part + '.'
-            const node = findOrCreate(currentLevel, part, currentPath)
-            currentLevel = node.children
-          })
-        })
-      return root
-    },
-    async handleDMNodeClick(node) {
-      if (!this.currentRow.ID || !node || !node.id) return
-      this.dmCurrentPath = node.id
-      this.dmLoadingValues = true
-      try {
-        const res = await getDataModelList(this.currentRow.ID, { prefix: node.id, page: 1, pageSize: 2000 })
-        if (res.code === 0 && res.data) {
-          this.dmTableData = res.data.list || []
-        } else {
-          ElMessage.error(res.msg || '获取参数值失败')
-        }
-      } finally {
-        this.dmLoadingValues = false
-      }
-    },
-    formatDMValue(v) {
-      if (v === null || v === undefined) return ''
-      if (typeof v === 'object') return JSON.stringify(v)
-      return String(v)
+      this.dmDrawerVisible = true
     }
   }
 }

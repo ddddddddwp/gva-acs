@@ -9,6 +9,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -103,23 +104,33 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 					continue
 				}
 
-				b, _ := json.Marshal(v)
+				valType := ""
+				if info.ParamTypes != nil {
+					valType = normalizeValueType(info.ParamTypes[k])
+				}
+				val := castValue(valType, v)
+				b, _ := json.Marshal(val)
 				values = append(values, model.DataModelValue{
 					DeviceID:        dbDevice.ID,
 					Name:            k,
 					ValueJSON:       b,
 					LastCollectedAt: now,
-					// ValueType is unknown here, leave it empty (or preserve existing on update)
+					ValueType:       valType,
 				})
 			}
 
 			if len(values) > 0 {
 				// Batch Upsert
 				// On conflict (device_id + name), update value_json and last_collected_at
-				// Preserve existing ValueType if present
+				// Preserve existing ValueType if Inform doesn't carry it
 				_ = global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
 					Columns:   []clause.Column{{Name: "device_id"}, {Name: "name"}},
-					DoUpdates: clause.AssignmentColumns([]string{"value_json", "last_collected_at", "updated_at"}),
+					DoUpdates: clause.Assignments(map[string]interface{}{
+						"value_type":        gorm.Expr("COALESCE(NULLIF(VALUES(value_type),''), value_type)"),
+						"value_json":        gorm.Expr("VALUES(value_json)"),
+						"last_collected_at": gorm.Expr("VALUES(last_collected_at)"),
+						"updated_at":        gorm.Expr("NOW()"),
+					}),
 				}).CreateInBatches(values, 100).Error
 			}
 		}

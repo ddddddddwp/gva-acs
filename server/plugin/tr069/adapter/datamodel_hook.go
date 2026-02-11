@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
@@ -149,7 +150,11 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 		if p.Name == "" {
 			continue
 		}
-		b, err := json.Marshal(p.Value)
+
+		valType := normalizeValueType(p.Type)
+		val := castValue(valType, p.Value)
+
+		b, err := json.Marshal(val)
 		if err != nil {
 			continue
 		}
@@ -157,7 +162,7 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 			DeviceID:        deviceID,
 			Name:            p.Name,
 			Writable:        false,
-			ValueType:       p.Type,
+			ValueType:       valType,
 			ValueJSON:       b,
 			LastCollectedAt: now,
 		}
@@ -326,6 +331,66 @@ func chunkStrings(in []string, n int) [][]string {
 func dedupKey(kind string, deviceKey string, seed string) string {
 	sum := sha1.Sum([]byte(kind + ":" + deviceKey + ":" + seed))
 	return "dm:" + kind + ":" + deviceKey + ":" + hex.EncodeToString(sum[:8])
+}
+
+func castValue(valType string, val interface{}) interface{} {
+	var s string
+	switch v := val.(type) {
+	case nil:
+		s = ""
+	case string:
+		s = v
+	case []byte:
+		s = string(v)
+	default:
+		return v
+	}
+
+	s = strings.TrimSpace(s)
+
+	switch valType {
+	case "boolean":
+		if s == "" {
+			return nil
+		}
+		return s == "1" || strings.ToLower(s) == "true"
+	case "int", "integer", "long":
+		if s == "" {
+			return nil
+		}
+		if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return v
+		}
+	case "unsignedInt", "unsignedLong":
+		if s == "" {
+			return nil
+		}
+		if v, err := strconv.ParseUint(s, 10, 64); err == nil {
+			return v
+		}
+	}
+
+	if valType == "string" {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func normalizeValueType(valType string) string {
+	valType = strings.TrimSpace(valType)
+	if valType == "" {
+		return ""
+	}
+	if i := strings.IndexByte(valType, ':'); i >= 0 {
+		return valType[i+1:]
+	}
+	return valType
 }
 
 var _ core.CorrelationHook = (*DataModelHook)(nil)

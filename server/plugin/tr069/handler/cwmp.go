@@ -93,6 +93,7 @@ func CWMPHandler(c *gin.Context) {
 	copyHeaderIfPresent(headers, c.Request, "X-Forwarded-Ssl")
 	copyHeaderIfPresent(headers, c.Request, "X-Real-Ip")
 	copyHeaderIfPresent(headers, c.Request, "X-TR069-Session")
+	copyHeaderIfPresent(headers, c.Request, "Authorization")
 
 	trace.Add(ctx, "engine.handle", "engine handle begin", map[string]string{
 		"hasCookie": strconv.FormatBool(headers["Cookie"] != ""),

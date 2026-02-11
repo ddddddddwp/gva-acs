@@ -83,6 +83,7 @@
   "/src/plugin/announcement/form/info.vue": "InfoForm",
   "/src/plugin/announcement/view/info.vue": "Info",
   "/src/plugin/email/view/index.vue": "Email",
+  "/src/plugin/tr069/view/device/components/data-model-viewer.vue": "DataModelViewer",
   "/src/plugin/tr069/view/device/components/fap-info.vue": "FapInfo",
   "/src/plugin/tr069/view/device/index.vue": "Index"
 }
