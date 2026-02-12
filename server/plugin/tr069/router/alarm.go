@@ -12,5 +12,7 @@ func (r *AlarmRouter) InitAlarmRouter(Router *gin.RouterGroup) {
 	alarmApi := new(api.AlarmApi)
 	{
 		alarmRouter.GET("list", alarmApi.GetAlarmList)
+		alarmRouter.GET("history", alarmApi.GetHistoryAlarms)
+		alarmRouter.GET("stats", alarmApi.GetAlarmStats)
 	}
 }

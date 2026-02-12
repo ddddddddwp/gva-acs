@@ -83,7 +83,8 @@
   "/src/plugin/announcement/form/info.vue": "InfoForm",
   "/src/plugin/announcement/view/info.vue": "Info",
   "/src/plugin/email/view/index.vue": "Email",
-  "/src/plugin/tr069/view/alarm/index.vue": "Tr069Alarm",
+  "/src/plugin/tr069/view/alarm/active.vue": "Tr069ActiveAlarm",
+  "/src/plugin/tr069/view/alarm/history.vue": "Tr069HistoryAlarm",
   "/src/plugin/tr069/view/device/components/data-model-viewer.vue": "DataModelViewer",
   "/src/plugin/tr069/view/device/components/fap-info.vue": "FapInfo",
   "/src/plugin/tr069/view/device/index.vue": "Index"

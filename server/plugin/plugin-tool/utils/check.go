@@ -47,10 +47,23 @@ func RegisterApis(apis ...system.SysApi) {
 
 	err := global.GVA_DB.Transaction(func(tx *gorm.DB) error {
 		for _, api := range apis {
-			err := tx.Model(system.SysApi{}).Where("path = ? AND method = ? AND api_group = ? ", api.Path, api.Method, api.ApiGroup).FirstOrCreate(&api).Error
+			var dbApi system.SysApi
+			err := tx.Model(system.SysApi{}).Where("path = ? AND method = ? AND api_group = ? ", api.Path, api.Method, api.ApiGroup).FirstOrCreate(&dbApi, system.SysApi{
+				Path:     api.Path,
+				Method:   api.Method,
+				ApiGroup: api.ApiGroup,
+			}).Error
 			if err != nil {
 				zap.L().Error("注册API失败", zap.Error(err), zap.String("api", api.Path), zap.String("method", api.Method), zap.String("apiGroup", api.ApiGroup))
 				return err
+			}
+			// 如果 Description 不一致，则更新
+			if dbApi.Description != api.Description {
+				dbApi.Description = api.Description
+				if err := tx.Save(&dbApi).Error; err != nil {
+					zap.L().Error("更新API描述失败", zap.Error(err), zap.String("api", api.Path))
+					return err
+				}
 			}
 		}
 		return nil
@@ -135,4 +148,3 @@ func GetPluginData(pluginName string) ([]system.SysApi, []system.SysBaseMenu, []
 	defer rw.Unlock()
 	return ApiMap[pluginName], MenuMap[pluginName], DictMap[pluginName]
 }
-

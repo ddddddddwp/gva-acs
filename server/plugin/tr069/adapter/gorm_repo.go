@@ -167,93 +167,134 @@ func (r *GormDeviceRepo) SyncAlarms(ctx context.Context, deviceID string, alarms
 		return nil
 	}
 
-	recv := len(alarms)
-	created := 0
-	updated := 0
-	ignored := 0
-
-	// Find the device numeric ID
 	var dbDevice model.Device
 	if err := global.GVA_DB.WithContext(ctx).Select("id").Where("serial_number = ?", deviceID).First(&dbDevice).Error; err != nil {
-		// If device not found (which is weird as Upsert happened), we can't link
-		// But Upsert returns serial, so we query by serial
 		return err
 	}
 
+	var toInsert []model.Tr069Alarm
+	var toClear []string
+	stats := struct {
+		Inserted int
+		Cleared  int
+		Skipped  int
+		Errors   int
+	}{}
+
 	for _, a := range alarms {
-		// Append event history (no dedup)
-		evt := model.Tr069AlarmEvent{
-			DeviceID:         dbDevice.ID,
-			SerialNumber:     deviceID,
-			AlarmIdentifier:  a.AlarmIdentifier,
-			NotificationType: a.NotificationType,
-			Severity:         a.PerceivedSeverity,
-			SpecificProblem:  a.SpecificProblem,
-			ProbableCause:    a.ProbableCause,
-			EventType:        a.EventType,
-			AdditionalText:   a.AdditionalText,
-			AddInfo:          a.AdditionalInfo,
-			EventTime:        a.EventTime,
-		}
-		_ = global.GVA_DB.Create(&evt).Error
-
-		// Handle missing NotificationType for CurrentAlarm (treat as Active)
-		notifType := a.NotificationType
-		if notifType == "" && a.Source == "CurrentAlarm" {
-			notifType = "NewAlarm"
+		if a.Source == "QueuedEvent" {
+			stats.Skipped++
+			continue
 		}
 
-		if notifType == "NewAlarm" || notifType == "ChangedAlarm" {
-			// Create if not exists (Active)
-			var count int64
-			global.GVA_DB.Model(&model.Tr069Alarm{}).Where("alarm_identifier = ? AND status = ?", a.AlarmIdentifier, "Active").Count(&count)
-			if count == 0 {
-				m := model.Tr069Alarm{
-					DeviceID:         dbDevice.ID,
-					SerialNumber:     deviceID,
-					AlarmIdentifier:  a.AlarmIdentifier,
-					NotificationType: a.NotificationType,
-					Status:           "Active",
-					Severity:         a.PerceivedSeverity,
-					SpecificProblem:  a.SpecificProblem,
-					ProbableCause:    a.ProbableCause,
-					EventType:        a.EventType,
-					AdditionalText:   a.AdditionalText,
-					AddInfo:          a.AdditionalInfo,
-					StartTime:        a.EventTime,
-				}
-				if err := global.GVA_DB.Create(&m).Error; err == nil {
-					created++
-				} else {
-					ignored++
-				}
+		serialNum := a.SerialNumber
+		if serialNum == "" {
+			serialNum = deviceID
+		}
+
+		var status string
+		var endTime *time.Time
+		now := time.Now()
+
+		switch a.Source {
+		case "CurrentAlarm":
+			status = "Active"
+		case "ExpeditedEvent":
+			if a.NotificationType == "ClearedAlarm" {
+				status = "Cleared"
+				endTime = &now
+				toClear = append(toClear, a.AlarmIdentifier)
 			} else {
-				ignored++
+				status = "Active"
 			}
-		} else if notifType == "ClearedAlarm" {
-			// Update Active to Cleared
-			endTime := a.EventTime
-			res := global.GVA_DB.Model(&model.Tr069Alarm{}).
-				Where("alarm_identifier = ? AND status = ?", a.AlarmIdentifier, "Active").
-				Updates(map[string]interface{}{
-					"status":   "Cleared",
-					"end_time": endTime,
-				})
-			if res.Error == nil && res.RowsAffected > 0 {
-				updated++
-			} else {
-				ignored++
-			}
+		case "HistoryEvent":
+			status = "Cleared"
+			endTime = &now
+		default:
+			status = "Active"
+		}
+
+		alarm := model.Tr069Alarm{
+			DeviceID:              dbDevice.ID,
+			SerialNumber:          serialNum,
+			OUI:                   a.OUI,
+			AlarmIdentifier:       a.AlarmIdentifier,
+			Source:                a.Source,
+			NotificationType:      a.NotificationType,
+			Status:                status,
+			EventType:             a.EventType,
+			PerceivedSeverity:     a.PerceivedSeverity,
+			ProbableCause:         a.ProbableCause,
+			SpecificProblem:       a.SpecificProblem,
+			AdditionalText:        a.AdditionalText,
+			AdditionalInformation: a.AdditionalInfo,
+			ManagedObjectInstance: a.ManagedObjectInstance,
+			EventTime:             a.EventTime,
+			StartTime:             a.EventTime,
+			EndTime:               endTime,
+			LastChanged:           now,
+		}
+		toInsert = append(toInsert, alarm)
+	}
+
+	if len(toInsert) > 0 {
+		if err := r.batchUpsertAlarms(ctx, toInsert); err != nil {
+			global.GVA_LOG.Error("batchUpsertAlarms failed", zap.Error(err))
+			stats.Errors++
+		} else {
+			stats.Inserted = len(toInsert)
 		}
 	}
-	// Log summary
+
+	if len(toClear) > 0 {
+		now := time.Now()
+		res := global.GVA_DB.WithContext(ctx).Model(&model.Tr069Alarm{}).
+			Where("alarm_identifier IN ?", toClear).
+			Where("status = ?", "Active").
+			Updates(map[string]interface{}{
+				"status":       "Cleared",
+				"end_time":     now,
+				"last_changed": now,
+			})
+		if res.Error != nil {
+			global.GVA_LOG.Error("clearAlarms failed", zap.Error(res.Error))
+			stats.Errors++
+		} else {
+			stats.Cleared = int(res.RowsAffected)
+		}
+	}
+
 	global.GVA_LOG.Info("SyncAlarms summary",
-		zap.Int("received", recv),
-		zap.Int("created", created),
-		zap.Int("updated", updated),
-		zap.Int("ignored", ignored),
+		zap.Int("received", len(alarms)),
+		zap.Int("inserted", stats.Inserted),
+		zap.Int("cleared", stats.Cleared),
+		zap.Int("skipped(QueuedEvent)", stats.Skipped),
+		zap.Int("errors", stats.Errors),
 	)
 	return nil
+}
+
+func (r *GormDeviceRepo) batchUpsertAlarms(ctx context.Context, alarms []model.Tr069Alarm) error {
+	if len(alarms) == 0 {
+		return nil
+	}
+
+	return global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "alarm_identifier"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"notification_type", "status", "event_type", "perceived_severity",
+			"probable_cause", "specific_problem", "additional_text",
+			"additional_information", "managed_object_instance",
+			"event_time", "last_changed",
+		}),
+	}).CreateInBatches(alarms, 100).Error
+}
+
+func extractOUI(deviceID string) string {
+	if len(deviceID) >= 6 {
+		return deviceID[:6]
+	}
+	return ""
 }
 
 func (r *GormDeviceRepo) UpdateOnlineStatus(ctx context.Context, deviceID string, status bool, lastSeen time.Time) error {
