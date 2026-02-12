@@ -210,6 +210,14 @@ watch(() => props.modelValue, (val) => {
   }
 })
 
+watch(() => props.row?.ID, (newId, oldId) => {
+  if (props.modelValue && newId && newId !== oldId) {
+    refreshStructure()
+    currentPath.value = ''
+    tableData.value = []
+  }
+})
+
 const filterNode = (value, data) => {
   if (!value) return true
   return data.label.toLowerCase().includes(value.toLowerCase())

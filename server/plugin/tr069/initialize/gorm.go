@@ -2,7 +2,10 @@ package initialize
 
 import (
 	"context"
+
 	"github.com/ddddddddwp/gva-acs/server/global"
+	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	gormmiddleware "github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware/gorm_middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"go.uber.org/zap"
 )
@@ -20,6 +23,16 @@ func Gorm(ctx context.Context) {
 	)
 	if err != nil {
 		global.GVA_LOG.Error("TR069 Plugin AutoMigrate Failed", zap.Error(err))
+	}
+
+	if global.GVA_DB != nil {
+		if err := global.GVA_DB.Use(gormmiddleware.New(gormmiddleware.RulesForPrefixDeny(
+			"tr069_datamodel_values",
+			"Name",
+			tr069Global.DataModelValueDenyPrefixes,
+		))); err != nil {
+			global.GVA_LOG.Error("TR069 DataModelValue IngestFilter Init Failed", zap.Error(err))
+		}
 	}
 }
 

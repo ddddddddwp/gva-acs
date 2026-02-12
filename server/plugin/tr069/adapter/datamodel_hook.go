@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	gormmiddleware "github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware/gorm_middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
@@ -150,6 +152,9 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 		if p.Name == "" {
 			continue
 		}
+		if gormmiddleware.DenyByPrefixes(p.Name, tr069Global.DataModelValueDenyPrefixes) {
+			continue
+		}
 
 		valType := normalizeValueType(p.Type)
 		val := castValue(valType, p.Value)
@@ -178,6 +183,9 @@ func (h *DataModelHook) persistAndExpandGPN(ctx context.Context, deviceID uint, 
 	now := h.now()
 	for _, info := range infos {
 		if info.Name == "" {
+			continue
+		}
+		if gormmiddleware.DenyByPrefixes(info.Name, tr069Global.DataModelValueDenyPrefixes) {
 			continue
 		}
 		// Skip saving objects (paths ending with .)
@@ -229,6 +237,9 @@ func (h *DataModelHook) persistAndExpandGPN(ctx context.Context, deviceID uint, 
 	leaves := make([]string, 0, len(infos))
 	for _, info := range infos {
 		if info.Name == "" {
+			continue
+		}
+		if gormmiddleware.DenyByPrefixes(info.Name, tr069Global.DataModelValueDenyPrefixes) {
 			continue
 		}
 		if strings.HasSuffix(info.Name, ".") {

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	gormmiddleware "github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware/gorm_middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"go.uber.org/zap"
@@ -126,6 +128,9 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 				if k == "" || strings.HasSuffix(k, ".") {
 					continue
 				}
+				if gormmiddleware.DenyByPrefixes(k, tr069Global.DataModelValueDenyPrefixes) {
+					continue
+				}
 
 				valType := ""
 				if info.ParamTypes != nil {
@@ -143,6 +148,15 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 			}
 
 			if len(values) > 0 {
+				if outAny, replaced := gormmiddleware.FilterForTable(values, "tr069_datamodel_values", gormmiddleware.RulesForPrefixDeny(
+					"tr069_datamodel_values",
+					"Name",
+					tr069Global.DataModelValueDenyPrefixes,
+				)); replaced {
+					if out, ok := outAny.([]model.DataModelValue); ok {
+						values = out
+					}
+				}
 				// Batch Upsert
 				// On conflict (device_id + name), update value_json and last_collected_at
 				// Preserve existing ValueType if Inform doesn't carry it

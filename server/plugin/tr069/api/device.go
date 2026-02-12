@@ -101,16 +101,16 @@ func (a *DeviceApi) DeleteDevice(c *gin.Context) {
 
 	// Transaction to delete device and related data (alarms, values)
 	err := global.GVA_DB.Transaction(func(tx *gorm.DB) error {
-		// 1. Delete Alarms
-		if err := tx.Where("device_id = ?", device.ID).Delete(&model.Tr069Alarm{}).Error; err != nil {
+		// 1. Delete Alarms (Hard Delete)
+		if err := tx.Unscoped().Where("device_id = ?", device.ID).Delete(&model.Tr069Alarm{}).Error; err != nil {
 			return err
 		}
-		// 2. Delete DataModel Values
-		if err := tx.Where("device_id = ?", device.ID).Delete(&model.DataModelValue{}).Error; err != nil {
+		// 2. Delete DataModel Values (Hard Delete)
+		if err := tx.Unscoped().Where("device_id = ?", device.ID).Delete(&model.DataModelValue{}).Error; err != nil {
 			return err
 		}
-		// 3. Delete Device
-		if err := tx.Delete(&device).Error; err != nil {
+		// 3. Delete Device (Hard Delete)
+		if err := tx.Unscoped().Delete(&device).Error; err != nil {
 			return err
 		}
 		return nil
