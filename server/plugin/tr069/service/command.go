@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/infolog"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	req "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
@@ -128,6 +131,12 @@ func (s *CommandService) enqueue(ctx context.Context, deviceKey string, op strin
 	}); err != nil {
 		return "", err
 	}
+
+	dump := fmt.Sprintf("----- TR069 COMMAND ENQUEUE BEGIN -----\ncommandId: %s\ndeviceKey: %s\noperation: %s\ndedupKey: %s\nparamsJson: %s\n----- TR069 COMMAND ENQUEUE END -----", cmdID, deviceKey, op, dedupKey, paramsJSON)
+	if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.DumpRaw {
+		_, _ = fmt.Fprintln(os.Stdout, dump)
+	}
+	infolog.Write(dump)
 	return cmdID, nil
 }
 
@@ -144,4 +153,3 @@ func (s *CommandService) deviceKeyByID(deviceID uint) (string, error) {
 	}
 	return fmt.Sprintf("%s-%s", d.OUI, d.SerialNumber), nil
 }
-

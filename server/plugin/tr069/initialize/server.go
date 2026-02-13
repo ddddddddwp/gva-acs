@@ -66,6 +66,10 @@ func SetupEngine() *gin.Engine {
 			PrintResponse: false,
 			DumpToConsole: tr069Global.GlobalConfig.DumpRaw,
 		}))
+		engine.Use(middleware.RawResponseDump(middleware.RawResponseDumpConfig{
+			MaxBytes:      tr069Global.GlobalConfig.DumpMaxBytes,
+			DumpToConsole: tr069Global.GlobalConfig.DumpRaw,
+		}))
 	}
 
 	engine.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {

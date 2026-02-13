@@ -10,12 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ddddddddwp/gva-acs/server/global"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/infolog"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 type RawDumpConfig struct {
@@ -225,27 +224,5 @@ func truncateBytes(b []byte, max int) string {
 }
 
 func writeInfoLog(s string) {
-	dir := tr069Global.GlobalConfig.InfoLogDir
-	if dir == "" {
-		dir = "./log"
-	}
-	date := time.Now().Format("2006-01-02")
-	base := dir + "/" + date
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		if global.GVA_LOG != nil {
-			global.GVA_LOG.Error("TR069 writeInfoLog mkdir failed", zap.Error(err), zap.String("dir", base))
-		}
-		return
-	}
-	path := base + "/tr069info.log"
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		if global.GVA_LOG != nil {
-			global.GVA_LOG.Error("TR069 writeInfoLog open failed", zap.Error(err), zap.String("path", path))
-		}
-		return
-	}
-	defer f.Close()
-	_, _ = f.WriteString(s)
-	_, _ = f.WriteString("\n")
+	infolog.Write(s)
 }
