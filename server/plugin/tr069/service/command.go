@@ -26,7 +26,7 @@ func (s *CommandService) EnqueueGetRPCMethods(deviceID uint) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.enqueue(context.Background(), deviceKey, "GetRPCMethods", map[string]interface{}{}, "")
+	return s.enqueueImmediate(context.Background(), deviceID, deviceKey, "GetRPCMethods", map[string]interface{}{}, "")
 }
 
 func (s *CommandService) EnqueueGetParameterValues(deviceID uint, in req.GetParameterValuesRequest) (string, error) {
@@ -37,7 +37,7 @@ func (s *CommandService) EnqueueGetParameterValues(deviceID uint, in req.GetPara
 	if err != nil {
 		return "", err
 	}
-	return s.enqueue(context.Background(), deviceKey, "GetParameterValues", map[string]interface{}{"paths": in.Paths}, "")
+	return s.enqueueImmediate(context.Background(), deviceID, deviceKey, "GetParameterValues", map[string]interface{}{"paths": in.Paths}, "")
 }
 
 func (s *CommandService) EnqueueSetParameterValues(deviceID uint, in req.SetParameterValuesRequest) (string, error) {
@@ -62,7 +62,7 @@ func (s *CommandService) EnqueueSetParameterValues(deviceID uint, in req.SetPara
 	if len(items) == 0 {
 		return "", errors.New("parameters is empty")
 	}
-	return s.enqueue(context.Background(), deviceKey, "SetParameterValues", map[string]interface{}{
+	return s.enqueueImmediate(context.Background(), deviceID, deviceKey, "SetParameterValues", map[string]interface{}{
 		"parameterKey": in.ParameterKey,
 		"parameters":   items,
 	}, "")
@@ -137,6 +137,59 @@ func (s *CommandService) enqueue(ctx context.Context, deviceKey string, op strin
 		_, _ = fmt.Fprintln(os.Stdout, dump)
 	}
 	infolog.Write(dump)
+	return cmdID, nil
+}
+
+func (s *CommandService) enqueueImmediate(ctx context.Context, deviceID uint, deviceKey string, op string, params map[string]interface{}, dedupKey string) (string, error) {
+	if !adapter.RedisAvailable() {
+		return "", errors.New("redis not initialized")
+	}
+	cmdID := uuid.NewString()
+	now := time.Now()
+
+	paramsJSON := ""
+	if params != nil {
+		b, err := json.Marshal(params)
+		if err != nil {
+			return "", err
+		}
+		paramsJSON = string(b)
+	}
+
+	if adapter.DBAvailable() {
+		if err := global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "command_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"device_key", "operation", "params_json", "dedup_key", "status", "updated_at"}),
+		}).Create(&model.Command{
+			CommandID:  cmdID,
+			DeviceKey:  deviceKey,
+			Operation:  op,
+			ParamsJSON: paramsJSON,
+			DedupKey:   dedupKey,
+			Status:     "PENDING",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}).Error; err != nil {
+			return "", err
+		}
+	}
+
+	if err := adapter.EnqueueImmediate(ctx, adapter.DispatcherPayload{
+		DeviceKey: deviceKey,
+		CommandID: cmdID,
+		DedupKey:  dedupKey,
+		Op:        op,
+		Params:    paramsJSON,
+		CreatedAt: now.Unix(),
+	}, adapter.ImmediateEnqueueConfig{TTL: 30 * time.Minute}); err != nil {
+		return "", err
+	}
+
+	dump := fmt.Sprintf("----- TR069 COMMAND IMMEDIATE BEGIN -----\ncommandId: %s\ndeviceId: %d\ndeviceKey: %s\noperation: %s\ndedupKey: %s\nparamsJson: %s\n----- TR069 COMMAND IMMEDIATE END -----", cmdID, deviceID, deviceKey, op, dedupKey, paramsJSON)
+	_, _ = fmt.Fprintln(os.Stdout, dump)
+	infolog.Write(dump)
+
+	_ = adapter.TriggerConnectionRequest(ctx, deviceID, adapter.ConnectionRequestConfig{Timeout: 5 * time.Second, Retries: 1})
 	return cmdID, nil
 }
 

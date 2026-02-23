@@ -16,8 +16,6 @@ type Device struct {
 	ModelName    string `json:"modelName" gorm:"comment:型号名称"`
 
 	// Status
-	Status     string    `json:"status" gorm:"default:offline;comment:在线状态(online/offline)"`
-	LastOnline time.Time `json:"lastOnline" gorm:"comment:最后上线时间"`
 	LastInform time.Time `json:"lastInform" gorm:"comment:最后Inform时间"`
 	UpTime     uint64    `json:"upTime" gorm:"comment:运行时长(秒)"`
 

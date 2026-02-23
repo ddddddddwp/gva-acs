@@ -68,14 +68,21 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 		return nil, nil, nil, nil
 	}
 
+	immediateKey := RedisImmediateListPrefix + deviceKey
 	pendingKey := RedisPendingListPrefix + deviceKey
 
 	var payload []byte
 	var parsed DispatcherPayload
 	var cmd *core.Command
+	selectedKey := pendingKey
 
 	for i := 0; i < s.cfg.MaxScan; i++ {
-		val, err := s.client.LPop(ctx, pendingKey).Bytes()
+		val, err := s.client.LPop(ctx, immediateKey).Bytes()
+		selectedKey = immediateKey
+		if errors.Is(err, redis.Nil) {
+			val, err = s.client.LPop(ctx, pendingKey).Bytes()
+			selectedKey = pendingKey
+		}
 		if errors.Is(err, redis.Nil) {
 			_ = unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
 			return nil, nil, nil, nil
@@ -136,7 +143,7 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 			ctx = context.Background()
 		}
 		if len(payload) > 0 {
-			_ = s.client.LPush(ctx, pendingKey, payload).Err()
+			_ = s.client.LPush(ctx, selectedKey, payload).Err()
 		}
 		return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
 	}

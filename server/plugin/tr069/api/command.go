@@ -2,6 +2,7 @@ package api
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
 	req "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
@@ -49,12 +50,12 @@ func (a *CommandApi) GetParameterValues(c *gin.Context) {
 		response.FailWithMessage("参数错误", c)
 		return
 	}
-	cmdID, err := commandService.EnqueueGetParameterValues(uint(deviceId), in)
+	res, err := commandService.ExecuteGetParameterValues(uint(deviceId), in, 15*time.Second)
 	if err != nil {
 		response.FailWithMessage("任务下发失败", c)
 		return
 	}
-	response.OkWithDetailed(map[string]string{"commandId": cmdID}, "任务已下发", c)
+	response.OkWithDetailed(res, "任务已下发", c)
 }
 
 // SetParameterValues
@@ -81,4 +82,3 @@ func (a *CommandApi) SetParameterValues(c *gin.Context) {
 	}
 	response.OkWithDetailed(map[string]string{"commandId": cmdID}, "任务已下发", c)
 }
-

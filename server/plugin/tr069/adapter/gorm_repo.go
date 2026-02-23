@@ -52,8 +52,6 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 		ProductClass:     productClass,
 		Manufacturer:     manufacturer,
 		IP:               ip,
-		Status:           "online",
-		LastOnline:       time.Now(),
 		LastInform:       time.Now(),
 		ConnectionReqURL: "",
 		SoftwareVer:      "",
@@ -88,8 +86,6 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 			"ip",
 			"connection_req_url",
 			"last_inform",
-			"last_online",
-			"status",
 		}),
 	}).Create(&device).Error
 	if err != nil {
@@ -311,18 +307,11 @@ func extractOUI(deviceID string) string {
 	return ""
 }
 
-func (r *GormDeviceRepo) UpdateOnlineStatus(ctx context.Context, deviceID string, status bool, lastSeen time.Time) error {
-	statusStr := "offline"
-	if status {
-		statusStr = "online"
-	}
-
+// UpdateOnlineStatus 实现 core.DeviceRepo 接口（仅更新 lastInform）
+func (r *GormDeviceRepo) UpdateOnlineStatus(ctx context.Context, deviceID string, online bool, lastSeen time.Time) error {
 	return global.GVA_DB.WithContext(ctx).Model(&model.Device{}).
 		Where("serial_number = ?", deviceID).
-		Updates(map[string]interface{}{
-			"status":      statusStr,
-			"last_online": lastSeen,
-		}).Error
+		Update("last_inform", lastSeen).Error
 }
 
 type GormCommandRepo struct{}
