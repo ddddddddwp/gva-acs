@@ -92,18 +92,6 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="fullSyncVisible" title="全量同步数据模型" width="520px">
-      <el-form :model="fullSyncForm" label-width="120px">
-        <el-form-item label="参数路径">
-          <el-input v-model="fullSyncForm.pathsText" type="textarea" :rows="5" placeholder="Device.&#10;InternetGatewayDevice.&#10;(一行一个路径)" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="fullSyncVisible = false">取消</el-button>
-        <el-button type="primary" :loading="fullSyncSubmitting" @click="submitFullSync">下发</el-button>
-      </template>
-    </el-dialog>
-
     <el-drawer v-model="dmDrawerVisible" title="设备数据模型参数树" size="80%">
       <div class="flex h-full">
         <!-- 左侧树 -->
@@ -289,40 +277,20 @@ const submitSPV = async () => {
   }
 }
 
-const fullSyncVisible = ref(false)
 const fullSyncSubmitting = ref(false)
-const fullSyncForm = ref({
-  pathsText: 'Device.'
-})
 
-const openFullSync = (row) => {
-  currentDeviceId.value = row.ID
-  fullSyncVisible.value = true
-}
-
-const submitFullSync = async () => {
-  const deviceId = currentDeviceId.value
-  if (!deviceId) return
+const openFullSync = async (row) => {
+  if (fullSyncSubmitting.value) return
   fullSyncSubmitting.value = true
-  
-  const paths = fullSyncForm.value.pathsText
-    .split('\n')
-    .map(p => p.trim())
-    .filter(p => p.length > 0)
-  
-  if (paths.length === 0) {
-    ElMessage.error('请至少输入一个参数路径')
+  try {
+    const res = await tr069FullDataModelSync(row.ID, { paths: ['Device.'] })
+    if (res.code === 0) {
+      ElMessage.success('已下发全量同步请求')
+    } else {
+      ElMessage.error(res.msg || '下发失败')
+    }
+  } finally {
     fullSyncSubmitting.value = false
-    return
-  }
-  
-  const res = await tr069FullDataModelSync(deviceId, { paths })
-  fullSyncSubmitting.value = false
-  if (res.code === 0) {
-    ElMessage.success('已下发，等待设备上报')
-    fullSyncVisible.value = false
-  } else {
-    ElMessage.error(res.msg || '下发失败')
   }
 }
 

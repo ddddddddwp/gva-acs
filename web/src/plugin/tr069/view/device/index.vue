@@ -156,18 +156,6 @@
       </div>
     </el-dialog>
 
-    <el-dialog title="全量同步数据模型" v-model="fullSyncVisible" width="520px" append-to-body>
-      <el-form :model="fullSyncForm" label-width="140px">
-        <el-form-item label="参数路径">
-          <el-input v-model="fullSyncForm.pathsText" type="textarea" :rows="5" placeholder="Device.&#10;InternetGatewayDevice.&#10;(一行一个路径)" />
-        </el-form-item>
-      </el-form>
-      <div slot="footer" class="dialog-footer">
-        <el-button @click="fullSyncVisible = false">取 消</el-button>
-        <el-button type="primary" @click="submitFullSync" :loading="fullSyncSubmitting">确 定</el-button>
-      </div>
-    </el-dialog>
-
     <data-model-viewer
       v-model="dmDrawerVisible"
       :row="currentRow"
@@ -233,11 +221,7 @@ export default {
         parameterKey: '',
         parameters: [{ name: '', type: 'xsd:string', value: '' }]
       },
-      fullSyncVisible: false,
       fullSyncSubmitting: false,
-      fullSyncForm: {
-        pathsText: 'Device.'
-      },
       dmDrawerVisible: false
     }
   },
@@ -379,28 +363,14 @@ export default {
         this.spvSubmitting = false
       }
     },
-    openFullSyncDialog() {
-      this.fullSyncVisible = true
-    },
-    async submitFullSync() {
-      if (!this.currentRow.ID) return
+    async openFullSyncDialog() {
+      if (!this.currentRow?.ID) return
+      if (this.fullSyncSubmitting) return
       this.fullSyncSubmitting = true
       try {
-        const paths = this.fullSyncForm.pathsText
-          .split('\n')
-          .map(p => p.trim())
-          .filter(p => p.length > 0)
-        
-        if (paths.length === 0) {
-          ElMessage.error('请至少输入一个参数路径')
-          this.fullSyncSubmitting = false
-          return
-        }
-        
-        const res = await fullDataModelSync(this.currentRow.ID, { paths })
+        const res = await fullDataModelSync(this.currentRow.ID, { paths: ['Device.'] })
         if (res.code === 0) {
-          ElMessage.success('已下发，等待设备上报')
-          this.fullSyncVisible = false
+          ElMessage.success('已下发全量同步请求')
         } else {
           ElMessage.error(res.msg || '下发失败')
         }
