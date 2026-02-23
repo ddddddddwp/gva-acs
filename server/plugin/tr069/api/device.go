@@ -1,14 +1,20 @@
 package api
 
 import (
+	"time"
+
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/model/common/request"
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	deviceResponse "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/response"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// 设备离线阈值（秒），超过此时间未收到 Inform 视为离线
+const offlineThreshold = 180 // 3分钟
 
 type DeviceApi struct{}
 
@@ -49,8 +55,42 @@ func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 		return
 	}
 
+	// 转换为响应结构体并计算在线状态
+	now := time.Now()
+	deviceResponses := make([]deviceResponse.DeviceResponse, 0, len(devices))
+	for _, d := range devices {
+		var isOnline bool
+		if !d.LastInform.IsZero() {
+			isOnline = now.Sub(d.LastInform).Seconds() < float64(offlineThreshold)
+		} else {
+			isOnline = false
+		}
+		deviceResponses = append(deviceResponses, deviceResponse.DeviceResponse{
+			ID:               d.ID,
+			SerialNumber:     d.SerialNumber,
+			OUI:              d.OUI,
+			ProductClass:     d.ProductClass,
+			Manufacturer:     d.Manufacturer,
+			ModelName:        d.ModelName,
+			LastInform:       d.LastInform,
+			UpTime:           d.UpTime,
+			IP:               d.IP,
+			MacAddress:       d.MacAddress,
+			ConnectionReqURL: d.ConnectionReqURL,
+			SoftwareVer:      d.SoftwareVer,
+			HardwareVer:      d.HardwareVer,
+			SpecVer:          d.SpecVer,
+			PhysicalCellID:   d.PhysicalCellID,
+			CellID:           d.CellID,
+			GroupId:          d.GroupId,
+			Remark:           d.Remark,
+			IsWhite:          d.IsWhite,
+			Online:           isOnline,
+		})
+	}
+
 	response.OkWithDetailed(response.PageResult{
-		List:     devices,
+		List:     deviceResponses,
 		Total:    total,
 		Page:     pageInfo.Page,
 		PageSize: pageInfo.PageSize,

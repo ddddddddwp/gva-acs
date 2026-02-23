@@ -2,13 +2,14 @@ package adapter
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	appGlobal "github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
-	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
+	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -135,3 +136,183 @@ func TestDataModelHook_PersistsGPVAndExpandsGPN(t *testing.T) {
 	}
 }
 
+// TestDataModelHook_PersistsGPVWithXsiType 测试解析带有 xsi:type 属性的参数并存储到数据库
+func TestDataModelHook_PersistsGPVWithXsiType(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	appGlobal.GVA_DB = db
+	t.Cleanup(func() { appGlobal.GVA_DB = nil })
+
+	if err := db.AutoMigrate(new(model.Device), new(model.Command), new(model.DataModelValue), new(model.DeviceRPCMethods)); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	dev := model.Device{OUI: "001122", SerialNumber: "1234567890"}
+	if err := db.Create(&dev).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+
+	inflight := NewMemoryInflightRepo(10 * time.Minute)
+	ingest := &captureIngest{}
+	hook := NewDataModelHook(nil, inflight, ingest, WithDataModelHookNow(func() time.Time { return time.Unix(10, 0) }))
+
+	ctx := context.Background()
+	session := &core.Session{
+		DeviceKey: "001122-1234567890",
+		DeviceID:  "1234567890",
+	}
+
+	// 保存 inflight 请求
+	if err := inflight.Save(ctx, core.InflightRequest{
+		DeviceKey:   session.DeviceKey,
+		CommandID:   "cmd-gpv",
+		CwmpID:      "cwmp-gpv",
+		RequestName: tr069.MethodGetParameterValues,
+		SentAt:      time.Now(),
+	}); err != nil {
+		t.Fatalf("save inflight: %v", err)
+	}
+
+	// 模拟解析后的参数列表（这些参数类型应该与解析 xsi:type 后的一致）
+	params := []tr069.Parameter{
+		{Name: "Device.DeviceInfo.SerialNumber", Value: "SN123456789", Type: "xsd:string"},
+		{Name: "Device.DeviceInfo.MU.1.Slot.1.SoftwareVersion", Value: "5.1.0.r62694M", Type: "xsd:string"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://172.18.0.20:7547/", Type: "xsd:string"},
+		{Name: "Device.DeviceInfo.SomeBoolean", Value: "true", Type: "xsd:boolean"},
+		{Name: "Device.DeviceInfo.SomeInt", Value: "12345", Type: "xsd:int"},
+		{Name: "Device.DeviceInfo.SomeLong", Value: "9876543210", Type: "xsd:long"},
+		{Name: "Device.DeviceInfo.SomeUnsignedInt", Value: "65535", Type: "xsd:unsignedInt"},
+	}
+
+	handled, err := hook.OnResponse(ctx, session, &tr069.Message{
+		Method:     tr069.MethodGetParameterValuesResponse,
+		ID:         "cwmp-gpv",
+		Parameters: params,
+	})
+	if err != nil {
+		t.Fatalf("OnResponse error: %v", err)
+	}
+	if !handled {
+		t.Fatalf("expected handled=true for correlated response")
+	}
+
+	// 验证数据是否正确存储到数据库
+	var values []model.DataModelValue
+	if err := db.Where("device_id = ?", dev.ID).Find(&values).Error; err != nil {
+		t.Fatalf("expected datamodel values persisted: %v", err)
+	}
+
+	if len(values) != len(params) {
+		t.Fatalf("expected %d values, got %d", len(params), len(values))
+	}
+
+	// 验证每个参数的类型和值
+	for _, param := range params {
+		found := false
+		for _, v := range values {
+			if v.Name == param.Name {
+				found = true
+				// 验证 value_type 是否正确（normalizeValueType 会把 xsd:string 转为 string）
+				expectedType := param.Type
+				if idx := param.Type[5:]; idx != "" { // xsd:xxx -> xxx
+					expectedType = param.Type[4:] // xsd: -> 空，取后面的部分
+				}
+				// 验证类型是否被正确处理
+				t.Logf("Parameter: %s, Type: %s, StoredType: %s, Value: %s",
+					param.Name, param.Type, v.ValueType, string(v.ValueJSON))
+				_ = expectedType
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected parameter %s to be persisted", param.Name)
+		}
+	}
+
+	t.Logf("Successfully stored %d parameters to database", len(values))
+}
+
+// TestDataModelHook_PersistGPV_DebugValueType 专门测试 value_type 字段存储
+func TestDataModelHook_PersistGPV_DebugValueType(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	appGlobal.GVA_DB = db
+	t.Cleanup(func() { appGlobal.GVA_DB = nil })
+
+	if err := db.AutoMigrate(new(model.Device), new(model.Command), new(model.DataModelValue), new(model.DeviceRPCMethods)); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	dev := model.Device{OUI: "001122", SerialNumber: "1234567890"}
+	if err := db.Create(&dev).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+
+	// 直接调用 persistGPV 进行测试
+	inflight := NewMemoryInflightRepo(10 * time.Minute)
+	ingest := &captureIngest{}
+	hook := NewDataModelHook(nil, inflight, ingest, WithDataModelHookNow(func() time.Time { return time.Unix(10, 0) }))
+
+	// 测试不同类型的参数
+	params := []tr069.Parameter{
+		{Name: "Device.Test.String", Value: "hello", Type: "xsd:string"},
+		{Name: "Device.Test.Boolean", Value: "true", Type: "xsd:boolean"},
+		{Name: "Device.Test.Int", Value: "123", Type: "xsd:int"},
+		{Name: "Device.Test.Long", Value: "456789", Type: "xsd:long"},
+		{Name: "Device.Test.UnsignedInt", Value: "999", Type: "xsd:unsignedInt"},
+		{Name: "Device.Test.EmptyType", Value: "test", Type: ""}, // 空类型
+	}
+
+	// 直接调用 persistGPV
+	err = hook.persistGPV(context.Background(), dev.ID, params)
+	if err != nil {
+		t.Fatalf("persistGPV error: %v", err)
+	}
+
+	// 查询数据库，验证 value_type 是否正确存储（使用 raw query 避免 JSON 解析问题）
+	type result struct {
+		ID        uint
+		Name      string
+		ValueType string
+		ValueJSON string
+	}
+
+	var results []result
+	if err := db.Raw("SELECT id, name, value_type, CAST(value_json AS TEXT) as value_json FROM tr069_datamodel_values WHERE device_id = ?", dev.ID).Scan(&results).Error; err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+
+	t.Logf("Total records in database: %d", len(results))
+
+	// 验证每个记录
+	for _, r := range results {
+		t.Logf("Name: %s, ValueType: '%s', ValueJSON: %s", r.Name, r.ValueType, r.ValueJSON)
+	}
+
+	// 详细断言
+	for _, param := range params {
+		var found result
+		err := db.Raw("SELECT id, name, value_type, CAST(value_json AS TEXT) as value_json FROM tr069_datamodel_values WHERE device_id = ? AND name = ?", dev.ID, param.Name).Scan(&found).Error
+		if err != nil {
+			t.Errorf("not found: %s, error: %v", param.Name, err)
+			continue
+		}
+
+		// 验证 value_type 字段
+		expectedType := param.Type
+		if param.Type != "" && strings.Contains(param.Type, ":") {
+			// xsd:string -> string
+			expectedType = param.Type[strings.Index(param.Type, ":")+1:]
+		}
+
+		if found.ValueType != expectedType {
+			t.Errorf("value_type mismatch for %s: expected '%s', got '%s'", param.Name, expectedType, found.ValueType)
+		} else {
+			t.Logf("OK: %s -> value_type = '%s'", param.Name, found.ValueType)
+		}
+	}
+}

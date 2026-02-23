@@ -26,8 +26,8 @@
         <el-table-column prop="ip" label="IP地址" width="140" show-overflow-tooltip />
         <el-table-column label="在线状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.status === 'online' ? 'success' : 'info'" effect="light">
-              {{ scope.row.status === 'online' ? '在线' : '离线' }}
+            <el-tag :type="scope.row.online ? 'success' : 'info'" effect="light">
+              {{ scope.row.online ? '在线' : '离线' }}
             </el-tag>
           </template>
         </el-table-column>
