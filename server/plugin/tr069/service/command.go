@@ -68,21 +68,27 @@ func (s *CommandService) EnqueueSetParameterValues(deviceID uint, in req.SetPara
 	}, "")
 }
 
-func (s *CommandService) EnqueueFullDataModelSync(deviceID uint, maxDepth int) error {
-	if maxDepth <= 0 {
-		maxDepth = 16
+func (s *CommandService) EnqueueFullDataModelSync(deviceID uint, paths []string) error {
+	if len(paths) == 0 {
+		paths = []string{"Device."}
 	}
+
 	deviceKey, err := s.deviceKeyByID(deviceID)
 	if err != nil {
 		return err
 	}
-	_, _ = s.enqueue(context.Background(), deviceKey, "GetRPCMethods", map[string]interface{}{}, "dm:rpc:"+deviceKey)
-	_, _ = s.enqueue(context.Background(), deviceKey, "GetParameterNames", map[string]interface{}{
-		"parameterPath": "Device.",
-		"nextLevel":     true,
-		"depth":         0,
-		"maxDepth":      maxDepth,
-	}, "dm:gpn-root:"+deviceKey)
+
+	dedupSuffix := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	for _, path := range paths {
+		cmdID, err := s.enqueueImmediate(context.Background(), deviceID, deviceKey, "GetParameterValues", map[string]interface{}{
+			"paths": []string{path},
+		}, "dm:gpv:"+path+":"+deviceKey+":"+dedupSuffix)
+		if err != nil {
+			return fmt.Errorf("enqueue GetParameterValues failed: %w", err)
+		}
+		fmt.Printf("----- TR069 FULLSYNC ENQUEUE -----\ndeviceId: %d, deviceKey: %s, path: %s, commandId: %s\n", deviceID, deviceKey, path, cmdID)
+	}
 	return nil
 }
 
@@ -190,6 +196,7 @@ func (s *CommandService) enqueueImmediate(ctx context.Context, deviceID uint, de
 	infolog.Write(dump)
 
 	_ = adapter.TriggerConnectionRequest(ctx, deviceID, adapter.ConnectionRequestConfig{Timeout: 5 * time.Second, Retries: 1})
+
 	return cmdID, nil
 }
 

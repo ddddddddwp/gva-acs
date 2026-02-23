@@ -131,15 +131,12 @@
     </div>
     
     <!-- Full Sync Dialog -->
-    <el-dialog title="全量同步数据模型" v-model="fullSyncVisible" width="400px" append-to-body>
-      <div class="text-center py-4">
-        <p class="mb-4 text-gray-600">确定要对设备进行全量参数同步吗？这可能需要一些时间。</p>
-        <el-form :model="fullSyncForm" label-width="100px">
-           <el-form-item label="最大深度">
-             <el-input-number v-model="fullSyncForm.maxDepth" :min="1" :max="10" />
-           </el-form-item>
-        </el-form>
-      </div>
+    <el-dialog title="全量同步数据模型" v-model="fullSyncVisible" width="520px" append-to-body>
+      <el-form :model="fullSyncForm" label-width="100px">
+        <el-form-item label="参数路径">
+          <el-input v-model="fullSyncForm.pathsText" type="textarea" :rows="5" placeholder="Device.&#10;InternetGatewayDevice.&#10;(一行一个路径)" />
+        </el-form-item>
+      </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="fullSyncVisible = false">取消</el-button>
@@ -189,7 +186,7 @@ const loadingValues = ref(false)
 
 const fullSyncVisible = ref(false)
 const fullSyncSubmitting = ref(false)
-const fullSyncForm = ref({ maxDepth: 4 })
+const fullSyncForm = ref({ pathsText: 'Device.' })
 
 const defaultProps = {
   children: 'children',
@@ -325,7 +322,18 @@ const submitFullSync = async () => {
   if (!props.row.ID) return
   fullSyncSubmitting.value = true
   try {
-    const res = await fullDataModelSync(props.row.ID, { maxDepth: fullSyncForm.value.maxDepth })
+    const paths = fullSyncForm.value.pathsText
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0)
+    
+    if (paths.length === 0) {
+      ElMessage.error('请至少输入一个参数路径')
+      fullSyncSubmitting.value = false
+      return
+    }
+    
+    const res = await fullDataModelSync(props.row.ID, { paths })
     if (res.code === 0) {
       ElMessage.success('已下发同步任务')
       fullSyncVisible.value = false

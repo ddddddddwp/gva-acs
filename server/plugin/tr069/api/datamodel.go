@@ -13,12 +13,13 @@ type DataModelApi struct{}
 var dmService = new(service.CommandService)
 
 type FullSyncRequest struct {
-	MaxDepth int `json:"maxDepth" form:"maxDepth"`
+	Paths []string `json:"paths" form:"paths"`
 }
 
 // FullSync
 // @Tags TR069
-// @Summary 全量同步数据模型(递归 GetParameterNames + GetParameterValues)
+// @Summary 全量同步数据模型(立即下发 GetParameterValues)
+// @Description paths: 参数路径列表，如 ["Device.", "InternetGatewayDevice."]。注意：此接口会立即下发 GetParameterValues 命令到Redis队列并触发Connection Request主动连接设备，无需等待设备上报
 // @Security ApiKeyAuth
 // @accept application/json
 // @Produce application/json
@@ -30,11 +31,16 @@ func (a *DataModelApi) FullSync(c *gin.Context) {
 	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
 	var in FullSyncRequest
 	_ = c.ShouldBindJSON(&in)
-	if err := dmService.EnqueueFullDataModelSync(uint(deviceId), in.MaxDepth); err != nil {
-		response.FailWithMessage("任务下发失败", c)
+
+	if len(in.Paths) == 0 {
+		in.Paths = []string{"Device."}
+	}
+
+	if err := dmService.EnqueueFullDataModelSync(uint(deviceId), in.Paths); err != nil {
+		response.FailWithMessage("任务下发失败: "+err.Error(), c)
 		return
 	}
-	response.OkWithMessage("任务已下发，设备下次会话会开始上报", c)
+	response.OkWithMessage("任务已下发，等待设备响应", c)
 }
 
 // GetDataModelList

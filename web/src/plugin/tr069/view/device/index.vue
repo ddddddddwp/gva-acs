@@ -158,8 +158,8 @@
 
     <el-dialog title="全量同步数据模型" v-model="fullSyncVisible" width="520px" append-to-body>
       <el-form :model="fullSyncForm" label-width="140px">
-        <el-form-item label="最大深度">
-          <el-input-number v-model="fullSyncForm.maxDepth" :min="1" :max="64" />
+        <el-form-item label="参数路径">
+          <el-input v-model="fullSyncForm.pathsText" type="textarea" :rows="5" placeholder="Device.&#10;InternetGatewayDevice.&#10;(一行一个路径)" />
         </el-form-item>
       </el-form>
       <div slot="footer" class="dialog-footer">
@@ -236,7 +236,7 @@ export default {
       fullSyncVisible: false,
       fullSyncSubmitting: false,
       fullSyncForm: {
-        maxDepth: 16
+        pathsText: 'Device.'
       },
       dmDrawerVisible: false
     }
@@ -386,7 +386,18 @@ export default {
       if (!this.currentRow.ID) return
       this.fullSyncSubmitting = true
       try {
-        const res = await fullDataModelSync(this.currentRow.ID, { maxDepth: this.fullSyncForm.maxDepth })
+        const paths = this.fullSyncForm.pathsText
+          .split('\n')
+          .map(p => p.trim())
+          .filter(p => p.length > 0)
+        
+        if (paths.length === 0) {
+          ElMessage.error('请至少输入一个参数路径')
+          this.fullSyncSubmitting = false
+          return
+        }
+        
+        const res = await fullDataModelSync(this.currentRow.ID, { paths })
         if (res.code === 0) {
           ElMessage.success('已下发，等待设备上报')
           this.fullSyncVisible = false
