@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -14,10 +15,11 @@ import (
 )
 
 type RedisCommandSourceConfig struct {
-	LockTTL    time.Duration
-	DedupTTL   time.Duration
-	MaxScan    int
-	InstanceID string
+	LockTTL              time.Duration
+	DedupTTL             time.Duration
+	MaxScan              int
+	InstanceID           string
+	MaxPendingPerSession int // 限制每次 session 处理的 pending 消息数量，避免饥饿
 }
 
 type RedisCommandSource struct {
@@ -39,6 +41,9 @@ func NewRedisCommandSource(cfg RedisCommandSourceConfig) *RedisCommandSource {
 	}
 	if cfg.MaxScan <= 0 {
 		cfg.MaxScan = 10
+	}
+	if cfg.MaxPendingPerSession <= 0 {
+		cfg.MaxPendingPerSession = 5
 	}
 	cfg.InstanceID = instanceID
 	return &RedisCommandSource{
@@ -71,83 +76,119 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 	immediateKey := RedisImmediateListPrefix + deviceKey
 	pendingKey := RedisPendingListPrefix + deviceKey
 
-	var payload []byte
+	// 1. 优先处理 immediate 队列（主动下发的命令）
+	cmd := s.pullOneFromQueue(ctx, immediateKey, deviceKey)
+	if cmd != nil {
+		fmt.Printf("----- TR069 REDIS PULL -----\ndeviceKey: %s, source: immediate, commandId: %s, operation: %s\n", deviceKey, cmd.ID, cmd.Operation)
+		ack := func(ctx context.Context) error {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
+		}
+		nack := func(ctx context.Context, reason string) error {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			if err := s.client.RPush(ctx, immediateKey, s.marshalCommand(cmd)).Err(); err != nil {
+				return err
+			}
+			return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
+		}
+		return cmd, ack, nack, nil
+	}
+
+	// 2. 限制处理 pending 队列的数量，避免饥饿
+	pendingCount := 0
+	for pendingCount < s.cfg.MaxPendingPerSession {
+		cmd = s.pullOneFromQueue(ctx, pendingKey, deviceKey)
+		if cmd == nil {
+			break
+		}
+		pendingCount++
+		fmt.Printf("----- TR069 REDIS PULL -----\ndeviceKey: %s, source: pending, commandId: %s, operation: %s, batch: %d/%d\n",
+			deviceKey, cmd.ID, cmd.Operation, pendingCount, s.cfg.MaxPendingPerSession)
+
+		ack := func(ctx context.Context) error {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
+		}
+		nack := func(ctx context.Context, reason string) error {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			if err := s.client.RPush(ctx, pendingKey, s.marshalCommand(cmd)).Err(); err != nil {
+				return err
+			}
+			return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
+		}
+		return cmd, ack, nack, nil
+	}
+
+	// 没有命令
+	_ = unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
+	return nil, nil, nil, nil
+}
+
+func (s *RedisCommandSource) pullOneFromQueue(ctx context.Context, queueKey, deviceKey string) *core.Command {
+	val, err := s.client.LPop(ctx, queueKey).Bytes()
+	if errors.Is(err, redis.Nil) || len(val) == 0 {
+		return nil
+	}
+	if err != nil {
+		return nil
+	}
+
 	var parsed DispatcherPayload
-	var cmd *core.Command
-	selectedKey := pendingKey
-
-	for i := 0; i < s.cfg.MaxScan; i++ {
-		val, err := s.client.LPop(ctx, immediateKey).Bytes()
-		selectedKey = immediateKey
-		if errors.Is(err, redis.Nil) {
-			val, err = s.client.LPop(ctx, pendingKey).Bytes()
-			selectedKey = pendingKey
-		}
-		if errors.Is(err, redis.Nil) {
-			_ = unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
-			return nil, nil, nil, nil
-		}
-		if err != nil {
-			_ = unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
-			return nil, nil, nil, err
-		}
-
-		payload = val
-		if err := json.Unmarshal(payload, &parsed); err != nil {
-			continue
-		}
-		if parsed.DeviceKey == "" {
-			parsed.DeviceKey = deviceKey
-		}
-		if parsed.DedupKey != "" {
-			dedupKey := RedisDedupPrefix + parsed.DedupKey
-			seen, err := s.client.SetNX(ctx, dedupKey, "1", s.cfg.DedupTTL).Result()
-			if err == nil && !seen {
-				payload = nil
-				parsed = DispatcherPayload{}
-				continue
-			}
-		}
-
-		cmd = &core.Command{
-			ID:        parsed.CommandID,
-			DeviceKey: parsed.DeviceKey,
-			Operation: parsed.Op,
-			DedupKey:  parsed.DedupKey,
-			Params:    map[string]interface{}{},
-			CreatedAt: time.Now(),
-		}
-		if parsed.Params != "" {
-			var m map[string]interface{}
-			if err := json.Unmarshal([]byte(parsed.Params), &m); err == nil {
-				cmd.Params = m
-			}
-		}
-		break
+	if err := json.Unmarshal(val, &parsed); err != nil {
+		return nil
 	}
 
-	if cmd == nil {
-		_ = unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
-		return nil, nil, nil, nil
+	if parsed.DeviceKey == "" {
+		parsed.DeviceKey = deviceKey
 	}
 
-	ack := func(ctx context.Context) error {
-		if ctx == nil {
-			ctx = context.Background()
+	// 去重检查
+	if parsed.DedupKey != "" {
+		dedupKey := RedisDedupPrefix + parsed.DedupKey
+		seen, err := s.client.SetNX(ctx, dedupKey, "1", s.cfg.DedupTTL).Result()
+		if err == nil && !seen {
+			return nil // 已存在，跳过
 		}
-		return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
 	}
-	nack := func(ctx context.Context, reason string) error {
-		_, _ = reason, payload
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		if len(payload) > 0 {
-			_ = s.client.LPush(ctx, selectedKey, payload).Err()
-		}
-		return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
+
+	cmd := &core.Command{
+		ID:        parsed.CommandID,
+		DeviceKey: parsed.DeviceKey,
+		Operation: parsed.Op,
+		DedupKey:  parsed.DedupKey,
+		Params:    map[string]interface{}{},
+		CreatedAt: time.Now(),
 	}
-	return cmd, ack, nack, nil
+	if parsed.Params != "" {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(parsed.Params), &m); err == nil {
+			cmd.Params = m
+		}
+	}
+	return cmd
+}
+
+func (s *RedisCommandSource) marshalCommand(cmd *core.Command) string {
+	p := DispatcherPayload{
+		DeviceKey: cmd.DeviceKey,
+		CommandID: cmd.ID,
+		Op:        cmd.Operation,
+		DedupKey:  cmd.DedupKey,
+	}
+	if cmd.Params != nil {
+		b, _ := json.Marshal(cmd.Params)
+		p.Params = string(b)
+	}
+	b, _ := json.Marshal(p)
+	return string(b)
 }
 
 var _ core.CommandSource = (*RedisCommandSource)(nil)

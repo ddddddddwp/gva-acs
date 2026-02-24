@@ -24,4 +24,21 @@ type TR069Config struct {
 	// 文件路径格式：<InfoLogDir>/<YYYY-MM-DD>/tr069info.log
 	// 对应配置：config.yaml -> tr069.infoLogDir
 	InfoLogDir string `mapstructure:"infoLogDir" json:"infoLogDir" yaml:"infoLogDir"`
+
+	// ==================== 队列配置 ====================
+
+	// CommandQueueLockTTL: 设备级别分布式锁的 TTL（秒），默认 30 秒
+	CommandQueueLockTTL int `mapstructure:"commandQueueLockTTL" json:"commandQueueLockTTL" yaml:"commandQueueLockTTL"`
+
+	// CommandQueueDedupTTL: 去重 key 的 TTL（秒），默认 86400 秒（24 小时）
+	CommandQueueDedupTTL int `mapstructure:"commandQueueDedupTTL" json:"commandQueueDedupTTL" yaml:"commandQueueDedupTTL"`
+
+	// CommandQueueMaxScan: 每次从队列获取命令的最大扫描次数，默认 10
+	CommandQueueMaxScan int `mapstructure:"commandQueueMaxScan" json:"commandQueueMaxScan" yaml:"commandQueueMaxScan"`
+
+	// CommandQueueMaxPendingPerSession: 每次 session 最多处理的 pending 命令数量，避免饥饿，默认 5
+	CommandQueueMaxPendingPerSession int `mapstructure:"commandQueueMaxPendingPerSession" json:"commandQueueMaxPendingPerSession" yaml:"commandQueueMaxPendingPerSession"`
+
+	// CommandQueueImmediateTTL: 立即下发队列的 TTL（秒），默认 1800 秒（30 分钟）
+	CommandQueueImmediateTTL int `mapstructure:"commandQueueImmediateTTL" json:"commandQueueImmediateTTL" yaml:"commandQueueImmediateTTL"`
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/tr069-core-only/factory"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
@@ -55,7 +56,14 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 	queue := deps.CommandQueue
 	if queue == nil {
 		if adapter.RedisAvailable() {
-			queue = adapter.NewRedisCommandSource(adapter.RedisCommandSourceConfig{})
+			cfg := tr069Global.GlobalConfig
+			queueCfg := adapter.RedisCommandSourceConfig{
+				LockTTL:              time.Duration(cfg.CommandQueueLockTTL) * time.Second,
+				DedupTTL:             time.Duration(cfg.CommandQueueDedupTTL) * time.Second,
+				MaxScan:              cfg.CommandQueueMaxScan,
+				MaxPendingPerSession: cfg.CommandQueueMaxPendingPerSession,
+			}
+			queue = adapter.NewRedisCommandSource(queueCfg)
 		} else {
 			queue = defaults.NewMemoryQueue()
 		}

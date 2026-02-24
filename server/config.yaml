@@ -259,4 +259,16 @@ tr069:
     dumpRedactCookie: true
     infoLogEnable: true     # [文件开关] true: 写入 tr069info.log; false: 关闭文件写入
     infoLogDir: ./log       # 日志文件存储路径 (默认 ./log/YYYY-MM-DD/tr069info.log)
+    
+    # ==================== REDIS 队列配置 ====================
+    # commandQueueLockTTL: 设备级别分布式锁的 TTL（秒），默认 30 秒
+    commandQueueLockTTL: 30
+    # commandQueueDedupTTL: 去重 key 的 TTL（秒），默认 86400 秒（24 小时）
+    commandQueueDedupTTL: 86400
+    # commandQueueMaxScan: 每次从队列获取命令的最大扫描次数，默认 10
+    commandQueueMaxScan: 10
+    # commandQueueMaxPendingPerSession: 每次 session 最多处理的 pending 命令数量，避免饥饿，默认 5
+    commandQueueMaxPendingPerSession: 5
+    # commandQueueImmediateTTL: 立即下发队列的 TTL（秒），默认 1800 秒（30 分钟）
+    commandQueueImmediateTTL: 1800
  
