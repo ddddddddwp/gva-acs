@@ -16,14 +16,17 @@ type RedisCommandIngest struct {
 	streamKey string
 }
 
-func NewRedisCommandIngest(streamKey string) *RedisCommandIngest {
+func NewRedisCommandIngest(streamKey string) (*RedisCommandIngest, error) {
+	if global.GVA_REDIS == nil {
+		return nil, errors.New("redis client not initialized")
+	}
 	if streamKey == "" {
 		streamKey = RedisIngestStreamKey
 	}
 	return &RedisCommandIngest{
 		client:    global.GVA_REDIS,
 		streamKey: streamKey,
-	}
+	}, nil
 }
 
 func (i *RedisCommandIngest) Enqueue(ctx context.Context, cmd *core.Command) error {

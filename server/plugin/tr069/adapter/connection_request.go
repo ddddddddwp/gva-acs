@@ -76,10 +76,21 @@ func connectionRequestTarget(ctx context.Context, deviceID uint) (connURL string
 	}
 	connURL = strings.TrimSpace(d.ConnectionReqURL)
 
+	// 验证URL使用HTTPS协议
 	u, err := url.Parse(connURL)
-	if err == nil && u != nil && u.User != nil {
+	if err != nil {
+		global.GVA_LOG.Error("failed to parse connection request URL", zap.String("url", connURL), zap.Error(err))
+		return "", "", "", false
+	}
+	if u.Scheme != "https" {
+		global.GVA_LOG.Error("connection request URL must use HTTPS", zap.String("url", connURL), zap.Uint("deviceID", deviceID))
+		return "", "", "", false
+	}
+	if u.User != nil {
 		user = u.User.Username()
-		pass, _ = u.User.Password()
+		if pwd, ok := u.User.Password(); ok {
+			pass = pwd
+		}
 	}
 	if user == "" {
 		if u2, p2, ok := loadConnectionRequestCreds(ctx, deviceID); ok {
@@ -106,7 +117,10 @@ func loadConnectionRequestCreds(ctx context.Context, deviceID uint) (string, str
 	var pass string
 	for _, r := range rows {
 		var v string
-		_ = json.Unmarshal(r.ValueJSON, &v)
+		if err := json.Unmarshal(r.ValueJSON, &v); err != nil {
+			global.GVA_LOG.Warn("failed to unmarshal credential value", zap.String("name", r.Name), zap.Error(err))
+			continue
+		}
 		switch r.Name {
 		case "Device.ManagementServer.ConnectionRequestUsername":
 			user = v
@@ -157,11 +171,22 @@ func writeConnectionRequestLog(res ConnectionRequestResult, deviceID uint, attem
 	if res.Err != nil {
 		status = "ERR"
 	}
+	// 清理URL以避免在日志中暴露凭证
+	safeURL := res.URL
+	if parsedURL, err := url.Parse(res.URL); err == nil && parsedURL != nil {
+		// 移除用户信息，只保留scheme、host和path
+		cleanURL := url.URL{
+			Scheme: parsedURL.Scheme,
+			Host:   parsedURL.Host,
+			Path:   parsedURL.Path,
+		}
+		safeURL = cleanURL.String()
+	}
 	s := fmt.Sprintf("----- TR069 CONNECTION REQUEST BEGIN -----\nstatus: %s\ndeviceId: %d\nattempt: %d\nurl: %s\nhttpStatus: %d\nelapsed: %s\nerror: %v\n----- TR069 CONNECTION REQUEST END -----",
-		status, deviceID, attempt, res.URL, res.StatusCode, res.Elapsed.String(), res.Err)
+		status, deviceID, attempt, safeURL, res.StatusCode, res.Elapsed.String(), res.Err)
 	_, _ = fmt.Fprintln(os.Stdout, s)
 	infolog.Write(s)
 	if res.Err != nil && global.GVA_LOG != nil {
-		global.GVA_LOG.Warn("TR069 connection request failed", zap.Uint("deviceId", deviceID), zap.String("url", res.URL), zap.Int("attempt", attempt), zap.Error(res.Err))
+		global.GVA_LOG.Warn("TR069 connection request failed", zap.Uint("deviceId", deviceID), zap.String("url", safeURL), zap.Int("attempt", attempt), zap.Error(res.Err))
 	}
 }

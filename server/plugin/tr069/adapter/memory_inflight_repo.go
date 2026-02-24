@@ -29,7 +29,7 @@ func NewMemoryInflightRepo(ttl time.Duration) *MemoryInflightRepo {
 func (r *MemoryInflightRepo) Save(ctx context.Context, req core.InflightRequest) error {
 	_, _ = ctx, req
 	if req.DeviceKey == "" || req.CwmpID == "" {
-		return nil
+		return nil // 空key不做处理
 	}
 	if req.SentAt.IsZero() {
 		req.SentAt = r.now()
@@ -71,7 +71,9 @@ func (r *MemoryInflightRepo) DeleteByCwmpID(ctx context.Context, deviceKey strin
 }
 
 func (r *MemoryInflightRepo) key(deviceKey string, cwmpID string) string {
-	return deviceKey + "|" + cwmpID
+	// 使用 Unicode Record Separator (0x1e) 作为分隔符，避免键冲突
+	// 避免使用 "|" 等常见字符作为分隔符
+	return deviceKey + "\x1e" + cwmpID
 }
 
 var _ core.InflightRepo = (*MemoryInflightRepo)(nil)

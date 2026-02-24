@@ -16,6 +16,7 @@ import (
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
 )
 
@@ -63,7 +64,9 @@ func (h *DataModelHook) OnResponse(ctx context.Context, session *core.Session, r
 	}
 	req, found := h.lookupInflight(ctx, session, resp)
 	if found {
-		_ = h.handleDataModelResponse(ctx, session, req, resp)
+		if err := h.handleDataModelResponse(ctx, session, req, resp); err != nil {
+			global.GVA_LOG.Error("failed to handle data model response", zap.Error(err))
+		}
 	}
 	if h.base != nil {
 		return h.base.OnResponse(ctx, session, resp)
@@ -147,7 +150,13 @@ func (h *DataModelHook) resolveDeviceNumericID(ctx context.Context, session *cor
 }
 
 func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []tr069.Parameter) error {
+	if len(params) == 0 {
+		return nil
+	}
+
 	now := h.now()
+	records := make([]model.DataModelValue, 0, len(params))
+
 	for _, p := range params {
 		if p.Name == "" {
 			continue
@@ -161,26 +170,42 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 
 		b, err := json.Marshal(val)
 		if err != nil {
+			global.GVA_LOG.Warn("failed to marshal parameter value", zap.String("name", p.Name), zap.Error(err))
 			continue
 		}
-		rec := model.DataModelValue{
+		records = append(records, model.DataModelValue{
 			DeviceID:        deviceID,
 			Name:            p.Name,
 			Writable:        false,
 			ValueType:       valType,
 			ValueJSON:       b,
 			LastCollectedAt: now,
-		}
-		_ = global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "device_id"}, {Name: "name"}},
-			DoUpdates: clause.AssignmentColumns([]string{"value_type", "value_json", "last_collected_at", "updated_at"}),
-		}).Create(&rec).Error
+		})
+	}
+
+	if len(records) == 0 {
+		return nil
+	}
+
+	// Batch upsert
+	if err := global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "device_id"}, {Name: "name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value_type", "value_json", "last_collected_at", "updated_at"}),
+	}).Create(records).Error; err != nil {
+		global.GVA_LOG.Error("failed to batch persist GPV", zap.Error(err))
+		return err
 	}
 	return nil
 }
 
 func (h *DataModelHook) persistAndExpandGPN(ctx context.Context, deviceID uint, deviceKey string, commandID string, infos []tr069.ParameterInfo) error {
+	if len(infos) == 0 {
+		return nil
+	}
+
 	now := h.now()
+	records := make([]model.DataModelValue, 0, len(infos))
+
 	for _, info := range infos {
 		if info.Name == "" {
 			continue
@@ -192,18 +217,25 @@ func (h *DataModelHook) persistAndExpandGPN(ctx context.Context, deviceID uint, 
 		if strings.HasSuffix(info.Name, ".") {
 			continue
 		}
-		rec := model.DataModelValue{
+		records = append(records, model.DataModelValue{
 			DeviceID:        deviceID,
 			Name:            info.Name,
 			Writable:        info.Writable,
 			ValueType:       "",
 			ValueJSON:       []byte("null"),
 			LastCollectedAt: now,
-		}
-		_ = global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
+		})
+	}
+
+	if len(records) > 0 {
+		// Batch upsert
+		if err := global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "device_id"}, {Name: "name"}},
 			DoUpdates: clause.AssignmentColumns([]string{"writable", "last_collected_at", "updated_at"}),
-		}).Create(&rec).Error
+		}).Create(records).Error; err != nil {
+			global.GVA_LOG.Error("failed to batch persist GPN", zap.Error(err))
+			return err
+		}
 	}
 
 	cmdPath := ""
@@ -250,18 +282,22 @@ func (h *DataModelHook) persistAndExpandGPN(ctx context.Context, deviceID uint, 
 	}
 
 	for _, obj := range objects {
-		_ = h.enqueue(ctx, deviceKey, "GetParameterNames", map[string]interface{}{
+		if err := h.enqueue(ctx, deviceKey, "GetParameterNames", map[string]interface{}{
 			"parameterPath": obj,
 			"nextLevel":     true,
 			"depth":         depth + 1,
 			"maxDepth":      maxDepth,
-		}, dedupKey("gpn", deviceKey, obj))
+		}, dedupKey("gpn", deviceKey, obj)); err != nil {
+			global.GVA_LOG.Error("failed to enqueue GetParameterNames", zap.Error(err))
+		}
 	}
 
 	for _, chunk := range chunkStrings(leaves, 50) {
-		_ = h.enqueue(ctx, deviceKey, "GetParameterValues", map[string]interface{}{
+		if err := h.enqueue(ctx, deviceKey, "GetParameterValues", map[string]interface{}{
 			"paths": chunk,
-		}, dedupKey("gpv", deviceKey, strings.Join(chunk, "\x1f")))
+		}, dedupKey("gpv", deviceKey, strings.Join(chunk, "\x1f"))); err != nil {
+			global.GVA_LOG.Error("failed to enqueue GetParameterValues", zap.Error(err))
+		}
 	}
 	return nil
 }

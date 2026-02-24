@@ -25,7 +25,10 @@ func NewRedisSessionStore(defaultTTL time.Duration) *RedisSessionStore {
 	if defaultTTL <= 0 {
 		defaultTTL = 5 * time.Minute
 	}
-	hostname, _ := os.Hostname()
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
 	return &RedisSessionStore{
 		client:     global.GVA_REDIS,
 		defaultTTL: defaultTTL,
@@ -101,8 +104,11 @@ func (s *RedisSessionStore) Delete(ctx context.Context, key string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s == nil || s.client == nil || key == "" {
-		return nil
+	if s == nil || s.client == nil {
+		return errors.New("redis not initialized")
+	}
+	if key == "" {
+		return errors.New("key is empty")
 	}
 	_, err := s.client.Del(ctx, redisSessionKey(key), redisTempKey(key), redisLockKey(key)).Result()
 	return err
@@ -116,7 +122,7 @@ func (s *RedisSessionStore) Migrate(ctx context.Context, tempKey, deviceKey stri
 		return errors.New("redis not initialized")
 	}
 	if tempKey == "" || deviceKey == "" {
-		return nil
+		return errors.New("tempKey and deviceKey are required")
 	}
 	ttl := s.defaultTTL
 	if ttl <= 0 {

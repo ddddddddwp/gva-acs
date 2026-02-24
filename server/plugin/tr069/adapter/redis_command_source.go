@@ -12,6 +12,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 type RedisCommandSourceConfig struct {
@@ -27,10 +28,17 @@ type RedisCommandSource struct {
 	cfg    RedisCommandSourceConfig
 }
 
-func NewRedisCommandSource(cfg RedisCommandSourceConfig) *RedisCommandSource {
+func NewRedisCommandSource(cfg RedisCommandSourceConfig) (*RedisCommandSource, error) {
+	if global.GVA_REDIS == nil {
+		return nil, errors.New("Redis client not initialized")
+	}
+
 	instanceID := cfg.InstanceID
 	if instanceID == "" {
-		hostname, _ := os.Hostname()
+		hostname, err := os.Hostname()
+		if err != nil {
+			hostname = "unknown"
+		}
 		instanceID = "gva-" + hostname + "-" + strconv.Itoa(os.Getpid())
 	}
 	if cfg.LockTTL <= 0 {
@@ -49,7 +57,7 @@ func NewRedisCommandSource(cfg RedisCommandSourceConfig) *RedisCommandSource {
 	return &RedisCommandSource{
 		client: global.GVA_REDIS,
 		cfg:    cfg,
-	}
+	}, nil
 }
 
 var unlockLockScript = redis.NewScript(`
@@ -63,14 +71,20 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s == nil || s.client == nil || deviceKey == "" {
-		return nil, nil, nil, nil
+	if s == nil || s.client == nil {
+		return nil, nil, nil, errors.New("RedisCommandSource not initialized")
+	}
+	if deviceKey == "" {
+		return nil, nil, nil, errors.New("deviceKey cannot be empty")
 	}
 
 	lockKey := RedisDeviceLockPrefix + deviceKey
 	ok, err := s.client.SetNX(ctx, lockKey, s.cfg.InstanceID, s.cfg.LockTTL).Result()
-	if err != nil || !ok {
-		return nil, nil, nil, nil
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to acquire device lock: %w", err)
+	}
+	if !ok {
+		return nil, nil, nil, nil // 锁已被其他实例持有
 	}
 
 	immediateKey := RedisImmediateListPrefix + deviceKey
@@ -79,7 +93,11 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 	// 1. 优先处理 immediate 队列（主动下发的命令）
 	cmd := s.pullOneFromQueue(ctx, immediateKey, deviceKey)
 	if cmd != nil {
-		fmt.Printf("----- TR069 REDIS PULL -----\ndeviceKey: %s, source: immediate, commandId: %s, operation: %s\n", deviceKey, cmd.ID, cmd.Operation)
+		global.GVA_LOG.Info("TR069 REDIS PULL",
+			zap.String("deviceKey", deviceKey),
+			zap.String("source", "immediate"),
+			zap.String("commandId", cmd.ID),
+			zap.String("operation", cmd.Operation))
 		ack := func(ctx context.Context) error {
 			if ctx == nil {
 				ctx = context.Background()
@@ -106,8 +124,13 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 			break
 		}
 		pendingCount++
-		fmt.Printf("----- TR069 REDIS PULL -----\ndeviceKey: %s, source: pending, commandId: %s, operation: %s, batch: %d/%d\n",
-			deviceKey, cmd.ID, cmd.Operation, pendingCount, s.cfg.MaxPendingPerSession)
+		global.GVA_LOG.Info("TR069 REDIS PULL",
+			zap.String("deviceKey", deviceKey),
+			zap.String("source", "pending"),
+			zap.String("commandId", cmd.ID),
+			zap.String("operation", cmd.Operation),
+			zap.Int("batch", pendingCount),
+			zap.Int("maxBatch", s.cfg.MaxPendingPerSession))
 
 		ack := func(ctx context.Context) error {
 			if ctx == nil {
@@ -138,6 +161,7 @@ func (s *RedisCommandSource) pullOneFromQueue(ctx context.Context, queueKey, dev
 		return nil
 	}
 	if err != nil {
+		global.GVA_LOG.Error("failed to pop from queue", zap.Error(err), zap.String("queueKey", queueKey))
 		return nil
 	}
 

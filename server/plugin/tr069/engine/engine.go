@@ -4,12 +4,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/tr069-core-only/factory"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core/defaults"
+	"go.uber.org/zap"
 )
 
 type Deps struct {
@@ -63,7 +65,12 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 				MaxScan:              cfg.CommandQueueMaxScan,
 				MaxPendingPerSession: cfg.CommandQueueMaxPendingPerSession,
 			}
-			queue = adapter.NewRedisCommandSource(queueCfg)
+			var err error
+			queue, err = adapter.NewRedisCommandSource(queueCfg)
+			if err != nil {
+				global.GVA_LOG.Error("failed to create Redis command source", zap.Error(err))
+				queue = defaults.NewMemoryQueue()
+			}
 		} else {
 			queue = defaults.NewMemoryQueue()
 		}
@@ -93,7 +100,12 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 		base := defaults.NewInflightCorrelationHook(inflight, cmdRepo)
 		var ingest core.CommandIngest
 		if adapter.RedisAvailable() {
-			ingest = adapter.NewRedisCommandIngest("")
+			ing, err := adapter.NewRedisCommandIngest("")
+			if err != nil {
+				global.GVA_LOG.Error("failed to create Redis command ingest", zap.Error(err))
+			} else {
+				ingest = ing
+			}
 		} else {
 			if mq, ok := queue.(*defaults.MemoryQueue); ok {
 				ingest = defaults.NewMemoryCommandIngest(mq)

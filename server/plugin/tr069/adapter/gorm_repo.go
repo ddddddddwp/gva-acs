@@ -93,7 +93,9 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	}
 
 	// Force restore if soft-deleted
-	global.GVA_DB.Unscoped().Model(&model.Device{}).Where("serial_number = ?", serial).Update("deleted_at", nil)
+	if err := global.GVA_DB.Unscoped().Model(&model.Device{}).Where("serial_number = ?", serial).Update("deleted_at", nil).Error; err != nil {
+		global.GVA_LOG.Warn("failed to restore soft-deleted device", zap.String("serial", serial), zap.Error(err))
+	}
 
 	// Re-query the device to get the ID, but handle deleted_at carefully
 	// Since we just upserted it, it should exist. However, if it was soft-deleted, we might need to Unscoped() to find it
@@ -111,10 +113,14 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	if info != nil && len(info.Params) > 0 {
 		var dbDevice model.Device
 		// Use Unscoped to find the device even if it was soft-deleted
-		if err := global.GVA_DB.Unscoped().WithContext(ctx).Select("id, deleted_at").Where("serial_number = ?", serial).First(&dbDevice).Error; err == nil {
+		if err := global.GVA_DB.Unscoped().WithContext(ctx).Select("id, deleted_at").Where("serial_number = ?", serial).First(&dbDevice).Error; err != nil {
+			global.GVA_LOG.Warn("failed to find device for parameter sync", zap.String("serial", serial), zap.Error(err))
+		} else {
 			// If it was deleted, restore it (clear deleted_at)
 			if dbDevice.DeletedAt.Valid {
-				global.GVA_DB.Unscoped().Model(&dbDevice).Update("deleted_at", nil)
+				if err := global.GVA_DB.Unscoped().Model(&dbDevice).Update("deleted_at", nil).Error; err != nil {
+					global.GVA_LOG.Warn("failed to restore device", zap.Uint("deviceID", dbDevice.ID), zap.Error(err))
+				}
 			}
 
 			now := time.Now()
@@ -133,7 +139,11 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 					valType = normalizeValueType(info.ParamTypes[k])
 				}
 				val := castValue(valType, v)
-				b, _ := json.Marshal(val)
+				b, err := json.Marshal(val)
+				if err != nil {
+					global.GVA_LOG.Warn("failed to marshal parameter valuekey", zap.String("", k), zap.Error(err))
+					continue
+				}
 				values = append(values, model.DataModelValue{
 					DeviceID:        dbDevice.ID,
 					Name:            k,
@@ -156,7 +166,7 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 				// Batch Upsert
 				// On conflict (device_id + name), update value_json and last_collected_at
 				// Preserve existing ValueType if Inform doesn't carry it
-				_ = global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
+				if err := global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
 					Columns: []clause.Column{{Name: "device_id"}, {Name: "name"}},
 					DoUpdates: clause.Assignments(map[string]interface{}{
 						"value_type":        gorm.Expr("COALESCE(NULLIF(VALUES(value_type),''), value_type)"),
@@ -164,7 +174,10 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 						"last_collected_at": gorm.Expr("VALUES(last_collected_at)"),
 						"updated_at":        gorm.Expr("NOW()"),
 					}),
-				}).CreateInBatches(values, 100).Error
+				}).CreateInBatches(values, 100).Error; err != nil {
+					global.GVA_LOG.Error("failed to batch upsert data model values", zap.Error(err))
+					return "", err
+				}
 			}
 		}
 	}

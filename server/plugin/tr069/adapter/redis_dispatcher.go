@@ -11,6 +11,7 @@ import (
 
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 type RedisDispatcherConfig struct {
@@ -55,6 +56,7 @@ var (
 func StartRedisDispatcher(ctx context.Context, cfg RedisDispatcherConfig) {
 	dispatcherOnce.Do(func() {
 		if global.GVA_REDIS == nil {
+			global.GVA_LOG.Error("failed to start Redis dispatcher: Redis client not initialized")
 			return
 		}
 		if ctx == nil {
@@ -63,6 +65,10 @@ func StartRedisDispatcher(ctx context.Context, cfg RedisDispatcherConfig) {
 		if cfg.IngestStream == "" {
 			cfg = defaultDispatcherConfig()
 		}
+		global.GVA_LOG.Info("starting Redis dispatcher",
+			zap.String("ingestStream", cfg.IngestStream),
+			zap.String("group", cfg.Group),
+			zap.String("consumer", cfg.Consumer))
 		cctx, cancel := context.WithCancel(ctx)
 		dispatcherCancel = cancel
 		go runRedisDispatcher(cctx, cfg)
@@ -71,6 +77,7 @@ func StartRedisDispatcher(ctx context.Context, cfg RedisDispatcherConfig) {
 
 func StopRedisDispatcher() {
 	if dispatcherCancel != nil {
+		global.GVA_LOG.Info("stopping Redis dispatcher")
 		dispatcherCancel()
 	}
 }
@@ -78,10 +85,16 @@ func StopRedisDispatcher() {
 func runRedisDispatcher(ctx context.Context, cfg RedisDispatcherConfig) {
 	client := global.GVA_REDIS
 	if client == nil {
+		global.GVA_LOG.Error("Redis dispatcher failed: Redis client is nil")
 		return
 	}
 
-	_ = client.XGroupCreateMkStream(ctx, cfg.IngestStream, cfg.Group, "$").Err()
+	if err := client.XGroupCreateMkStream(ctx, cfg.IngestStream, cfg.Group, "$").Err(); err != nil {
+		// 忽略 "BUSYGROUP Consumer Group name already exists" 错误
+		if !errors.Is(err, redis.TxFailedErr) && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+			global.GVA_LOG.Error("failed to create consumer group", zap.Error(err), zap.String("group", cfg.Group))
+		}
+	}
 
 	lastClaim := time.Time{}
 
@@ -131,7 +144,11 @@ func claimAndDispatch(ctx context.Context, client redis.UniversalClient, cfg Red
 		Count:  cfg.BatchSize,
 		Idle:   cfg.ClaimIdle,
 	}).Result()
-	if err != nil || len(pending) == 0 {
+	if err != nil {
+		global.GVA_LOG.Error("failed to get pending messages", zap.Error(err))
+		return
+	}
+	if len(pending) == 0 {
 		return
 	}
 	ids := make([]string, 0, len(pending))
@@ -145,7 +162,11 @@ func claimAndDispatch(ctx context.Context, client redis.UniversalClient, cfg Red
 		MinIdle:  cfg.ClaimIdle,
 		Messages: ids,
 	}).Result()
-	if err != nil || len(claimed) == 0 {
+	if err != nil {
+		global.GVA_LOG.Error("failed to claim messages", zap.Error(err))
+		return
+	}
+	if len(claimed) == 0 {
 		return
 	}
 	for _, msg := range claimed {
@@ -161,7 +182,9 @@ func dispatchOne(ctx context.Context, client redis.UniversalClient, cfg RedisDis
 		p.DeviceKey = toString(v)
 	}
 	if p.DeviceKey == "" {
-		_ = client.XAck(ctx, cfg.IngestStream, cfg.Group, msg.ID).Err()
+		if err := client.XAck(ctx, cfg.IngestStream, cfg.Group, msg.ID).Err(); err != nil {
+			global.GVA_LOG.Error("failed to ack message with empty deviceKey", zap.Error(err), zap.String("msgID", msg.ID))
+		}
 		return
 	}
 	p.CommandID = toString(msg.Values["commandId"])
@@ -172,13 +195,25 @@ func dispatchOne(ctx context.Context, client redis.UniversalClient, cfg RedisDis
 
 	b, err := json.Marshal(p)
 	if err != nil {
+		global.GVA_LOG.Error("failed to marshal dispatch payload", zap.Error(err), zap.String("deviceKey", p.DeviceKey))
+		if err := client.XAck(ctx, cfg.IngestStream, cfg.Group, msg.ID).Err(); err != nil {
+			global.GVA_LOG.Error("failed to ack message after marshal failure", zap.Error(err))
+		}
 		return
 	}
 
 	if err := client.RPush(ctx, p.pendingKey(), b).Err(); err != nil {
+		global.GVA_LOG.Error("failed to push to pending queue", zap.Error(err), zap.String("deviceKey", p.DeviceKey))
 		return
 	}
-	_ = client.XAck(ctx, cfg.IngestStream, cfg.Group, msg.ID).Err()
+	if err := client.XAck(ctx, cfg.IngestStream, cfg.Group, msg.ID).Err(); err != nil {
+		global.GVA_LOG.Error("failed to ack message", zap.Error(err), zap.String("msgID", msg.ID))
+	}
+
+	global.GVA_LOG.Debug("dispatched message",
+		zap.String("deviceKey", p.DeviceKey),
+		zap.String("commandId", p.CommandID),
+		zap.String("op", p.Op))
 }
 
 func toString(v interface{}) string {

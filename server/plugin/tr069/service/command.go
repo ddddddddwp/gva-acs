@@ -126,7 +126,10 @@ func (s *CommandService) enqueue(ctx context.Context, deviceKey string, op strin
 		}
 	}
 
-	ingest := adapter.NewRedisCommandIngest("")
+	ingest, err := adapter.NewRedisCommandIngest("")
+	if err != nil {
+		return "", err
+	}
 	if err := ingest.Enqueue(ctx, &core.Command{
 		ID:        cmdID,
 		DeviceKey: deviceKey,
