@@ -26,7 +26,7 @@
       </el-form>
     </div>
     <div class="gva-table-box">
-      <el-table :data="tableData" row-key="ID" stripe style="width: 100%">
+      <el-table :data="tableData" v-loading="loading" row-key="ID" stripe style="width: 100%">
         <el-table-column label="清除时间" width="180">
           <template #default="scope">{{ formatDate(scope.row.endTime) }}</template>
         </el-table-column>
@@ -58,8 +58,8 @@
       <div class="gva-pagination">
         <el-pagination
           layout="total, sizes, prev, pager, next, jumper"
-          :current-page="page"
-          :page-size="pageSize"
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
           :page-sizes="[10, 30, 50, 100]"
           :total="total"
           @current-change="handleCurrentChange"
@@ -91,7 +91,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { getHistoryAlarms } from '@/plugin/tr069/api/alarm'
 import { formatDate } from '@/utils/format'
 
@@ -99,7 +100,13 @@ defineOptions({
   name: 'Tr069HistoryAlarm'
 })
 
-const searchInfo = ref({})
+// 响应式数据
+const loading = ref(false)
+const searchInfo = reactive({
+  serialNumber: '',
+  source: '',
+  severity: ''
+})
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
@@ -107,6 +114,7 @@ const tableData = ref([])
 const dialogVisible = ref(false)
 const detailData = ref({})
 
+// 获取严重程度类型
 const getSeverityType = (severity) => {
   switch (severity) {
     case 'Critical': return 'danger'
@@ -117,17 +125,23 @@ const getSeverityType = (severity) => {
   }
 }
 
-const getTableData = async() => {
-  const table = await getHistoryAlarms({ page: page.value, pageSize: pageSize.value, ...searchInfo.value })
-  if (table.code === 0) {
-    tableData.value = table.data.list
-    total.value = table.data.total
-    page.value = table.data.page
-    pageSize.value = table.data.pageSize
+// 获取表格数据
+const getTableData = async () => {
+  loading.value = true
+  try {
+    const res = await getHistoryAlarms({ page: page.value, pageSize: pageSize.value, ...searchInfo })
+    if (res.code === 0) {
+      tableData.value = res.data.list || []
+      total.value = res.data.total || 0
+    } else {
+      ElMessage.error(res.msg || '获取数据失败')
+    }
+  } catch (error) {
+    ElMessage.error('获取历史告警列表失败')
+  } finally {
+    loading.value = false
   }
 }
-
-getTableData()
 
 const onSubmit = () => {
   page.value = 1
@@ -135,7 +149,9 @@ const onSubmit = () => {
 }
 
 const onReset = () => {
-  searchInfo.value = {}
+  searchInfo.serialNumber = ''
+  searchInfo.source = ''
+  searchInfo.severity = ''
   page.value = 1
   getTableData()
 }
@@ -154,4 +170,9 @@ const openDetail = (row) => {
   detailData.value = row
   dialogVisible.value = true
 }
+
+// 生命周期
+onMounted(() => {
+  getTableData()
+})
 </script>

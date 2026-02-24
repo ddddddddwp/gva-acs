@@ -3,7 +3,7 @@
     <div class="search-box">
       <el-form :inline="true" :model="searchInfo" class="demo-form-inline">
         <el-form-item label="序列号">
-          <el-input v-model="searchInfo.serialNumber" placeholder="请输入序列号" />
+          <el-input v-model="searchInfo.serialNumber" placeholder="请输入序列号" clearable />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :icon="Search" @click="onSubmit">查询</el-button>
@@ -44,8 +44,8 @@
         <el-pagination
           background
           layout="total, sizes, prev, pager, next, jumper"
-          :current-page="page"
-          :page-size="pageSize"
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
           :page-sizes="[10, 30, 50, 100]"
           :total="total"
           @current-change="handleCurrentChange"
@@ -56,7 +56,7 @@
 
     <!-- 录入设备弹窗 -->
     <el-dialog title="录入设备 (白名单)" v-model="dialogFormVisible" width="500px">
-      <el-form :model="formData" ref="addForm" :rules="rules" label-width="100px">
+      <el-form :model="formData" ref="addFormRef" :rules="rules" label-width="100px">
         <el-form-item label="序列号" prop="serialNumber">
           <el-input v-model="formData.serialNumber" autocomplete="off" />
         </el-form-item>
@@ -67,10 +67,12 @@
           <el-input v-model="formData.remark" type="textarea" />
         </el-form-item>
       </el-form>
-      <div slot="footer" class="dialog-footer">
-        <el-button @click="dialogFormVisible = false">取 消</el-button>
-        <el-button type="primary" @click="enterDevice">确 定</el-button>
-      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="dialogFormVisible = false">取 消</el-button>
+          <el-button type="primary" @click="enterDevice">确 定</el-button>
+        </div>
+      </template>
     </el-dialog>
 
     <!-- 设备详情抽屉 -->
@@ -85,7 +87,7 @@
           <el-descriptions-item label="序列号">{{ currentRow.serialNumber }}</el-descriptions-item>
           <el-descriptions-item label="OUI">{{ currentRow.oui }}</el-descriptions-item>
           <el-descriptions-item label="IP地址">{{ currentRow.ip }}</el-descriptions-item>
-          <el-descriptions-item label="最后上线">{{ currentRow.lastOnline | formatDate }}</el-descriptions-item>
+          <el-descriptions-item label="最后上线">{{ formatDate(currentRow.lastOnline) }}</el-descriptions-item>
         </el-descriptions>
 
         <div class="mb-4 flex flex-wrap gap-2">
@@ -111,10 +113,12 @@
           <el-input v-model="gpvForm.pathsText" type="textarea" :rows="10" />
         </el-form-item>
       </el-form>
-      <div slot="footer" class="dialog-footer">
-        <el-button @click="gpvDialogVisible = false">取 消</el-button>
-        <el-button type="primary" @click="submitGPV" :loading="gpvSubmitting">确 定</el-button>
-      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="gpvDialogVisible = false">取 消</el-button>
+          <el-button type="primary" @click="submitGPV" :loading="gpvSubmitting">确 定</el-button>
+        </div>
+      </template>
     </el-dialog>
 
     <el-dialog title="SetParameterValues" v-model="spvDialogVisible" width="820px" append-to-body>
@@ -150,10 +154,12 @@
           </div>
         </el-form-item>
       </el-form>
-      <div slot="footer" class="dialog-footer">
-        <el-button @click="spvDialogVisible = false">取 消</el-button>
-        <el-button type="primary" @click="submitSPV" :loading="spvSubmitting">确 定</el-button>
-      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="spvDialogVisible = false">取 消</el-button>
+          <el-button type="primary" @click="submitSPV" :loading="spvSubmitting">确 定</el-button>
+        </div>
+      </template>
     </el-dialog>
 
     <data-model-viewer
@@ -163,227 +169,246 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, reactive, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getDeviceList, createDevice, deleteDevice } from '@/plugin/tr069/api/device'
 import { fullDataModelSync, getParameterValues, getRPCMethods, setParameterValues } from '@/plugin/tr069/api/command'
+import { formatTimeToStr } from '@/utils/date'
 import FapInfo from './components/fap-info.vue'
 import DataModelViewer from './components/data-model-viewer.vue'
-import { formatTimeToStr } from '@/utils/date'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Download, Edit, RefreshRight, Connection, View, Delete, Search, Plus } from '@element-plus/icons-vue'
 
-export default {
-  name: 'DeviceList',
-  components: {
-    FapInfo,
-    DataModelViewer,
-    Refresh, Download, Edit, RefreshRight, Connection, View, Delete, Search, Plus
-  },
-  filters: {
-    formatDate(time) {
-      if (time && time !== '0001-01-01T00:00:00Z') {
-        return formatTimeToStr(time)
-      }
-      return '-'
+// 响应式数据
+const loading = ref(false)
+const tableData = ref([])
+const page = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
+const searchInfo = reactive({ serialNumber: '' })
+const dialogFormVisible = ref(false)
+const formData = reactive({
+  serialNumber: '',
+  oui: '',
+  remark: ''
+})
+const addFormRef = ref(null)
+const drawerVisible = ref(false)
+const currentRow = ref({})
+const rpcLoading = ref(false)
+const gpvDialogVisible = ref(false)
+const gpvSubmitting = ref(false)
+const gpvForm = reactive({ pathsText: '' })
+const spvDialogVisible = ref(false)
+const spvSubmitting = ref(false)
+const spvForm = reactive({
+  parameterKey: '',
+  parameters: [{ name: '', type: 'xsd:string', value: '' }]
+})
+const fullSyncSubmitting = ref(false)
+const dmDrawerVisible = ref(false)
+
+// 表单校验规则
+const rules = {
+  serialNumber: [{ required: true, message: '请输入序列号', trigger: 'blur' }],
+  oui: [{ required: true, message: '请输入OUI', trigger: 'blur' }]
+}
+
+// 格式化日期
+const formatDate = (time) => {
+  if (time && time !== '0001-01-01T00:00:00Z') {
+    return formatTimeToStr(time)
+  }
+  return '-'
+}
+
+// 获取表格数据
+const getTableData = async () => {
+  loading.value = true
+  try {
+    const res = await getDeviceList({ page: page.value, pageSize: pageSize.value, ...searchInfo })
+    if (res.code === 0) {
+      tableData.value = res.data.list || []
+      total.value = res.data.total || 0
     }
-  },
-  data() {
-    return {
-      loading: false,
-      tableData: [],
-      page: 1,
-      pageSize: 10,
-      total: 0,
-      searchInfo: {
-        serialNumber: ''
-      },
-      dialogFormVisible: false,
-      formData: {
-        serialNumber: '',
-        oui: '',
-        remark: ''
-      },
-      rules: {
-        serialNumber: [{ required: true, message: '请输入序列号', trigger: 'blur' }],
-        oui: [{ required: true, message: '请输入OUI', trigger: 'blur' }]
-      },
-      drawerVisible: false,
-      currentRow: {},
-      rpcLoading: false,
-      gpvDialogVisible: false,
-      gpvSubmitting: false,
-      gpvForm: {
-        pathsText: ''
-      },
-      spvDialogVisible: false,
-      spvSubmitting: false,
-      spvForm: {
-        parameterKey: '',
-        parameters: [{ name: '', type: 'xsd:string', value: '' }]
-      },
-      fullSyncSubmitting: false,
-      dmDrawerVisible: false
-    }
-  },
-  created() {
-    this.getTableData()
-  },
-  methods: {
-    async getTableData() {
-      this.loading = true
-      const res = await getDeviceList({ page: this.page, pageSize: this.pageSize, ...this.searchInfo })
-      if (res.code === 0) {
-        this.tableData = res.data.list
-        this.total = res.data.total
-      }
-      this.loading = false
-    },
-    onSubmit() {
-      this.page = 1
-      this.getTableData()
-    },
-    onReset() {
-      this.searchInfo = { serialNumber: '' }
-      this.getTableData()
-    },
-    handleCurrentChange(val) {
-      this.page = val
-      this.getTableData()
-    },
-    handleSizeChange(val) {
-      this.pageSize = val
-      this.getTableData()
-    },
-    openDialog() {
-      this.formData = { serialNumber: '', oui: '', remark: '' }
-      this.dialogFormVisible = true
-    },
-    enterDevice() {
-      this.$refs.addForm.validate(async valid => {
-        if (valid) {
-          const res = await createDevice(this.formData)
-          if (res.code === 0) {
-            ElMessage.success('录入成功')
-            this.dialogFormVisible = false
-            this.getTableData()
-          }
-        }
-      })
-    },
-    deleteRow(row) {
-      ElMessageBox.confirm('确定要删除该设备吗?', '提示', {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }).then(async () => {
-        const res = await deleteDevice(row.ID)
-        if (res.code === 0) {
-          ElMessage.success('删除成功')
-          this.getTableData()
-        }
-      })
-    },
-    viewDetail(row) {
-      this.currentRow = row
-      this.drawerVisible = true
-      this.gpvForm = { pathsText: 'Device.DeviceInfo.SerialNumber' }
-      this.spvForm = { parameterKey: '', parameters: [{ name: '', type: 'xsd:string', value: '' }] }
-    },
-    async handleGetRPCMethods() {
-      if (!this.currentRow.ID) return
-      this.rpcLoading = true
-      try {
-        const res = await getRPCMethods(this.currentRow.ID)
-        if (res.code === 0) {
-          ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
-        } else {
-          ElMessage.error(res.msg || '下发失败')
-        }
-      } finally {
-        this.rpcLoading = false
-      }
-    },
-    openGPVDialog() {
-      this.gpvDialogVisible = true
-    },
-    async submitGPV() {
-      if (!this.currentRow.ID) return
-      const paths = (this.gpvForm.pathsText || '')
-        .split('\n')
-        .map(s => s.trim())
-        .filter(Boolean)
-      if (paths.length === 0) {
-        ElMessage.warning('请填写参数路径')
-        return
-      }
-      this.gpvSubmitting = true
-      try {
-        const res = await getParameterValues(this.currentRow.ID, { paths })
-        if (res.code === 0) {
-          ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
-          this.gpvDialogVisible = false
-        } else {
-          ElMessage.error(res.msg || '下发失败')
-        }
-      } finally {
-        this.gpvSubmitting = false
-      }
-    },
-    openSPVDialog() {
-      this.spvDialogVisible = true
-    },
-    addSPVRow() {
-      this.spvForm.parameters = [...this.spvForm.parameters, { name: '', type: 'xsd:string', value: '' }]
-    },
-    removeSPVRow(idx) {
-      this.spvForm.parameters = this.spvForm.parameters.filter((_, i) => i !== idx)
-    },
-    async submitSPV() {
-      if (!this.currentRow.ID) return
-      const payload = {
-        parameterKey: this.spvForm.parameterKey,
-        parameters: (this.spvForm.parameters || [])
-          .map(p => ({ ...p, name: (p.name || '').trim(), type: (p.type || '').trim() }))
-          .filter(p => p.name)
-      }
-      if (payload.parameters.length === 0) {
-        ElMessage.warning('请至少填写一条参数')
-        return
-      }
-      this.spvSubmitting = true
-      try {
-        const res = await setParameterValues(this.currentRow.ID, payload)
-        if (res.code === 0) {
-          ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
-          this.spvDialogVisible = false
-        } else {
-          ElMessage.error(res.msg || '下发失败')
-        }
-      } finally {
-        this.spvSubmitting = false
-      }
-    },
-    async openFullSyncDialog() {
-      if (!this.currentRow?.ID) return
-      if (this.fullSyncSubmitting) return
-      this.fullSyncSubmitting = true
-      try {
-        const res = await fullDataModelSync(this.currentRow.ID, { paths: ['Device.'] })
-        if (res.code === 0) {
-          ElMessage.success('已下发全量同步请求')
-        } else {
-          ElMessage.error(res.msg || '下发失败')
-        }
-      } finally {
-        this.fullSyncSubmitting = false
-      }
-    },
-    openDataModelFromRow(row) {
-      this.currentRow = row
-      this.dmDrawerVisible = true
-    }
+  } catch (error) {
+    ElMessage.error('获取设备列表失败')
+  } finally {
+    loading.value = false
   }
 }
+
+const onSubmit = () => {
+  page.value = 1
+  getTableData()
+}
+
+const onReset = () => {
+  searchInfo.serialNumber = ''
+  getTableData()
+}
+
+const handleCurrentChange = (val) => {
+  page.value = val
+  getTableData()
+}
+
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  getTableData()
+}
+
+const openDialog = () => {
+  formData.serialNumber = ''
+  formData.oui = ''
+  formData.remark = ''
+  dialogFormVisible.value = true
+}
+
+const enterDevice = async () => {
+  try {
+    await addFormRef.value.validate()
+    const res = await createDevice({ ...formData })
+    if (res.code === 0) {
+      ElMessage.success('录入成功')
+      dialogFormVisible.value = false
+      getTableData()
+    } else {
+      ElMessage.error(res.msg || '录入失败')
+    }
+  } catch (error) {
+    // 表单验证失败
+  }
+}
+
+const deleteRow = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要删除该设备吗?', '提示', { type: 'warning' })
+    const res = await deleteDevice(row.ID)
+    if (res.code === 0) {
+      ElMessage.success('删除成功')
+      getTableData()
+    } else {
+      ElMessage.error(res.msg || '删除失败')
+    }
+  } catch (error) {
+    // 用户取消
+  }
+}
+
+const viewDetail = (row) => {
+  currentRow.value = row
+  drawerVisible.value = true
+  gpvForm.pathsText = 'Device.DeviceInfo.SerialNumber'
+  spvForm.parameterKey = ''
+  spvForm.parameters = [{ name: '', type: 'xsd:string', value: '' }]
+}
+
+const handleGetRPCMethods = async () => {
+  if (!currentRow.value.ID) return
+  rpcLoading.value = true
+  try {
+    const res = await getRPCMethods(currentRow.value.ID)
+    if (res.code === 0) {
+      ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
+    } else {
+      ElMessage.error(res.msg || '下发失败')
+    }
+  } finally {
+    rpcLoading.value = false
+  }
+}
+
+const openGPVDialog = () => {
+  gpvDialogVisible.value = true
+}
+
+const submitGPV = async () => {
+  if (!currentRow.value.ID) return
+  const paths = (gpvForm.pathsText || '')
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+  if (paths.length === 0) {
+    ElMessage.warning('请填写参数路径')
+    return
+  }
+  gpvSubmitting.value = true
+  try {
+    const res = await getParameterValues(currentRow.value.ID, { paths })
+    if (res.code === 0) {
+      ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
+      gpvDialogVisible.value = false
+    } else {
+      ElMessage.error(res.msg || '下发失败')
+    }
+  } finally {
+    gpvSubmitting.value = false
+  }
+}
+
+const openSPVDialog = () => {
+  spvDialogVisible.value = true
+}
+
+const addSPVRow = () => {
+  spvForm.parameters = [...spvForm.parameters, { name: '', type: 'xsd:string', value: '' }]
+}
+
+const removeSPVRow = (idx) => {
+  spvForm.parameters = spvForm.parameters.filter((_, i) => i !== idx)
+}
+
+const submitSPV = async () => {
+  if (!currentRow.value.ID) return
+  const payload = {
+    parameterKey: spvForm.parameterKey,
+    parameters: (spvForm.parameters || [])
+      .map(p => ({ ...p, name: (p.name || '').trim(), type: (p.type || '').trim() }))
+      .filter(p => p.name)
+  }
+  if (payload.parameters.length === 0) {
+    ElMessage.warning('请至少填写一条参数')
+    return
+  }
+  spvSubmitting.value = true
+  try {
+    const res = await setParameterValues(currentRow.value.ID, payload)
+    if (res.code === 0) {
+      ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
+      spvDialogVisible.value = false
+    } else {
+      ElMessage.error(res.msg || '下发失败')
+    }
+  } finally {
+    spvSubmitting.value = false
+  }
+}
+
+const openFullSyncDialog = async () => {
+  if (!currentRow.value?.ID) return
+  if (fullSyncSubmitting.value) return
+  fullSyncSubmitting.value = true
+  try {
+    const res = await fullDataModelSync(currentRow.value.ID, { paths: ['Device.'] })
+    if (res.code === 0) {
+      ElMessage.success('已下发全量同步请求')
+    } else {
+      ElMessage.error(res.msg || '下发失败')
+    }
+  } finally {
+    fullSyncSubmitting.value = false
+  }
+}
+
+const openDataModelFromRow = (row) => {
+  currentRow.value = row
+  dmDrawerVisible.value = true
+}
+
+// 生命周期
+onMounted(() => {
+  getTableData()
+})
 </script>
 
 <style scoped>

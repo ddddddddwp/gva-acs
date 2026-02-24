@@ -12,7 +12,7 @@
       </el-form>
     </div>
 
-    <el-table :data="tableData" row-key="ID">
+    <el-table :data="tableData" v-loading="loading" row-key="ID">
       <el-table-column align="left" label="ID" min-width="80" prop="ID" />
       <el-table-column align="left" label="SN" min-width="160" prop="serialNumber" />
       <el-table-column align="left" label="OUI" min-width="120" prop="oui" />
@@ -105,7 +105,7 @@
             accordion
             @node-click="handleNodeClick"
           >
-            <template #default="{ node, data }">
+            <template #default="{ node }">
               <span class="custom-tree-node">
                 <span>{{ node.label }}</span>
               </span>
@@ -136,7 +136,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { 
   getTR069DeviceList, 
@@ -152,24 +152,34 @@ defineOptions({
   name: 'TR069Device'
 })
 
-const searchInfo = ref({
+const searchInfo = reactive({
   serialNumber: ''
 })
 
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+const loading = ref(false)
 const tableData = ref([])
 
 const getTableData = async () => {
-  const res = await getTR069DeviceList({
-    page: page.value,
-    pageSize: pageSize.value,
-    serialNumber: searchInfo.value.serialNumber
-  })
-  if (res.code === 0) {
-    tableData.value = res.data.list
-    total.value = res.data.total
+  loading.value = true
+  try {
+    const res = await getTR069DeviceList({
+      page: page.value,
+      pageSize: pageSize.value,
+      serialNumber: searchInfo.serialNumber
+    })
+    if (res.code === 0) {
+      tableData.value = res.data.list || []
+      total.value = res.data.total || 0
+    } else {
+      ElMessage.error(res.msg || '获取数据失败')
+    }
+  } catch (error) {
+    ElMessage.error('获取设备列表失败')
+  } finally {
+    loading.value = false
   }
 }
 
@@ -179,7 +189,7 @@ const onSearch = async () => {
 }
 
 const onReset = async () => {
-  searchInfo.value.serialNumber = ''
+  searchInfo.serialNumber = ''
   page.value = 1
   await getTableData()
 }
@@ -197,20 +207,20 @@ const handleGetRPCMethods = async (row) => {
 
 const gpvDialogVisible = ref(false)
 const gpvSubmitting = ref(false)
-const gpvForm = ref({
+const gpvForm = reactive({
   pathsText: ''
 })
 
 const openGPV = (row) => {
   currentDeviceId.value = row.ID
-  gpvForm.value.pathsText = 'Device.DeviceInfo.SerialNumber'
+  gpvForm.pathsText = 'Device.DeviceInfo.SerialNumber'
   gpvDialogVisible.value = true
 }
 
 const submitGPV = async () => {
   const deviceId = currentDeviceId.value
   if (!deviceId) return
-  const paths = gpvForm.value.pathsText
+  const paths = gpvForm.pathsText
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean)
@@ -231,34 +241,30 @@ const submitGPV = async () => {
 
 const spvDialogVisible = ref(false)
 const spvSubmitting = ref(false)
-const spvForm = ref({
+const spvForm = reactive({
   parameterKey: '',
   parameters: [{ name: '', type: 'xsd:string', value: '' }]
 })
 
 const openSPV = (row) => {
   currentDeviceId.value = row.ID
-  spvForm.value = {
-    parameterKey: '',
-    parameters: [{ name: '', type: 'xsd:string', value: '' }]
-  }
+  spvForm.parameterKey = ''
+  spvForm.parameters = [{ name: '', type: 'xsd:string', value: '' }]
   spvDialogVisible.value = true
 }
 
 const addSPVRow = () => {
-  spvForm.value.parameters = [...spvForm.value.parameters, { name: '', type: 'xsd:string', value: '' }]
+  spvForm.parameters = [...spvForm.parameters, { name: '', type: 'xsd:string', value: '' }]
 }
-
 const removeSPVRow = (idx) => {
-  spvForm.value.parameters = spvForm.value.parameters.filter((_, i) => i !== idx)
+  spvForm.parameters = spvForm.parameters.filter((_, i) => i !== idx)
 }
-
 const submitSPV = async () => {
   const deviceId = currentDeviceId.value
   if (!deviceId) return
   const payload = {
-    parameterKey: spvForm.value.parameterKey,
-    parameters: spvForm.value.parameters
+    parameterKey: spvForm.parameterKey,
+    parameters: spvForm.parameters
       .map((p) => ({ ...p, name: (p.name || '').trim(), type: (p.type || '').trim() }))
       .filter((p) => p.name)
   }
@@ -318,7 +324,7 @@ const openDataModel = async (row) => {
 const buildTree = (paths) => {
   const root = []
   // Ensure paths are sorted to process parent before children
-  paths.sort()
+  const sortedPaths = [...paths].sort()
   
   // Helper to find or create node
   const findOrCreate = (nodes, part, fullPath) => {
@@ -335,13 +341,13 @@ const buildTree = (paths) => {
     return node
   }
 
-  paths.forEach(path => {
+  sortedPaths.forEach(path => {
     // Split "Device.DeviceInfo." -> ["Device", "DeviceInfo"]
     const parts = path.split('.').filter(Boolean)
     let currentLevel = root
     let currentPath = ''
     
-    parts.forEach((part, index) => {
+    parts.forEach((part) => {
       currentPath += part + '.'
       const node = findOrCreate(currentLevel, part, currentPath)
       currentLevel = node.children
@@ -368,6 +374,8 @@ const formatValue = (jsonVal) => {
   return String(jsonVal)
 }
 
-getTableData()
+onMounted(() => {
+  getTableData()
+})
 </script>
 

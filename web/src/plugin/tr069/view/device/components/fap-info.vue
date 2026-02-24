@@ -3,10 +3,10 @@
     <div class="header">
       <span class="title">基站无线参数 (TR-196)</span>
       <div class="actions">
-        <el-button type="primary" size="small" icon="el-icon-refresh" @click="handleSync" :loading="syncLoading">
+        <el-button type="primary" size="small" :icon="Refresh" @click="handleSync" :loading="syncLoading">
           刷新/同步
         </el-button>
-        <el-button type="warning" size="small" icon="el-icon-edit" @click="handleEdit">
+        <el-button type="warning" size="small" :icon="Edit" @click="handleEdit">
           修改配置
         </el-button>
       </div>
@@ -51,91 +51,96 @@
           <el-input v-model="form.txPower" placeholder="e.g. 20"></el-input>
         </el-form-item>
       </el-form>
-      <span slot="footer" class="dialog-footer">
-        <el-button @click="dialogVisible = false">取 消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="submitLoading">确 定</el-button>
-      </span>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="dialogVisible = false">取 消</el-button>
+          <el-button type="primary" @click="handleSubmit" :loading="submitLoading">确 定</el-button>
+        </span>
+      </template>
     </el-dialog>
   </div>
 </template>
 
-<script>
-import { getFAPInfo, syncFAPInfo, configureFAP } from '@/plugin/tr069/api/fap'
+<script setup>
+import { ref, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { getFAPInfo, syncFAPInfo, configureFAP } from '@/plugin/tr069/api/fap'
 
-export default {
-  name: 'FapInfo',
-  props: {
-    deviceId: {
-      type: Number,
-      required: true
+// Props
+const props = defineProps({
+  deviceId: {
+    type: Number,
+    required: true
+  }
+})
+
+// 响应式数据
+const fapInfo = ref({})
+const syncLoading = ref(false)
+const submitLoading = ref(false)
+const dialogVisible = ref(false)
+const form = reactive({
+  pci: null,
+  txPower: ''
+})
+
+// 获取数据
+const fetchData = async () => {
+  try {
+    const res = await getFAPInfo(props.deviceId)
+    if (res.code === 0) {
+      fapInfo.value = res.data || {}
     }
-  },
-  data() {
-    return {
-      fapInfo: {},
-      syncLoading: false,
-      submitLoading: false,
-      dialogVisible: false,
-      form: {
-        pci: null,
-        txPower: ''
-      }
-    }
-  },
-  watch: {
-    deviceId: {
-      handler(val) {
-        if (val) {
-          this.fetchData()
-        }
-      },
-      immediate: true
-    }
-  },
-  methods: {
-    async fetchData() {
-      try {
-        const res = await getFAPInfo(this.deviceId)
-        if (res.code === 0) {
-          this.fapInfo = res.data || {}
-        }
-      } catch (error) {
-        console.error('Fetch FAP Info Error:', error)
-      }
-    },
-    async handleSync() {
-      this.syncLoading = true
-      try {
-        const res = await syncFAPInfo(this.deviceId)
-        if (res.code === 0) {
-          ElMessage.success('同步任务已下发，请稍后刷新查看最新数据')
-        }
-      } finally {
-        this.syncLoading = false
-      }
-    },
-    handleEdit() {
-      this.form = {
-        pci: this.fapInfo.pci,
-        txPower: this.fapInfo.txPower
-      }
-      this.dialogVisible = true
-    },
-    async handleSubmit() {
-      this.submitLoading = true
-      try {
-        const res = await configureFAP(this.deviceId, this.form)
-        if (res.code === 0) {
-          ElMessage.success('配置任务已下发')
-          this.dialogVisible = false
-        }
-      } finally {
-        this.submitLoading = false
-      }
-    }
+  } catch (error) {
+    ElMessage.error('获取基站信息失败')
   }
 }
+
+// 同步
+const handleSync = async () => {
+  syncLoading.value = true
+  try {
+    const res = await syncFAPInfo(props.deviceId)
+    if (res.code === 0) {
+      ElMessage.success('同步任务已下发，请稍后刷新查看最新数据')
+    } else {
+      ElMessage.error(res.msg || '同步失败')
+    }
+  } finally {
+    syncLoading.value = false
+  }
+}
+
+// 编辑
+const handleEdit = () => {
+  form.pci = fapInfo.value.pci
+  form.txPower = fapInfo.value.txPower
+  dialogVisible.value = true
+}
+
+// 提交
+const handleSubmit = async () => {
+  submitLoading.value = true
+  try {
+    const res = await configureFAP(props.deviceId, { ...form })
+    if (res.code === 0) {
+      ElMessage.success('配置任务已下发')
+      dialogVisible.value = false
+      fetchData()
+    } else {
+      ElMessage.error(res.msg || '配置失败')
+    }
+  } finally {
+    submitLoading.value = false
+  }
+}
+
+// 监听设备ID变化
+watch(() => props.deviceId, (val) => {
+  if (val) {
+    fetchData()
+  }
+}, { immediate: true })
 </script>
 
 <style scoped>

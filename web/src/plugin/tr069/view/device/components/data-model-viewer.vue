@@ -135,7 +135,7 @@
 
 <script setup>
 import { ref, watch, computed } from 'vue'
-import { Monitor, Folder, Document, Search, Refresh, Download, RefreshRight, CopyDocument, Loading } from '@element-plus/icons-vue'
+import { Search, Refresh, Download, RefreshRight, CopyDocument, Loading } from '@element-plus/icons-vue'
 import { getDataModelStructure, getDataModelList } from '@/plugin/tr069/api/datamodel'
 import { fullDataModelSync } from '@/plugin/tr069/api/command'
 import { formatTimeToStr } from '@/utils/date'
