@@ -62,7 +62,7 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
-replace github.com/ddddddddwp/tr069-core-only => /root/demo/gin-vue-admin/server/plugin/tr069/lib/tr069-core-only
+replace github.com/ddddddddwp/tr069-core-only => ./plugin/tr069/lib/tr069-core-only
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

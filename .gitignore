@@ -69,3 +69,6 @@ worktrees/
 /bs_5GNR*.tar
 /ue_5GNR*.tar
 /**/simulation-logs/
+
+# Locally maintained TR-069 core protocol repository
+/server/plugin/tr069/lib/tr069-core-only/
