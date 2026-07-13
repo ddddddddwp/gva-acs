@@ -57,6 +57,7 @@ Expected: 命令非零退出，至少 `.codex/skills`、Comet cache、`hb_ping` 
 # Local code intelligence and generated OpenSpec integrations
 /.codegraph/
 /.codex/skills/openspec-*/
+/.superpowers/
 
 # Comet machine-local runtime state
 /.comet/cache/
@@ -250,7 +251,7 @@ Expected: 未合并列表、冲突标记搜索和 `git diff --check` 均无错�
 ```bash
 git add -A
 git status --short
-git commit
+git commit -m "Merge upstream/main into V2 sync branch"
 git show -s --format='%H%n%P%n%s' HEAD
 ```
 
