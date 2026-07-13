@@ -15,8 +15,6 @@ yarn-error.log*
 # Editor directories and files
 .idea
 .vscode
-.trae
-.claude
 *.suo
 *.ntvs*
 *.njsproj
@@ -43,15 +41,7 @@ web/pnpm-lock.yaml
 *.db
 *.sqlite
 *.sqlite3
-
-# Local SDK
-server/plugin/tr069/lib/tr069-core-only
-
-# local backups
-.backup/
-
-# Isolated development worktrees
-/.worktrees/
+worktrees/
 
 # Local code intelligence and generated OpenSpec integrations
 /.codegraph/

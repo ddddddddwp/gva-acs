@@ -5,6 +5,8 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/initialize/internal"
 	_ "github.com/go-sql-driver/mysql"
+	"time"
+
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -43,6 +45,7 @@ func initMysqlDatabase(m config.Mysql) *gorm.DB {
 		sqlDB, _ := db.DB()
 		sqlDB.SetMaxIdleConns(m.MaxIdleConns)
 		sqlDB.SetMaxOpenConns(m.MaxOpenConns)
+		sqlDB.SetConnMaxLifetime(time.Duration(m.ConnMaxLifetime) * time.Second)
 		return db
 	}
 }
