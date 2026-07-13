@@ -49,3 +49,6 @@ server/plugin/tr069/lib/tr069-core-only
 
 # local backups
 .backup/
+
+# Isolated development worktrees
+/.worktrees/
