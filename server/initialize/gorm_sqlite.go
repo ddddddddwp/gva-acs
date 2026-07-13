@@ -4,6 +4,8 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/config"
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/initialize/internal"
+	"time"
+
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -33,6 +35,7 @@ func initSqliteDatabase(s config.Sqlite) *gorm.DB {
 		sqlDB, _ := db.DB()
 		sqlDB.SetMaxIdleConns(s.MaxIdleConns)
 		sqlDB.SetMaxOpenConns(s.MaxOpenConns)
+		sqlDB.SetConnMaxLifetime(time.Duration(s.ConnMaxLifetime) * time.Second)
 		return db
 	}
 }

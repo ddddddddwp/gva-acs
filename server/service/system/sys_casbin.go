@@ -66,7 +66,13 @@ func (casbinService *CasbinService) UpdateCasbin(adminAuthorityID, AuthorityID u
 		return nil
 	} // 设置空权限无需调用 AddPolicies 方法
 	e := utils.GetCasbin()
-	success, _ := e.AddPolicies(rules)
+	if e == nil {
+		return errors.New("casbin enforcer 初始化失败")
+	}
+	success, err := e.AddPolicies(rules)
+	if err != nil {
+		return err
+	}
 	if !success {
 		return errors.New("存在相同api,添加失败,请联系管理员")
 	}
@@ -89,6 +95,9 @@ func (casbinService *CasbinService) UpdateCasbinApi(oldPath string, newPath stri
 	}
 
 	e := utils.GetCasbin()
+	if e == nil {
+		return errors.New("casbin enforcer 初始化失败")
+	}
 	return e.LoadPolicy()
 }
 
@@ -100,6 +109,9 @@ func (casbinService *CasbinService) UpdateCasbinApi(oldPath string, newPath stri
 
 func (casbinService *CasbinService) GetPolicyPathByAuthorityId(AuthorityID uint) (pathMaps []request.CasbinInfo) {
 	e := utils.GetCasbin()
+	if e == nil {
+		return pathMaps
+	}
 	authorityId := strconv.Itoa(int(AuthorityID))
 	list, _ := e.GetFilteredPolicy(0, authorityId)
 	for _, v := range list {
@@ -119,6 +131,9 @@ func (casbinService *CasbinService) GetPolicyPathByAuthorityId(AuthorityID uint)
 
 func (casbinService *CasbinService) ClearCasbin(v int, p ...string) bool {
 	e := utils.GetCasbin()
+	if e == nil {
+		return false
+	}
 	success, _ := e.RemoveFilteredPolicy(v, p...)
 	return success
 }
@@ -168,6 +183,51 @@ func (casbinService *CasbinService) AddPolicies(db *gorm.DB, rules [][]string) e
 
 func (casbinService *CasbinService) FreshCasbin() (err error) {
 	e := utils.GetCasbin()
+	if e == nil {
+		return errors.New("casbin enforcer 初始化失败")
+	}
 	err = e.LoadPolicy()
 	return err
+}
+
+// GetAuthoritiesByApi 获取拥有指定API权限的所有角色ID
+func (casbinService *CasbinService) GetAuthoritiesByApi(path, method string) (authorityIds []uint, err error) {
+	var rules []gormadapter.CasbinRule
+	err = global.GVA_DB.Where("ptype = 'p' AND v1 = ? AND v2 = ?", path, method).Find(&rules).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rules {
+		id, e := strconv.Atoi(r.V0)
+		if e == nil {
+			authorityIds = append(authorityIds, uint(id))
+		}
+	}
+	return authorityIds, nil
+}
+
+// SetApiAuthorities 全量覆盖某API关联的角色列表
+func (casbinService *CasbinService) SetApiAuthorities(path, method string, authorityIds []uint) error {
+	return global.GVA_DB.Transaction(func(tx *gorm.DB) error {
+		// 1. 删除该API所有已有的角色关联
+		if err := tx.Where("ptype = 'p' AND v1 = ? AND v2 = ?", path, method).Delete(&gormadapter.CasbinRule{}).Error; err != nil {
+			return err
+		}
+		// 2. 批量插入新的关联记录
+		if len(authorityIds) > 0 {
+			newRules := make([]gormadapter.CasbinRule, 0, len(authorityIds))
+			for _, authorityId := range authorityIds {
+				newRules = append(newRules, gormadapter.CasbinRule{
+					Ptype: "p",
+					V0:    strconv.Itoa(int(authorityId)),
+					V1:    path,
+					V2:    method,
+				})
+			}
+			if err := tx.Create(&newRules).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

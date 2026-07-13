@@ -15,8 +15,6 @@ yarn-error.log*
 # Editor directories and files
 .idea
 .vscode
-.trae
-.claude
 *.suo
 *.ntvs*
 *.njsproj
@@ -43,9 +41,31 @@ web/pnpm-lock.yaml
 *.db
 *.sqlite
 *.sqlite3
+worktrees/
+/.worktrees/
 
-# Local SDK
-server/plugin/tr069/lib/tr069-core-only
+# Local code intelligence and generated OpenSpec integrations
+/.codegraph/
+/.codex/skills/openspec-*/
+/.superpowers/
 
-# local backups
-.backup/
+# Comet machine-local runtime state
+/.comet/cache/
+/.comet/tmp/
+/.comet/log/
+/openspec/changes/*/.comet/artifacts.json
+/openspec/changes/*/.comet/checkpoint.json
+/openspec/changes/*/.comet/context.md
+/openspec/changes/*/.comet/run-state.json
+/openspec/changes/*/.comet/skill-snapshots/
+/openspec/changes/*/.comet/state-events.jsonl
+/openspec/changes/*/.comet/trajectory.jsonl
+
+# External BS/UE simulation assets and runtime data
+/hp_ping/
+/hb_ping/
+/hp_ping.zip
+/hb_ping.zip
+/bs_5GNR*.tar
+/ue_5GNR*.tar
+/**/simulation-logs/
