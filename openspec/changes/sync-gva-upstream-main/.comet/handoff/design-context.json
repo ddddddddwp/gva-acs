@@ -1,0 +1,15 @@
+{
+  "change": "sync-gva-upstream-main",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "8de6bf8ed88633e9b8f5af745394b0fd6f6b9f240b21b0c9540c1a4af8b006d3",
+  "files": [
+    { "path": "openspec/changes/sync-gva-upstream-main/proposal.md", "sha256": "4398ecedb4a97b72fff4a1613bff70951295cc54af553bdd7af1ac15015b687e" },
+    { "path": "openspec/changes/sync-gva-upstream-main/design.md", "sha256": "eb0e921047f5b559739918298771ffcb5c611cf6bb38eb8630b3c420281350b3" },
+    { "path": "openspec/changes/sync-gva-upstream-main/tasks.md", "sha256": "610b758b4b5f5d362556432409a5a23686e2dd4394616ac79e7e45f15871d6dc" },
+    { "path": "openspec/changes/sync-gva-upstream-main/specs/local-artifact-hygiene/spec.md", "sha256": "2b25c0a0c8bbdb5687c466ebeb13ff9e0f148841d7b45fe303fe9e0c6a5ca0d1" },
+    { "path": "openspec/changes/sync-gva-upstream-main/specs/upstream-framework-sync/spec.md", "sha256": "d9542c91231029867cd996fe4e48d306d3f0323b4b8155a17132b0c25fb02af7" }
+  ]
+}
