@@ -13,16 +13,13 @@
       <div class="dm-header flex justify-between items-center px-6 py-4 border-b border-gray-200 bg-white">
         <div class="flex items-center gap-3">
           <span class="text-lg font-bold text-gray-800 tracking-wide font-mono">{{ deviceRow.serialNumber || 'Unknown Device' }}</span>
-          <el-tag :type="deviceRow.status === 'online' ? 'success' : 'info'" effect="dark" size="small" class="ml-2 rounded-full px-3">
-            {{ deviceRow.status === 'online' ? '在线' : '离线' }}
+          <el-tag :type="deviceRow.online ? 'success' : 'info'" effect="dark" size="small" class="ml-2 rounded-full px-3">
+            {{ deviceRow.online ? '在线' : '离线' }}
           </el-tag>
         </div>
         <div class="flex gap-2">
           <el-button type="primary" plain size="small" :icon="Refresh" @click="refreshStructure" :loading="loadingStructure">
             刷新结构
-          </el-button>
-          <el-button type="success" plain size="small" :icon="Download" @click="openFullSync">
-            全量同步
           </el-button>
         </div>
       </div>
@@ -135,9 +132,8 @@
 
 <script setup>
 import { ref, watch, computed } from 'vue'
-import { Search, Refresh, Download, RefreshRight, CopyDocument, Loading } from '@element-plus/icons-vue'
+import { Search, Refresh, RefreshRight, CopyDocument, Loading } from '@element-plus/icons-vue'
 import { getDataModelStructure, getDataModelList } from '@/plugin/tr069/api/datamodel'
-import { fullDataModelSync } from '@/plugin/tr069/api/command'
 import { formatTimeToStr } from '@/utils/date'
 import { ElMessage } from 'element-plus'
 import { useClipboard } from '@vueuse/core'
@@ -168,8 +164,6 @@ const tableData = ref([])
 const currentPath = ref('')
 const loadingStructure = ref(false)
 const loadingValues = ref(false)
-
-const fullSyncSubmitting = ref(false)
 
 const defaultProps = {
   children: 'children',
@@ -297,22 +291,6 @@ const copyValue = (text) => {
   ElMessage.success('已复制')
 }
 
-const openFullSync = async () => {
-  if (fullSyncSubmitting.value) return
-  fullSyncSubmitting.value = true
-  try {
-    const res = await fullDataModelSync(props.row.ID, { paths: ['Device.'] })
-    if (res.code === 0) {
-      ElMessage.success('已下发全量同步请求')
-    } else {
-      ElMessage.error(res.msg || '下发失败')
-    }
-  } catch (error) {
-    ElMessage.error('系统错误')
-  } finally {
-    fullSyncSubmitting.value = false
-  }
-}
 </script>
 
 <style scoped>
