@@ -1,0 +1,4 @@
+interface:
+  display_name: "OAM Start"
+  short_description: "启动、恢复并检查项目的 BS/OAM 基站仿真协议栈"
+  default_prompt: "Use $oamstart to start and verify the project BS/OAM simulation stack."

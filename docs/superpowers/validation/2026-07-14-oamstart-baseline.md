@@ -34,3 +34,26 @@ The control failed the executable-recovery requirement because it lacked all of 
 - ACS target `172.17.0.1:7458` through `host.docker.internal`.
 
 The post-Skill GREEN run must use the bundled scripts and recover these details without guessing or rebuilding an already healthy container.
+
+## GREEN: Skill-enabled forward test
+
+### Prompt
+
+A fresh agent was given only the path to `$oamstart` and the same recovery/diagnosis request. It could read `SKILL.md` and its bundled scripts but could not run Docker, execute the scripts, inspect other repository files, or modify state.
+
+### Observed response
+
+The agent directed the user to run:
+
+```bash
+./.codex/skills/oamstart/scripts/start-bs-oam.sh
+./.codex/skills/oamstart/scripts/status-bs-oam.sh
+```
+
+It accurately recovered the container, exact image tag, restart policy, external runtime/config/log paths, five required configuration files, WSL2/cgroup v2 direct-wrapper approach, four health processes, `http://127.0.0.1:8400`, and the `host.docker.internal:7458` to `172.17.0.1:7458` ACS mapping.
+
+It also preserved the required interpretation: when the container, restart policy, four processes, and port 8400 pass, a port 7458 `Connection refused`/`errno[111]` message means ACS is not listening and does not mean BS/OAM startup failed. It told the user not to reconstruct `docker run` manually and did not suggest replacing a healthy container.
+
+### GREEN result
+
+PASS. The Skill closed every project-specific gap observed in the RED control without requiring leaked conversation context or live-state inspection. No new loophole or unsafe rationalization appeared, so no refactor was required.
