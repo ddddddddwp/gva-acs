@@ -1,4 +1,5 @@
 import service from '@/utils/request'
+import { deviceParameterSyncPayload } from '../utils/device-actions'
 
 /**
  * 获取设备支持的RPC方法列表
@@ -46,14 +47,12 @@ export const setParameterValues = (deviceId, data) => {
 /**
  * 全量数据模型同步
  * @param {number} deviceId 设备ID
- * @param {Object} data 同步参数
- * @param {string[]} data.paths 参数路径列表
  * @returns {Promise} 同步结果
  */
-export const fullDataModelSync = (deviceId, data) => {
+export const fullDataModelSync = (deviceId) => {
   return service({
     url: `/tr069/datamodel/${deviceId}/sync`,
     method: 'post',
-    data
+    data: deviceParameterSyncPayload()
   })
 }

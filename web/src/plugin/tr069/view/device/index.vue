@@ -31,11 +31,28 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right" align="center">
+        <el-table-column label="操作" width="260" fixed="right" align="center">
           <template #default="scope">
-            <el-button type="primary" link :icon="View" @click="viewDetail(scope.row)">详情</el-button>
+            <el-button
+              type="primary"
+              link
+              :disabled="!canIssueDeviceCommand(scope.row)"
+              :loading="syncingDeviceIds.has(scope.row.ID)"
+              @click="syncParameters(scope.row)"
+            >同步参数</el-button>
             <el-button type="primary" link :icon="Connection" @click="openDataModelFromRow(scope.row)">参数</el-button>
-            <el-button type="danger" link :icon="Delete" class="delete-btn" @click="deleteRow(scope.row)">删除</el-button>
+            <el-dropdown trigger="click" @command="command => handleMoreCommand(command, scope.row)">
+              <el-button type="primary" link>
+                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="gpv" :disabled="!canIssueDeviceCommand(scope.row)">获取参数</el-dropdown-item>
+                  <el-dropdown-item command="spv" :disabled="!canIssueDeviceCommand(scope.row)">配置参数</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>删除设备</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -75,38 +92,6 @@
       </template>
     </el-dialog>
 
-    <!-- 设备详情抽屉 -->
-    <el-drawer
-      title="设备详情与配置"
-      v-model="drawerVisible"
-      direction="rtl"
-      size="50%">
-      <div class="drawer-content" v-if="currentRow.ID">
-        <!-- 基础信息 -->
-        <el-descriptions title="基础信息" :column="2" border class="mb-20">
-          <el-descriptions-item label="序列号">{{ currentRow.serialNumber }}</el-descriptions-item>
-          <el-descriptions-item label="OUI">{{ currentRow.oui }}</el-descriptions-item>
-          <el-descriptions-item label="IP地址">{{ currentRow.ip }}</el-descriptions-item>
-          <el-descriptions-item label="最后上线">{{ formatDate(currentRow.lastOnline) }}</el-descriptions-item>
-        </el-descriptions>
-
-        <div class="mb-4 flex flex-wrap gap-2">
-          <el-button-group>
-            <el-button type="primary" plain size="small" :icon="Refresh" @click="handleGetRPCMethods" :loading="rpcLoading">刷新RPC</el-button>
-            <el-button type="primary" plain size="small" :icon="Download" @click="openGPVDialog">获取参数</el-button>
-            <el-button type="primary" plain size="small" :icon="Edit" @click="openSPVDialog">设置参数</el-button>
-          </el-button-group>
-          <el-button-group class="ml-2">
-             <el-button type="success" plain size="small" :icon="RefreshRight" @click="openFullSyncDialog">全量同步</el-button>
-             <el-button type="primary" size="small" :icon="Connection" @click="openDataModelFromRow(currentRow)">参数树</el-button>
-          </el-button-group>
-        </div>
-
-        <!-- 基站无线参数组件 -->
-        <fap-info :device-id="currentRow.ID" />
-      </div>
-    </el-drawer>
-
     <el-dialog title="GetParameterValues" v-model="gpvDialogVisible" width="720px" append-to-body>
       <el-form :model="gpvForm" label-width="140px">
         <el-form-item label="参数路径(一行一个)">
@@ -116,7 +101,7 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="gpvDialogVisible = false">取 消</el-button>
-          <el-button type="primary" @click="submitGPV" :loading="gpvSubmitting">确 定</el-button>
+          <el-button type="primary" @click="submitGPV" :loading="gpvSubmitting" :disabled="!canIssueDeviceCommand(currentRow)">确 定</el-button>
         </div>
       </template>
     </el-dialog>
@@ -157,7 +142,7 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="spvDialogVisible = false">取 消</el-button>
-          <el-button type="primary" @click="submitSPV" :loading="spvSubmitting">确 定</el-button>
+          <el-button type="primary" @click="submitSPV" :loading="spvSubmitting" :disabled="!canIssueDeviceCommand(currentRow)">确 定</el-button>
         </div>
       </template>
     </el-dialog>
@@ -173,9 +158,8 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getDeviceList, createDevice, deleteDevice } from '@/plugin/tr069/api/device'
-import { fullDataModelSync, getParameterValues, getRPCMethods, setParameterValues } from '@/plugin/tr069/api/command'
-import { formatTimeToStr } from '@/utils/date'
-import FapInfo from './components/fap-info.vue'
+import { fullDataModelSync, getParameterValues, setParameterValues } from '@/plugin/tr069/api/command'
+import { canIssueDeviceCommand } from '@/plugin/tr069/utils/device-actions'
 import DataModelViewer from './components/data-model-viewer.vue'
 
 // 响应式数据
@@ -192,9 +176,7 @@ const formData = reactive({
   remark: ''
 })
 const addFormRef = ref(null)
-const drawerVisible = ref(false)
 const currentRow = ref({})
-const rpcLoading = ref(false)
 const gpvDialogVisible = ref(false)
 const gpvSubmitting = ref(false)
 const gpvForm = reactive({ pathsText: '' })
@@ -204,21 +186,13 @@ const spvForm = reactive({
   parameterKey: '',
   parameters: [{ name: '', type: 'xsd:string', value: '' }]
 })
-const fullSyncSubmitting = ref(false)
+const syncingDeviceIds = ref(new Set())
 const dmDrawerVisible = ref(false)
 
 // 表单校验规则
 const rules = {
   serialNumber: [{ required: true, message: '请输入序列号', trigger: 'blur' }],
   oui: [{ required: true, message: '请输入OUI', trigger: 'blur' }]
-}
-
-// 格式化日期
-const formatDate = (time) => {
-  if (time && time !== '0001-01-01T00:00:00Z') {
-    return formatTimeToStr(time)
-  }
-  return '-'
 }
 
 // 获取表格数据
@@ -295,30 +269,13 @@ const deleteRow = async (row) => {
   }
 }
 
-const viewDetail = (row) => {
+const selectCommandDevice = (row) => {
   currentRow.value = row
-  drawerVisible.value = true
+}
+
+const openGPVDialog = (row) => {
+  selectCommandDevice(row)
   gpvForm.pathsText = 'Device.DeviceInfo.SerialNumber'
-  spvForm.parameterKey = ''
-  spvForm.parameters = [{ name: '', type: 'xsd:string', value: '' }]
-}
-
-const handleGetRPCMethods = async () => {
-  if (!currentRow.value.ID) return
-  rpcLoading.value = true
-  try {
-    const res = await getRPCMethods(currentRow.value.ID)
-    if (res.code === 0) {
-      ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
-    } else {
-      ElMessage.error(res.msg || '下发失败')
-    }
-  } finally {
-    rpcLoading.value = false
-  }
-}
-
-const openGPVDialog = () => {
   gpvDialogVisible.value = true
 }
 
@@ -346,7 +303,10 @@ const submitGPV = async () => {
   }
 }
 
-const openSPVDialog = () => {
+const openSPVDialog = (row) => {
+  selectCommandDevice(row)
+  spvForm.parameterKey = ''
+  spvForm.parameters = [{ name: '', type: 'xsd:string', value: '' }]
   spvDialogVisible.value = true
 }
 
@@ -384,20 +344,27 @@ const submitSPV = async () => {
   }
 }
 
-const openFullSyncDialog = async () => {
-  if (!currentRow.value?.ID) return
-  if (fullSyncSubmitting.value) return
-  fullSyncSubmitting.value = true
+const syncParameters = async (row) => {
+  if (!canIssueDeviceCommand(row) || syncingDeviceIds.value.has(row.ID)) return
+  syncingDeviceIds.value = new Set(syncingDeviceIds.value).add(row.ID)
   try {
-    const res = await fullDataModelSync(currentRow.value.ID, { paths: ['Device.'] })
+    const res = await fullDataModelSync(row.ID)
     if (res.code === 0) {
-      ElMessage.success('已下发全量同步请求')
+      ElMessage.success(`参数同步已下发，commandId=${res.data?.commandId || '-'}`)
     } else {
       ElMessage.error(res.msg || '下发失败')
     }
   } finally {
-    fullSyncSubmitting.value = false
+    const next = new Set(syncingDeviceIds.value)
+    next.delete(row.ID)
+    syncingDeviceIds.value = next
   }
+}
+
+const handleMoreCommand = (command, row) => {
+  if (command === 'gpv') openGPVDialog(row)
+  if (command === 'spv') openSPVDialog(row)
+  if (command === 'delete') deleteRow(row)
 }
 
 const openDataModelFromRow = (row) => {
@@ -424,14 +391,5 @@ onMounted(() => {
 }
 .btn-list {
   margin-bottom: 10px;
-}
-.delete-btn {
-  color: #f56c6c;
-}
-.drawer-content {
-  padding: 20px;
-}
-.mb-20 {
-  margin-bottom: 20px;
 }
 </style>
