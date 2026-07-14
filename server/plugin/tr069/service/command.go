@@ -21,8 +21,19 @@ import (
 
 type CommandService struct{}
 
+var (
+	ErrDeviceOffline           = errors.New("device offline")
+	ErrCommandQueueUnavailable = errors.New("command queue unavailable")
+)
+
+const commandOnlineThreshold = 180 * time.Second
+
+func deviceParameterSyncParams() map[string]interface{} {
+	return map[string]interface{}{"paths": []string{"Device."}}
+}
+
 func (s *CommandService) EnqueueGetRPCMethods(deviceID uint) (string, error) {
-	deviceKey, err := s.deviceKeyByID(deviceID)
+	deviceKey, err := s.commandTargetByID(deviceID, time.Now())
 	if err != nil {
 		return "", err
 	}
@@ -33,7 +44,7 @@ func (s *CommandService) EnqueueGetParameterValues(deviceID uint, in req.GetPara
 	if len(in.Paths) == 0 {
 		return "", errors.New("paths is empty")
 	}
-	deviceKey, err := s.deviceKeyByID(deviceID)
+	deviceKey, err := s.commandTargetByID(deviceID, time.Now())
 	if err != nil {
 		return "", err
 	}
@@ -44,7 +55,7 @@ func (s *CommandService) EnqueueSetParameterValues(deviceID uint, in req.SetPara
 	if len(in.Parameters) == 0 {
 		return "", errors.New("parameters is empty")
 	}
-	deviceKey, err := s.deviceKeyByID(deviceID)
+	deviceKey, err := s.commandTargetByID(deviceID, time.Now())
 	if err != nil {
 		return "", err
 	}
@@ -68,33 +79,29 @@ func (s *CommandService) EnqueueSetParameterValues(deviceID uint, in req.SetPara
 	}, "")
 }
 
-func (s *CommandService) EnqueueFullDataModelSync(deviceID uint, paths []string) error {
-	if len(paths) == 0 {
-		paths = []string{"Device."}
-	}
-
-	deviceKey, err := s.deviceKeyByID(deviceID)
+func (s *CommandService) EnqueueDeviceParameterSync(deviceID uint) (string, error) {
+	deviceKey, err := s.commandTargetByID(deviceID, time.Now())
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	dedupSuffix := fmt.Sprintf("%d", time.Now().UnixNano())
-
-	for _, path := range paths {
-		cmdID, err := s.enqueueImmediate(context.Background(), deviceID, deviceKey, "GetParameterValues", map[string]interface{}{
-			"paths": []string{path},
-		}, "dm:gpv:"+path+":"+deviceKey+":"+dedupSuffix)
-		if err != nil {
-			return fmt.Errorf("enqueue GetParameterValues failed: %w", err)
-		}
-		fmt.Printf("----- TR069 FULLSYNC ENQUEUE -----\ndeviceId: %d, deviceKey: %s, path: %s, commandId: %s\n", deviceID, deviceKey, path, cmdID)
+	cmdID, err := s.enqueueImmediate(
+		context.Background(),
+		deviceID,
+		deviceKey,
+		"GetParameterValues",
+		deviceParameterSyncParams(),
+		fmt.Sprintf("dm:gpv:Device.:%s:%d", deviceKey, time.Now().UnixNano()),
+	)
+	if err != nil {
+		return "", fmt.Errorf("enqueue GetParameterValues failed: %w", err)
 	}
-	return nil
+	return cmdID, nil
 }
 
 func (s *CommandService) enqueue(ctx context.Context, deviceKey string, op string, params map[string]interface{}, dedupKey string) (string, error) {
 	if !adapter.RedisAvailable() {
-		return "", errors.New("redis not initialized")
+		return "", ErrCommandQueueUnavailable
 	}
 	cmdID := uuid.NewString()
 	now := time.Now()
@@ -151,7 +158,7 @@ func (s *CommandService) enqueue(ctx context.Context, deviceKey string, op strin
 
 func (s *CommandService) enqueueImmediate(ctx context.Context, deviceID uint, deviceKey string, op string, params map[string]interface{}, dedupKey string) (string, error) {
 	if !adapter.RedisAvailable() {
-		return "", errors.New("redis not initialized")
+		return "", ErrCommandQueueUnavailable
 	}
 	cmdID := uuid.NewString()
 	now := time.Now()
@@ -215,4 +222,21 @@ func (s *CommandService) deviceKeyByID(deviceID uint) (string, error) {
 		return "", fmt.Errorf("device missing oui/serialNumber: %d", deviceID)
 	}
 	return fmt.Sprintf("%s-%s", d.OUI, d.SerialNumber), nil
+}
+
+func (s *CommandService) commandTargetByID(deviceID uint, now time.Time) (string, error) {
+	if !adapter.DBAvailable() {
+		return "", errors.New("db not initialized")
+	}
+	var device model.Device
+	if err := global.GVA_DB.Select("id", "oui", "serial_number", "last_inform").First(&device, deviceID).Error; err != nil {
+		return "", err
+	}
+	if device.OUI == "" || device.SerialNumber == "" {
+		return "", fmt.Errorf("device missing oui/serialNumber: %d", deviceID)
+	}
+	if device.LastInform.IsZero() || now.Sub(device.LastInform) >= commandOnlineThreshold {
+		return "", ErrDeviceOffline
+	}
+	return fmt.Sprintf("%s-%s", device.OUI, device.SerialNumber), nil
 }

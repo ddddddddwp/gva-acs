@@ -12,35 +12,24 @@ type DataModelApi struct{}
 
 var dmService = new(service.CommandService)
 
-type FullSyncRequest struct {
-	Paths []string `json:"paths" form:"paths"`
-}
-
 // FullSync
 // @Tags TR069
-// @Summary 全量同步数据模型(立即下发 GetParameterValues)
-// @Description paths: 参数路径列表，如 ["Device.", "InternetGatewayDevice."]。注意：此接口会立即下发 GetParameterValues 命令到Redis队列并触发Connection Request主动连接设备，无需等待设备上报
+// @Summary 同步设备参数(立即下发 Device. GetParameterValues)
+// @Description 立即下发一次参数路径固定为 Device. 的 GetParameterValues 命令，并触发 Connection Request 主动连接设备
 // @Security ApiKeyAuth
 // @accept application/json
 // @Produce application/json
 // @Param deviceId path int true "设备ID"
-// @Param data body api.FullSyncRequest false "同步参数"
-// @Success 200 {object} response.Response{msg=string} "下发成功"
+// @Success 200 {object} response.Response{data=map[string]string,msg=string} "下发成功"
 // @Router /tr069/datamodel/{deviceId}/sync [post]
 func (a *DataModelApi) FullSync(c *gin.Context) {
 	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
-	var in FullSyncRequest
-	_ = c.ShouldBindJSON(&in)
-
-	if len(in.Paths) == 0 {
-		in.Paths = []string{"Device."}
-	}
-
-	if err := dmService.EnqueueFullDataModelSync(uint(deviceId), in.Paths); err != nil {
-		response.FailWithMessage("任务下发失败: "+err.Error(), c)
+	commandID, err := dmService.EnqueueDeviceParameterSync(uint(deviceId))
+	if err != nil {
+		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithMessage("任务已下发，等待设备响应", c)
+	response.OkWithDetailed(map[string]string{"commandId": commandID}, "任务已下发，等待设备响应", c)
 }
 
 // GetDataModelList

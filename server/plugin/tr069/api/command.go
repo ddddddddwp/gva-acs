@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"strconv"
 	"time"
 
@@ -13,6 +14,17 @@ import (
 type CommandApi struct{}
 
 var commandService = new(service.CommandService)
+
+func commandFailureMessage(err error) string {
+	switch {
+	case errors.Is(err, service.ErrDeviceOffline):
+		return "设备离线，无法下发任务"
+	case errors.Is(err, service.ErrCommandQueueUnavailable):
+		return "命令队列不可用"
+	default:
+		return "任务下发失败: " + err.Error()
+	}
+}
 
 // SyncRPCMethods
 // @Tags TR069
@@ -27,7 +39,7 @@ func (a *CommandApi) SyncRPCMethods(c *gin.Context) {
 	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
 	cmdID, err := commandService.EnqueueGetRPCMethods(uint(deviceId))
 	if err != nil {
-		response.FailWithMessage("任务下发失败", c)
+		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
 	response.OkWithDetailed(map[string]string{"commandId": cmdID}, "任务已下发", c)
@@ -52,7 +64,7 @@ func (a *CommandApi) GetParameterValues(c *gin.Context) {
 	}
 	res, err := commandService.ExecuteGetParameterValues(uint(deviceId), in, 15*time.Second)
 	if err != nil {
-		response.FailWithMessage("任务下发失败", c)
+		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
 	response.OkWithDetailed(res, "任务已下发", c)
@@ -77,7 +89,7 @@ func (a *CommandApi) SetParameterValues(c *gin.Context) {
 	}
 	cmdID, err := commandService.EnqueueSetParameterValues(uint(deviceId), in)
 	if err != nil {
-		response.FailWithMessage("任务下发失败", c)
+		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
 	response.OkWithDetailed(map[string]string{"commandId": cmdID}, "任务已下发", c)
