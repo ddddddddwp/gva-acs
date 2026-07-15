@@ -33,6 +33,9 @@ func deviceParameterSyncParams() map[string]interface{} {
 }
 
 func (s *CommandService) EnqueueGetRPCMethods(deviceID uint) (string, error) {
+	if err := validateCurrentRPCSubmission(deviceID, "GetRPCMethods", nil); err != nil {
+		return "", err
+	}
 	deviceKey, err := s.commandTargetByID(deviceID, time.Now())
 	if err != nil {
 		return "", err
@@ -41,8 +44,8 @@ func (s *CommandService) EnqueueGetRPCMethods(deviceID uint) (string, error) {
 }
 
 func (s *CommandService) EnqueueGetParameterValues(deviceID uint, in req.GetParameterValuesRequest) (string, error) {
-	if len(in.Paths) == 0 {
-		return "", errors.New("paths is empty")
+	if err := validateCurrentRPCSubmission(deviceID, "GetParameterValues", in); err != nil {
+		return "", err
 	}
 	deviceKey, err := s.commandTargetByID(deviceID, time.Now())
 	if err != nil {
@@ -52,8 +55,8 @@ func (s *CommandService) EnqueueGetParameterValues(deviceID uint, in req.GetPara
 }
 
 func (s *CommandService) EnqueueSetParameterValues(deviceID uint, in req.SetParameterValuesRequest) (string, error) {
-	if len(in.Parameters) == 0 {
-		return "", errors.New("parameters is empty")
+	if err := validateCurrentRPCSubmission(deviceID, "SetParameterValues", in); err != nil {
+		return "", err
 	}
 	deviceKey, err := s.commandTargetByID(deviceID, time.Now())
 	if err != nil {
@@ -80,6 +83,9 @@ func (s *CommandService) EnqueueSetParameterValues(deviceID uint, in req.SetPara
 }
 
 func (s *CommandService) EnqueueDeviceParameterSync(deviceID uint) (string, error) {
+	if err := validateCurrentRPCSubmission(deviceID, "GetParameterValues", req.GetParameterValuesRequest{Paths: []string{"Device."}}); err != nil {
+		return "", err
+	}
 	deviceKey, err := s.commandTargetByID(deviceID, time.Now())
 	if err != nil {
 		return "", err
@@ -97,6 +103,13 @@ func (s *CommandService) EnqueueDeviceParameterSync(deviceID uint) (string, erro
 		return "", fmt.Errorf("enqueue GetParameterValues failed: %w", err)
 	}
 	return cmdID, nil
+}
+
+func validateCurrentRPCSubmission(deviceID uint, operation string, request any) error {
+	if err := ValidateRPCRequest(operation, request); err != nil {
+		return err
+	}
+	return ValidateRPCSubmission(context.Background(), global.GVA_DB, deviceID, operation, time.Now())
 }
 
 func (s *CommandService) enqueue(ctx context.Context, deviceKey string, op string, params map[string]interface{}, dedupKey string) (string, error) {

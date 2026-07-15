@@ -26,4 +26,5 @@ type DeviceResponse struct {
 	Remark           string    `json:"remark"`
 	IsWhite          bool      `json:"isWhite"`
 	Online           bool      `json:"online"` // 设备在线状态
+	RPCMethods       []string  `json:"rpcMethods"`
 }

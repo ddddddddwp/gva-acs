@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
@@ -54,6 +56,15 @@ func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 		response.FailWithMessage("获取设备列表失败", c)
 		return
 	}
+	deviceIDs := make([]uint, 0, len(devices))
+	for _, device := range devices {
+		deviceIDs = append(deviceIDs, device.ID)
+	}
+	rpcMethodsByDevice, err := loadDeviceRPCMethods(c.Request.Context(), global.GVA_DB, deviceIDs)
+	if err != nil {
+		response.FailWithMessage("获取设备能力失败", c)
+		return
+	}
 
 	// 转换为响应结构体并计算在线状态
 	now := time.Now()
@@ -86,6 +97,7 @@ func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 			Remark:           d.Remark,
 			IsWhite:          d.IsWhite,
 			Online:           isOnline,
+			RPCMethods:       rpcMethodsByDevice[d.ID],
 		})
 	}
 
@@ -95,6 +107,31 @@ func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 		Page:     pageInfo.Page,
 		PageSize: pageInfo.PageSize,
 	}, "获取成功", c)
+}
+
+func loadDeviceRPCMethods(ctx context.Context, db *gorm.DB, deviceIDs []uint) (map[uint][]string, error) {
+	methodsByDevice := make(map[uint][]string, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		methodsByDevice[deviceID] = []string{}
+	}
+	if len(deviceIDs) == 0 {
+		return methodsByDevice, nil
+	}
+
+	var rows []model.DeviceRPCMethods
+	if err := db.WithContext(ctx).Where("device_id IN ?", deviceIDs).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		methods := []string{}
+		if len(row.MethodsJSON) > 0 {
+			if err := json.Unmarshal(row.MethodsJSON, &methods); err != nil {
+				return nil, err
+			}
+		}
+		methodsByDevice[row.DeviceID] = methods
+	}
+	return methodsByDevice, nil
 }
 
 // CreateDevice (Whitelist)
