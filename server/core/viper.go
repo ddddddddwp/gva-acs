@@ -1,11 +1,13 @@
 package core
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	serverConfig "github.com/ddddddddwp/gva-acs/server/config"
 	"github.com/ddddddddwp/gva-acs/server/core/internal"
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/utils"
@@ -47,13 +49,28 @@ func applyConfigChange(v *viper.Viper) error {
 		return fmt.Errorf("read changed config file: %w", err)
 	}
 
-	next := global.GVA_CONFIG
+	next, err := deepCopyServerConfig(global.GVA_CONFIG)
+	if err != nil {
+		return fmt.Errorf("copy current config before reload: %w", err)
+	}
 	if err := v.Unmarshal(&next); err != nil {
 		return fmt.Errorf("unmarshal changed config file: %w", err)
 	}
 	global.GVA_CONFIG = next
 	utils.GlobalSystemEvents.TriggerConfigChange()
 	return nil
+}
+
+func deepCopyServerConfig(in serverConfig.Server) (serverConfig.Server, error) {
+	serialized, err := json.Marshal(in)
+	if err != nil {
+		return serverConfig.Server{}, err
+	}
+	var out serverConfig.Server
+	if err := json.Unmarshal(serialized, &out); err != nil {
+		return serverConfig.Server{}, err
+	}
+	return out, nil
 }
 
 // getConfigPath 获取配置文件路径, 优先级: 命令行 > 环境变量 > 默认值

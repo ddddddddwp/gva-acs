@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
@@ -21,6 +22,7 @@ func TestApplyConfigChangeTriggersHandlerAfterSuccessfulUnmarshal(t *testing.T) 
 
 	events := &utils.SystemEvents{}
 	utils.GlobalSystemEvents = events
+	global.GVA_CONFIG.Redis.ClusterAddrs = []string{"preserved:6379"}
 	called := 0
 	events.RegisterConfigChangeHandler(func() {
 		called++
@@ -32,6 +34,12 @@ func TestApplyConfigChangeTriggersHandlerAfterSuccessfulUnmarshal(t *testing.T) 
 	}
 	if called != 1 {
 		t.Fatalf("handler calls after valid change=%d", called)
+	}
+	if got := global.GVA_CONFIG.System.Addr; got != 9999 {
+		t.Fatalf("system addr after valid change=%d", got)
+	}
+	if got := global.GVA_CONFIG.Redis.ClusterAddrs; !slices.Equal(got, []string{"preserved:6379"}) {
+		t.Fatalf("omitted cluster addrs after valid change=%v", got)
 	}
 
 	invalid, _ := newConfigFileViper(t, "system: not-a-system-map\n")
@@ -74,6 +82,52 @@ func TestApplyConfigChangeRejectsMalformedFreshFileWithoutPublishingStaleConfig(
 	}
 	if called != 0 {
 		t.Errorf("config handler calls=%d, want=0", called)
+	}
+	if got := global.GVA_CONFIG.System.Addr; got != 4321 {
+		t.Errorf("global config addr=%d, want unchanged 4321", got)
+	}
+	if got := tr069Config.CurrentRuntime().Settings.RPCResponseTimeout; got != 41 {
+		t.Errorf("runtime response timeout=%d, want unchanged 41", got)
+	}
+}
+
+func TestApplyConfigChangeSemanticErrorDoesNotMutateReferenceFields(t *testing.T) {
+	previousEvents := utils.GlobalSystemEvents
+	previousConfig := global.GVA_CONFIG
+	previousRuntime := tr069Config.CurrentRuntime()
+	t.Cleanup(func() {
+		utils.GlobalSystemEvents = previousEvents
+		global.GVA_CONFIG = previousConfig
+		tr069Config.StoreRuntime(previousRuntime.Settings)
+	})
+
+	global.GVA_CONFIG.Redis.ClusterAddrs = []string{"old-primary:6379", "old-replica:6379"}
+	global.GVA_CONFIG.System.Addr = 4321
+	tr069Config.StoreRuntime(tr069Config.TR069Config{RPCResponseTimeout: 41})
+
+	events := &utils.SystemEvents{}
+	utils.GlobalSystemEvents = events
+	called := 0
+	events.RegisterConfigChangeHandler(func() {
+		called++
+		tr069Config.StoreRuntime(tr069Config.TR069Config{RPCResponseTimeout: 99})
+	})
+
+	v, _ := newConfigFileViper(t, `redis:
+  clusterAddrs:
+    - new-primary:6379
+    - new-replica:6379
+system: not-a-system-map
+`)
+	if err := applyConfigChange(v); err == nil {
+		t.Error("semantic config error unexpectedly succeeded")
+	}
+	if called != 0 {
+		t.Errorf("config handler calls=%d, want=0", called)
+	}
+	wantAddrs := []string{"old-primary:6379", "old-replica:6379"}
+	if got := global.GVA_CONFIG.Redis.ClusterAddrs; !slices.Equal(got, wantAddrs) {
+		t.Errorf("global cluster addrs=%v, want unchanged %v", got, wantAddrs)
 	}
 	if got := global.GVA_CONFIG.System.Addr; got != 4321 {
 		t.Errorf("global config addr=%d, want unchanged 4321", got)
