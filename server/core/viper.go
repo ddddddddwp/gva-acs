@@ -29,8 +29,8 @@ func Viper() *viper.Viper {
 
 	v.OnConfigChange(func(e fsnotify.Event) {
 		fmt.Println("config file changed:", e.Name)
-		if unmarshalErr := applyConfigChange(v); unmarshalErr != nil {
-			fmt.Println(unmarshalErr)
+		if reloadErr := applyConfigChange(v); reloadErr != nil {
+			fmt.Println("config reload failed:", reloadErr)
 		}
 	})
 	if err = v.Unmarshal(&global.GVA_CONFIG); err != nil {
@@ -43,9 +43,15 @@ func Viper() *viper.Viper {
 }
 
 func applyConfigChange(v *viper.Viper) error {
-	if err := v.Unmarshal(&global.GVA_CONFIG); err != nil {
-		return err
+	if err := v.ReadInConfig(); err != nil {
+		return fmt.Errorf("read changed config file: %w", err)
 	}
+
+	next := global.GVA_CONFIG
+	if err := v.Unmarshal(&next); err != nil {
+		return fmt.Errorf("unmarshal changed config file: %w", err)
+	}
+	global.GVA_CONFIG = next
 	utils.GlobalSystemEvents.TriggerConfigChange()
 	return nil
 }
