@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/infolog"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/gin-gonic/gin"
@@ -74,7 +74,7 @@ func RawDump(cfg RawDumpConfig) gin.HandlerFunc {
 		if cfg.DumpToConsole {
 			_, _ = fmt.Fprintln(os.Stdout, reqDump)
 		}
-		if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.InfoLogEnable {
+		if config.CurrentRuntime().Settings.InfoLogEnable {
 			// 如果已开启独立文件日志，则不再打印到 GVA_LOG，避免 Zap 结构化日志将换行符转义为 \n 导致阅读困难
 			// if global.GVA_LOG != nil {
 			// 	global.GVA_LOG.Info("TR069 RAW REQUEST", zap.String("dump", reqDump))
@@ -104,7 +104,7 @@ func RawDump(cfg RawDumpConfig) gin.HandlerFunc {
 			if cfg.DumpToConsole {
 				_, _ = fmt.Fprintln(os.Stdout, respDump)
 			}
-			if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.InfoLogEnable {
+			if config.CurrentRuntime().Settings.InfoLogEnable {
 				// if global.GVA_LOG != nil {
 				// 	global.GVA_LOG.Info("TR069 RAW RESPONSE", zap.String("dump", respDump))
 				// }

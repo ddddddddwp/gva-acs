@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/gin-gonic/gin"
 )
@@ -35,7 +35,7 @@ func RawResponseDump(cfg RawResponseDumpConfig) gin.HandlerFunc {
 		if cfg.DumpToConsole {
 			_, _ = fmt.Fprintln(os.Stdout, respDump)
 		}
-		if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.InfoLogEnable {
+		if config.CurrentRuntime().Settings.InfoLogEnable {
 			writeInfoLog(respDump)
 		}
 		if requestID != "" {

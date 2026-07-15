@@ -11,8 +11,8 @@ import (
 
 	gvaGlobal "github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/engine"
-	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/ddddddddwp/tr069-core-only/factory"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
@@ -134,7 +134,7 @@ func CWMPHandler(c *gin.Context) {
 	}
 	c.Data(resp.StatusCode, "text/xml", resp.Body)
 
-	if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.Debug {
+	if config.CurrentRuntime().Settings.Debug {
 		gvaGlobal.GVA_LOG.Debug("TR069 Trace", zap.String("requestId", reqID), zap.Any("trace", trace.Get(ctx, reqID)))
 	}
 }

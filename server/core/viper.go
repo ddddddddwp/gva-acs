@@ -8,6 +8,7 @@ import (
 
 	"github.com/ddddddddwp/gva-acs/server/core/internal"
 	"github.com/ddddddddwp/gva-acs/server/global"
+	"github.com/ddddddddwp/gva-acs/server/utils"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
@@ -28,8 +29,8 @@ func Viper() *viper.Viper {
 
 	v.OnConfigChange(func(e fsnotify.Event) {
 		fmt.Println("config file changed:", e.Name)
-		if err = v.Unmarshal(&global.GVA_CONFIG); err != nil {
-			fmt.Println(err)
+		if unmarshalErr := applyConfigChange(v); unmarshalErr != nil {
+			fmt.Println(unmarshalErr)
 		}
 	})
 	if err = v.Unmarshal(&global.GVA_CONFIG); err != nil {
@@ -39,6 +40,14 @@ func Viper() *viper.Viper {
 	// root 适配性 根据root位置去找到对应迁移位置,保证root路径有效
 	global.GVA_CONFIG.AutoCode.Root, _ = filepath.Abs("..")
 	return v
+}
+
+func applyConfigChange(v *viper.Viper) error {
+	if err := v.Unmarshal(&global.GVA_CONFIG); err != nil {
+		return err
+	}
+	utils.GlobalSystemEvents.TriggerConfigChange()
+	return nil
 }
 
 // getConfigPath 获取配置文件路径, 优先级: 命令行 > 环境变量 > 默认值

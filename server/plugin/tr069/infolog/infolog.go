@@ -5,15 +5,16 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
-	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"go.uber.org/zap"
 )
 
 func Write(s string) {
-	if tr069Global.GlobalConfig == nil || !tr069Global.GlobalConfig.InfoLogEnable {
+	settings := config.CurrentRuntime().Settings
+	if !settings.InfoLogEnable {
 		return
 	}
-	dir := tr069Global.GlobalConfig.InfoLogDir
+	dir := settings.InfoLogDir
 	if dir == "" {
 		dir = "./log"
 	}

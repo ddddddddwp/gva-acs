@@ -10,7 +10,7 @@ import (
 
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
-	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/infolog"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	req "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
@@ -149,7 +149,7 @@ func (s *CommandService) enqueue(ctx context.Context, deviceKey string, op strin
 	}
 
 	dump := fmt.Sprintf("----- TR069 COMMAND ENQUEUE BEGIN -----\ncommandId: %s\ndeviceKey: %s\noperation: %s\ndedupKey: %s\nparamsJson: %s\n----- TR069 COMMAND ENQUEUE END -----", cmdID, deviceKey, op, dedupKey, paramsJSON)
-	if tr069Global.GlobalConfig != nil && tr069Global.GlobalConfig.DumpRaw {
+	if config.CurrentRuntime().Settings.DumpRaw {
 		_, _ = fmt.Fprintln(os.Stdout, dump)
 	}
 	infolog.Write(dump)

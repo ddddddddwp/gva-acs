@@ -10,21 +10,20 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
-	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/gin-gonic/gin"
 )
 
 func TestRawResponseDump_WritesInfoLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	prev := tr069Global.GlobalConfig
+	previousRuntime := config.CurrentRuntime()
 	tmp := t.TempDir()
-	tr069Global.GlobalConfig = &config.TR069Config{
+	config.StoreRuntime(config.TR069Config{
 		InfoLogEnable: true,
 		InfoLogDir:    tmp,
-	}
+	})
 	t.Cleanup(func() {
-		tr069Global.GlobalConfig = prev
+		config.StoreRuntime(previousRuntime.Settings)
 	})
 
 	r := gin.New()

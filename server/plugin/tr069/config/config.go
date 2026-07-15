@@ -41,4 +41,16 @@ type TR069Config struct {
 
 	// CommandQueueImmediateTTL: 立即下发队列的 TTL（秒），默认 1800 秒（30 分钟）
 	CommandQueueImmediateTTL int `mapstructure:"commandQueueImmediateTTL" json:"commandQueueImmediateTTL" yaml:"commandQueueImmediateTTL"`
+
+	// CommandQueueWaitTimeout: 命令等待设备上线的超时时间（秒），默认 180 秒
+	CommandQueueWaitTimeout int `mapstructure:"commandQueueWaitTimeout" json:"commandQueueWaitTimeout" yaml:"commandQueueWaitTimeout"`
+
+	// RPCResponseTimeout: RPC 发送后等待响应的超时时间（秒），默认 90 秒
+	RPCResponseTimeout int `mapstructure:"rpcResponseTimeout" json:"rpcResponseTimeout" yaml:"rpcResponseTimeout"`
+
+	// TransferCompleteTimeout: 下载或上传后等待 TransferComplete 的超时时间（秒），默认 43200 秒
+	TransferCompleteTimeout int `mapstructure:"transferCompleteTimeout" json:"transferCompleteTimeout" yaml:"transferCompleteTimeout"`
+
+	// RPCXMLRetentionDays: RPC XML 的保留天数，默认 30 天
+	RPCXMLRetentionDays int `mapstructure:"rpcXMLRetentionDays" json:"rpcXMLRetentionDays" yaml:"rpcXMLRetentionDays"`
 }

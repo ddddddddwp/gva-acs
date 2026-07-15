@@ -302,3 +302,7 @@ tr069:
     commandQueueMaxScan: 10
     commandQueueMaxPendingPerSession: 5
     commandQueueImmediateTTL: 1800
+    commandQueueWaitTimeout: 180
+    rpcResponseTimeout: 90
+    transferCompleteTimeout: 43200
+    rpcXMLRetentionDays: 30

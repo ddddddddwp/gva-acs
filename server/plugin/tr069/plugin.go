@@ -2,20 +2,30 @@ package tr069
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
+	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/initialize"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/router"
+	"github.com/ddddddddwp/gva-acs/server/utils"
 	"github.com/gin-gonic/gin"
 )
 
 var Plugin = new(tr069Plugin)
 
+var registerConfigReload sync.Once
+
 type tr069Plugin struct{}
 
 func (p *tr069Plugin) Register(group *gin.Engine) {
-	initialize.Viper()
+	registerConfigReload.Do(func() {
+		utils.GlobalSystemEvents.RegisterConfigChangeHandler(initialize.ReloadConfig)
+	})
+	initialize.ReloadConfig()
+	tr069Global.SetStartupConfig(config.CurrentRuntime().Settings)
 	initialize.Gorm(context.Background())
 	initialize.Api(context.Background())
 	initialize.Menu(context.Background())
