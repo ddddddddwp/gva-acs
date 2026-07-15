@@ -181,9 +181,25 @@ func TestDataModelHook_PersistsGPVWithXsiType(t *testing.T) {
 		{Name: "Device.DeviceInfo.MU.1.Slot.1.SoftwareVersion", Value: "5.1.0.r62694M", Type: "xsd:string"},
 		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://172.18.0.20:7547/", Type: "xsd:string"},
 		{Name: "Device.DeviceInfo.SomeBoolean", Value: "true", Type: "xsd:boolean"},
-		{Name: "Device.DeviceInfo.SomeInt", Value: "12345", Type: "xsd:int"},
+		{Name: "Device.DeviceInfo.SomeInt", Value: "-12345", Type: "xsd:int"},
 		{Name: "Device.DeviceInfo.SomeLong", Value: "9876543210", Type: "xsd:long"},
 		{Name: "Device.DeviceInfo.SomeUnsignedInt", Value: "65535", Type: "xsd:unsignedInt"},
+		{Name: "Device.DeviceInfo.SomeUnsignedLong", Value: "18446744073709551615", Type: "xsd:unsignedLong"},
+		{Name: "Device.DeviceInfo.LastUpdated", Value: "2026-07-16T02:30:00Z", Type: "xsd:dateTime"},
+	}
+	expected := map[string]struct {
+		valueType string
+		valueJSON string
+	}{
+		"Device.DeviceInfo.SerialNumber":                {valueType: "string", valueJSON: `"SN123456789"`},
+		"Device.DeviceInfo.MU.1.Slot.1.SoftwareVersion": {valueType: "string", valueJSON: `"5.1.0.r62694M"`},
+		"Device.ManagementServer.ConnectionRequestURL":  {valueType: "string", valueJSON: `"http://172.18.0.20:7547/"`},
+		"Device.DeviceInfo.SomeBoolean":                 {valueType: "boolean", valueJSON: `true`},
+		"Device.DeviceInfo.SomeInt":                     {valueType: "int", valueJSON: `-12345`},
+		"Device.DeviceInfo.SomeLong":                    {valueType: "long", valueJSON: `9876543210`},
+		"Device.DeviceInfo.SomeUnsignedInt":             {valueType: "unsignedInt", valueJSON: `65535`},
+		"Device.DeviceInfo.SomeUnsignedLong":            {valueType: "unsignedLong", valueJSON: `18446744073709551615`},
+		"Device.DeviceInfo.LastUpdated":                 {valueType: "dateTime", valueJSON: `"2026-07-16T02:30:00Z"`},
 	}
 
 	handled, err := hook.OnResponse(ctx, session, &tr069.Message{
@@ -198,6 +214,19 @@ func TestDataModelHook_PersistsGPVWithXsiType(t *testing.T) {
 		t.Fatalf("expected handled=true for correlated response")
 	}
 
+	var storageRows []struct {
+		Name         string
+		StorageClass string
+	}
+	if err := db.Raw("SELECT name, typeof(value_json) AS storage_class FROM tr069_datamodel_values WHERE device_id = ?", dev.ID).Scan(&storageRows).Error; err != nil {
+		t.Fatalf("inspect value_json storage: %v", err)
+	}
+	for _, row := range storageRows {
+		if row.StorageClass != "text" && row.StorageClass != "blob" {
+			t.Errorf("value_json storage class for %s = %s, want text or blob", row.Name, row.StorageClass)
+		}
+	}
+
 	// 验证数据是否正确存储到数据库
 	var values []model.DataModelValue
 	if err := db.Where("device_id = ?", dev.ID).Find(&values).Error; err != nil {
@@ -209,29 +238,23 @@ func TestDataModelHook_PersistsGPVWithXsiType(t *testing.T) {
 	}
 
 	// 验证每个参数的类型和值
-	for _, param := range params {
-		found := false
-		for _, v := range values {
-			if v.Name == param.Name {
-				found = true
-				// 验证 value_type 是否正确（normalizeValueType 会把 xsd:string 转为 string）
-				expectedType := param.Type
-				if idx := param.Type[5:]; idx != "" { // xsd:xxx -> xxx
-					expectedType = param.Type[4:] // xsd: -> 空，取后面的部分
-				}
-				// 验证类型是否被正确处理
-				t.Logf("Parameter: %s, Type: %s, StoredType: %s, Value: %s",
-					param.Name, param.Type, v.ValueType, string(v.ValueJSON))
-				_ = expectedType
-				break
-			}
+	for _, value := range values {
+		want, ok := expected[value.Name]
+		if !ok {
+			t.Errorf("unexpected parameter persisted: %s", value.Name)
+			continue
 		}
-		if !found {
-			t.Errorf("expected parameter %s to be persisted", param.Name)
+		if value.ValueType != want.valueType {
+			t.Errorf("value_type for %s = %q, want %q", value.Name, value.ValueType, want.valueType)
 		}
+		if got := string(value.ValueJSON); got != want.valueJSON {
+			t.Errorf("value_json for %s = %q, want %q", value.Name, got, want.valueJSON)
+		}
+		delete(expected, value.Name)
 	}
-
-	t.Logf("Successfully stored %d parameters to database", len(values))
+	for name := range expected {
+		t.Errorf("expected parameter %s to be persisted", name)
+	}
 }
 
 // TestDataModelHook_PersistGPV_DebugValueType 专门测试 value_type 字段存储
