@@ -25,6 +25,8 @@ type RawDumpConfig struct {
 	DumpToConsole bool // 新增：控制是否打印到终端
 }
 
+const defaultDumpMaxBytes = 64 * 1024
+
 // EnsureRequestID 是 TR069 调试辅助中间件：
 // - 优先使用请求头 X-Request-Id
 // - 否则自动生成 UUID，并写入 gin.Context(key="requestId")
@@ -52,12 +54,15 @@ func EnsureRequestID() gin.HandlerFunc {
 // - 使用 BEGIN/END 多行块输出，避免和访问日志混在同一行
 // - 支持脱敏 Authorization/Cookie，并限制最大打印字节数
 // 删除/禁用：从 TR069 server 的 middleware 链中移除或将 config.yaml 的 tr069.dumpRaw=false。
-func RawDump(cfg RawDumpConfig) gin.HandlerFunc {
-	maxBytes := cfg.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = 64 * 1024
-	}
+// cfg 参数仅保留源码兼容；运行行为由每个请求开始时的原子配置快照决定。
+func RawDump(_ RawDumpConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		settings := config.CurrentRuntime().Settings
+		if !rawDumpEnabled(settings) {
+			c.Next()
+			return
+		}
+		maxBytes := dumpMaxBytes(settings)
 		reqID, _ := c.Get("requestId")
 		requestID, _ := reqID.(string)
 
@@ -70,16 +75,16 @@ func RawDump(cfg RawDumpConfig) gin.HandlerFunc {
 			}
 		}
 
-		reqDump := dumpRequest(c.Request, reqBody, requestID, cfg.RedactAuth, cfg.RedactCookie, maxBytes)
-		if cfg.DumpToConsole {
+		reqDump := dumpRequest(c.Request, reqBody, requestID, settings.DumpRedactAuth, settings.DumpRedactCookie, maxBytes)
+		if settings.DumpRaw {
 			_, _ = fmt.Fprintln(os.Stdout, reqDump)
 		}
-		if config.CurrentRuntime().Settings.InfoLogEnable {
+		if settings.InfoLogEnable {
 			// 如果已开启独立文件日志，则不再打印到 GVA_LOG，避免 Zap 结构化日志将换行符转义为 \n 导致阅读困难
 			// if global.GVA_LOG != nil {
 			// 	global.GVA_LOG.Info("TR069 RAW REQUEST", zap.String("dump", reqDump))
 			// }
-			writeInfoLog(reqDump)
+			writeInfoLog(reqDump, settings)
 		}
 		if requestID != "" {
 			trace.Default.Add(requestID, trace.Entry{
@@ -89,39 +94,19 @@ func RawDump(cfg RawDumpConfig) gin.HandlerFunc {
 			})
 		}
 
-		var capture *responseCaptureWriter
-		if cfg.PrintResponse {
-			capture = newResponseCaptureWriter(c.Writer, maxBytes)
-			c.Writer = capture
-		}
-
-		start := time.Now()
 		c.Next()
-		elapsed := time.Since(start)
-
-		if capture != nil {
-			respDump := dumpResponse(c.Writer.Status(), c.Writer.Header(), capture.body.Bytes(), requestID, elapsed, maxBytes)
-			if cfg.DumpToConsole {
-				_, _ = fmt.Fprintln(os.Stdout, respDump)
-			}
-			if config.CurrentRuntime().Settings.InfoLogEnable {
-				// if global.GVA_LOG != nil {
-				// 	global.GVA_LOG.Info("TR069 RAW RESPONSE", zap.String("dump", respDump))
-				// }
-				writeInfoLog(respDump)
-			}
-			if requestID != "" {
-				trace.Default.Add(requestID, trace.Entry{
-					At:      time.Now(),
-					Stage:   "raw.response",
-					Message: truncateBytes(capture.body.Bytes(), maxBytes),
-					Fields: map[string]string{
-						"status": fmt.Sprintf("%d", c.Writer.Status()),
-					},
-				})
-			}
-		}
 	}
+}
+
+func rawDumpEnabled(settings config.TR069Config) bool {
+	return settings.DumpRaw || settings.InfoLogEnable
+}
+
+func dumpMaxBytes(settings config.TR069Config) int {
+	if settings.DumpMaxBytes > 0 {
+		return settings.DumpMaxBytes
+	}
+	return defaultDumpMaxBytes
 }
 
 func dumpRequest(r *http.Request, body []byte, requestID string, redactAuth, redactCookie bool, maxBytes int) string {
@@ -223,6 +208,6 @@ func truncateBytes(b []byte, max int) string {
 	return string(b[:max])
 }
 
-func writeInfoLog(s string) {
-	infolog.Write(s)
+func writeInfoLog(s string, settings config.TR069Config) {
+	infolog.WriteWithSettings(s, settings)
 }

@@ -15,12 +15,16 @@ type RawResponseDumpConfig struct {
 	DumpToConsole bool
 }
 
-func RawResponseDump(cfg RawResponseDumpConfig) gin.HandlerFunc {
-	maxBytes := cfg.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = 64 * 1024
-	}
+// RawResponseDump keeps its config parameter for source compatibility; each
+// request derives all behavior from one atomic runtime snapshot.
+func RawResponseDump(_ RawResponseDumpConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		settings := config.CurrentRuntime().Settings
+		if !rawDumpEnabled(settings) {
+			c.Next()
+			return
+		}
+		maxBytes := dumpMaxBytes(settings)
 		reqID, _ := c.Get("requestId")
 		requestID, _ := reqID.(string)
 
@@ -32,11 +36,11 @@ func RawResponseDump(cfg RawResponseDumpConfig) gin.HandlerFunc {
 		elapsed := time.Since(start)
 
 		respDump := dumpResponse(c.Writer.Status(), c.Writer.Header(), capture.body.Bytes(), requestID, elapsed, maxBytes)
-		if cfg.DumpToConsole {
+		if settings.DumpRaw {
 			_, _ = fmt.Fprintln(os.Stdout, respDump)
 		}
-		if config.CurrentRuntime().Settings.InfoLogEnable {
-			writeInfoLog(respDump)
+		if settings.InfoLogEnable {
+			writeInfoLog(respDump, settings)
 		}
 		if requestID != "" {
 			trace.Default.Add(requestID, trace.Entry{

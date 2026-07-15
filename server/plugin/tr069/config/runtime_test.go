@@ -1,6 +1,7 @@
 package config
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -67,5 +68,37 @@ func TestReloadChangesRuntimeWithoutChangingExistingDeadline(t *testing.T) {
 	}
 	if want := base.Add(90 * time.Second); !deadline.Equal(want) {
 		t.Fatalf("existing deadline=%s want=%s", deadline, want)
+	}
+}
+
+func TestCurrentRuntimeConcurrentFirstReadDoesNotOverwriteStoredRuntime(t *testing.T) {
+	previous := current.Load()
+	t.Cleanup(func() {
+		current.Store(previous)
+	})
+
+	const iterations = 2000
+	for iteration := 0; iteration < iterations; iteration++ {
+		current.Store(nil)
+		start := make(chan struct{})
+		var wait sync.WaitGroup
+		wait.Add(2)
+
+		go func() {
+			defer wait.Done()
+			<-start
+			_ = CurrentRuntime()
+		}()
+		go func() {
+			defer wait.Done()
+			<-start
+			StoreRuntime(TR069Config{RPCResponseTimeout: 777})
+		}()
+
+		close(start)
+		wait.Wait()
+		if got := CurrentRuntime().Settings.RPCResponseTimeout; got != 777 {
+			t.Fatalf("iteration %d: lazy defaults overwrote stored response timeout: %d", iteration, got)
+		}
 	}
 }

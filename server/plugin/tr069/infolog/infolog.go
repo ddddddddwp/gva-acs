@@ -10,7 +10,11 @@ import (
 )
 
 func Write(s string) {
-	settings := config.CurrentRuntime().Settings
+	WriteWithSettings(s, config.CurrentRuntime().Settings)
+}
+
+// WriteWithSettings writes using the caller's immutable request snapshot.
+func WriteWithSettings(s string, settings config.TR069Config) {
 	if !settings.InfoLogEnable {
 		return
 	}
