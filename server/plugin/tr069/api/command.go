@@ -3,9 +3,9 @@ package api
 import (
 	"errors"
 	"strconv"
-	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
 	req "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
@@ -13,7 +13,7 @@ import (
 
 type CommandApi struct{}
 
-var commandService = new(service.CommandService)
+var commandService = service.NewCommandService(service.NewCommandManager(nil, adapter.EnqueueImmediate))
 
 func commandFailureMessage(err error) string {
 	switch {
@@ -37,12 +37,12 @@ func commandFailureMessage(err error) string {
 // @Router /tr069/command/{deviceId}/getRPCMethods [post]
 func (a *CommandApi) SyncRPCMethods(c *gin.Context) {
 	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
-	cmdID, err := commandService.EnqueueGetRPCMethods(uint(deviceId))
+	result, err := commandService.Submit(c.Request.Context(), uint(deviceId), "GetRPCMethods", nil)
 	if err != nil {
 		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithDetailed(map[string]string{"commandId": cmdID}, "任务已下发", c)
+	response.OkWithDetailed(result, "任务已下发", c)
 }
 
 // GetParameterValues
@@ -62,12 +62,12 @@ func (a *CommandApi) GetParameterValues(c *gin.Context) {
 		response.FailWithMessage("参数错误", c)
 		return
 	}
-	res, err := commandService.ExecuteGetParameterValues(uint(deviceId), in, 15*time.Second)
+	result, err := commandService.Submit(c.Request.Context(), uint(deviceId), "GetParameterValues", in)
 	if err != nil {
 		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithDetailed(res, "任务已下发", c)
+	response.OkWithDetailed(result, "任务已下发", c)
 }
 
 // SetParameterValues
@@ -87,10 +87,10 @@ func (a *CommandApi) SetParameterValues(c *gin.Context) {
 		response.FailWithMessage("参数错误", c)
 		return
 	}
-	cmdID, err := commandService.EnqueueSetParameterValues(uint(deviceId), in)
+	result, err := commandService.Submit(c.Request.Context(), uint(deviceId), "SetParameterValues", in)
 	if err != nil {
 		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithDetailed(map[string]string{"commandId": cmdID}, "任务已下发", c)
+	response.OkWithDetailed(result, "任务已下发", c)
 }

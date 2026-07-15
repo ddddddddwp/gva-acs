@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	gormmiddleware "github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware/gorm_middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"go.uber.org/zap"
 
@@ -327,67 +329,115 @@ func (r *GormDeviceRepo) UpdateOnlineStatus(ctx context.Context, deviceID string
 		Update("last_inform", lastSeen).Error
 }
 
-type GormCommandRepo struct{}
+type GormCommandRepo struct {
+	db    *gorm.DB
+	store *service.CommandStore
+}
+
+func newGormCommandRepo(db *gorm.DB) *GormCommandRepo {
+	return &GormCommandRepo{db: db, store: service.NewCommandStore(db)}
+}
+
+func (r *GormCommandRepo) database() *gorm.DB {
+	if r != nil && r.db != nil {
+		return r.db
+	}
+	return global.GVA_DB
+}
+
+func (r *GormCommandRepo) commandStore() *service.CommandStore {
+	if r != nil && r.store != nil {
+		return r.store
+	}
+	return service.NewCommandStore(r.database())
+}
+
+func (r *GormCommandRepo) current(ctx context.Context, commandID string) (model.Command, error) {
+	var command model.Command
+	err := r.database().WithContext(ctx).First(&command, "command_id = ?", commandID).Error
+	return command, err
+}
 
 func (r *GormCommandRepo) MarkSending(ctx context.Context, commandID, requestID string, sentAt time.Time) error {
-	m := model.Command{
-		CommandID: commandID,
-		Status:    "SENDING",
-		RequestID: requestID,
+	if sentAt.IsZero() {
+		sentAt = time.Now()
 	}
-	if !sentAt.IsZero() {
-		t := sentAt
-		m.SentAt = &t
+	current, err := r.current(ctx, commandID)
+	if err != nil {
+		return err
 	}
-	return global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "command_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"status",
-			"request_id",
-			"sent_at",
-			"updated_at",
-		}),
-	}).Create(&m).Error
+	deadline := sentAt.Add(config.CurrentRuntime().RPCResponseTimeout)
+	_, err = r.commandStore().Transition(ctx, service.CommandTransition{
+		CommandID:       commandID,
+		FromStatuses:    []string{model.CommandStatusBuilding},
+		ToStatus:        model.CommandStatusSent,
+		ExpectedVersion: current.Version,
+		EventType:       "REQUEST_SENT",
+		Stage:           "request",
+		Updates: map[string]any{
+			"request_id":        requestID,
+			"sent_at":           sentAt,
+			"phase_deadline_at": deadline,
+		},
+	})
+	return err
 }
 
 func (r *GormCommandRepo) MarkSuccess(ctx context.Context, commandID string, finishedAt time.Time) error {
-	m := model.Command{
-		CommandID: commandID,
-		Status:    "SUCCESS",
+	if finishedAt.IsZero() {
+		finishedAt = time.Now()
 	}
-	if !finishedAt.IsZero() {
-		t := finishedAt
-		m.FinishedAt = &t
+	current, err := r.current(ctx, commandID)
+	if err != nil {
+		return err
 	}
-	return global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "command_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"status",
-			"finished_at",
-			"updated_at",
-		}),
-	}).Create(&m).Error
+	_, err = r.commandStore().Transition(ctx, service.CommandTransition{
+		CommandID:       commandID,
+		FromStatuses:    []string{model.CommandStatusSent, model.CommandStatusWaitingTransfer},
+		ToStatus:        model.CommandStatusCompleted,
+		ExpectedVersion: current.Version,
+		EventType:       "RESPONSE_COMPLETED",
+		Stage:           "response",
+		Updates: map[string]any{
+			"finished_at":       finishedAt,
+			"phase_deadline_at": nil,
+		},
+	})
+	return err
 }
 
 func (r *GormCommandRepo) MarkFail(ctx context.Context, commandID string, faultCode int, faultString string, finishedAt time.Time) error {
-	m := model.Command{
-		CommandID:   commandID,
-		Status:      "FAIL",
-		FaultCode:   faultCode,
-		FaultString: faultString,
+	if finishedAt.IsZero() {
+		finishedAt = time.Now()
 	}
-	if !finishedAt.IsZero() {
-		t := finishedAt
-		m.FinishedAt = &t
+	current, err := r.current(ctx, commandID)
+	if err != nil {
+		return err
 	}
-	return global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "command_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"status",
-			"fault_code",
-			"fault_string",
-			"finished_at",
-			"updated_at",
-		}),
-	}).Create(&m).Error
+	stage := "cwmp.fault"
+	if current.Status == model.CommandStatusBuilding {
+		stage = "core.build"
+	}
+	_, err = r.commandStore().Transition(ctx, service.CommandTransition{
+		CommandID: commandID,
+		FromStatuses: []string{
+			model.CommandStatusWaitingDevice,
+			model.CommandStatusBuilding,
+			model.CommandStatusSent,
+			model.CommandStatusWaitingTransfer,
+		},
+		ToStatus:        model.CommandStatusFailed,
+		ExpectedVersion: current.Version,
+		EventType:       "COMMAND_FAILED",
+		Stage:           stage,
+		Message:         faultString,
+		Updates: map[string]any{
+			"failure_stage":     stage,
+			"fault_code":        faultCode,
+			"fault_string":      faultString,
+			"finished_at":       finishedAt,
+			"phase_deadline_at": nil,
+		},
+	})
+	return err
 }

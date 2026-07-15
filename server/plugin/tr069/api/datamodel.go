@@ -4,13 +4,15 @@ import (
 	"strconv"
 
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	req "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
 )
 
 type DataModelApi struct{}
 
-var dmService = new(service.CommandService)
+var dmService = service.NewCommandService(service.NewCommandManager(nil, adapter.EnqueueImmediate))
 
 // FullSync
 // @Tags TR069
@@ -24,12 +26,12 @@ var dmService = new(service.CommandService)
 // @Router /tr069/datamodel/{deviceId}/sync [post]
 func (a *DataModelApi) FullSync(c *gin.Context) {
 	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
-	commandID, err := dmService.EnqueueDeviceParameterSync(uint(deviceId))
+	result, err := dmService.Submit(c.Request.Context(), uint(deviceId), "GetParameterValues", req.GetParameterValuesRequest{Paths: []string{"Device."}})
 	if err != nil {
 		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithDetailed(map[string]string{"commandId": commandID}, "任务已下发，等待设备响应", c)
+	response.OkWithDetailed(result, "任务已下发，等待设备响应", c)
 }
 
 // GetDataModelList

@@ -2,40 +2,36 @@ package adapter
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/redis/go-redis/v9"
 )
 
-type ImmediateEnqueueConfig struct {
-	TTL time.Duration
+type commandWakeClient interface {
+	RPush(ctx context.Context, key string, values ...interface{}) *redis.IntCmd
 }
 
-func EnqueueImmediate(ctx context.Context, p DispatcherPayload, cfg ImmediateEnqueueConfig) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+// EnqueueImmediate records only a duplicate-safe device wake-up. The database
+// command head remains the authoritative source selected by RedisCommandSource.
+func EnqueueImmediate(ctx context.Context, deviceKey string) error {
 	if global.GVA_REDIS == nil {
 		return errors.New("redis not initialized")
 	}
-	if p.DeviceKey == "" || p.CommandID == "" || p.Op == "" {
-		return errors.New("invalid payload")
+	return enqueueImmediate(ctx, global.GVA_REDIS, deviceKey)
+}
+
+func enqueueImmediate(ctx context.Context, client commandWakeClient, deviceKey string) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	b, err := json.Marshal(p)
-	if err != nil {
-		return err
+	if client == nil {
+		return errors.New("redis not initialized")
 	}
-	key := RedisImmediateListPrefix + p.DeviceKey
-	if err := global.GVA_REDIS.RPush(ctx, key, b).Err(); err != nil {
-		return err
+	if deviceKey == "" {
+		return errors.New("deviceKey cannot be empty")
 	}
-	if cfg.TTL > 0 {
-		_ = global.GVA_REDIS.Expire(ctx, key, cfg.TTL).Err()
-	}
-	return nil
+	return client.RPush(ctx, RedisCommandWakeupKey, deviceKey).Err()
 }
 
 func IsRedisNil(err error) bool { return errors.Is(err, redis.Nil) }

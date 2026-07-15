@@ -2,7 +2,6 @@ package adapter
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,9 +9,12 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type RedisCommandSourceConfig struct {
@@ -20,11 +22,30 @@ type RedisCommandSourceConfig struct {
 	DedupTTL             time.Duration
 	MaxScan              int
 	InstanceID           string
-	MaxPendingPerSession int // 限制每次 session 处理的 pending 消息数量，避免饥饿
+	MaxPendingPerSession int
+}
+
+type commandDeviceLocker interface {
+	Lock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
+	Unlock(ctx context.Context, key, owner string) error
+}
+
+type redisCommandDeviceLocker struct {
+	client redis.UniversalClient
+}
+
+func (l redisCommandDeviceLocker) Lock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
+	return l.client.SetNX(ctx, key, owner, ttl).Result()
+}
+
+func (l redisCommandDeviceLocker) Unlock(ctx context.Context, key, owner string) error {
+	return unlockLockScript.Run(ctx, l.client, []string{key}, owner).Err()
 }
 
 type RedisCommandSource struct {
-	client redis.UniversalClient
+	db     *gorm.DB
+	store  *service.CommandStore
+	locker commandDeviceLocker
 	cfg    RedisCommandSourceConfig
 }
 
@@ -32,32 +53,24 @@ func NewRedisCommandSource(cfg RedisCommandSourceConfig) (*RedisCommandSource, e
 	if global.GVA_REDIS == nil {
 		return nil, errors.New("Redis client not initialized")
 	}
+	if global.GVA_DB == nil {
+		return nil, errors.New("database not initialized")
+	}
+	return newRedisCommandSource(global.GVA_DB, redisCommandDeviceLocker{client: global.GVA_REDIS}, cfg), nil
+}
 
-	instanceID := cfg.InstanceID
-	if instanceID == "" {
+func newRedisCommandSource(db *gorm.DB, locker commandDeviceLocker, cfg RedisCommandSourceConfig) *RedisCommandSource {
+	if cfg.InstanceID == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
 			hostname = "unknown"
 		}
-		instanceID = "gva-" + hostname + "-" + strconv.Itoa(os.Getpid())
+		cfg.InstanceID = "gva-" + hostname + "-" + strconv.Itoa(os.Getpid())
 	}
 	if cfg.LockTTL <= 0 {
 		cfg.LockTTL = 30 * time.Second
 	}
-	if cfg.DedupTTL <= 0 {
-		cfg.DedupTTL = 24 * time.Hour
-	}
-	if cfg.MaxScan <= 0 {
-		cfg.MaxScan = 10
-	}
-	if cfg.MaxPendingPerSession <= 0 {
-		cfg.MaxPendingPerSession = 5
-	}
-	cfg.InstanceID = instanceID
-	return &RedisCommandSource{
-		client: global.GVA_REDIS,
-		cfg:    cfg,
-	}, nil
+	return &RedisCommandSource{db: db, store: service.NewCommandStore(db), locker: locker, cfg: cfg}
 }
 
 var unlockLockScript = redis.NewScript(`
@@ -71,7 +84,7 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s == nil || s.client == nil {
+	if s == nil || s.db == nil || s.store == nil || s.locker == nil {
 		return nil, nil, nil, errors.New("RedisCommandSource not initialized")
 	}
 	if deviceKey == "" {
@@ -79,140 +92,107 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 	}
 
 	lockKey := RedisDeviceLockPrefix + deviceKey
-	ok, err := s.client.SetNX(ctx, lockKey, s.cfg.InstanceID, s.cfg.LockTTL).Result()
+	locked, err := s.locker.Lock(ctx, lockKey, s.cfg.InstanceID, s.cfg.LockTTL)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to acquire device lock: %w", err)
 	}
-	if !ok {
-		return nil, nil, nil, nil // 锁已被其他实例持有
+	if !locked {
+		return nil, nil, nil, nil
+	}
+	unlock := func(ctx context.Context) error {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return s.locker.Unlock(ctx, lockKey, s.cfg.InstanceID)
 	}
 
-	immediateKey := RedisImmediateListPrefix + deviceKey
-	pendingKey := RedisPendingListPrefix + deviceKey
-
-	// 1. 优先处理 immediate 队列（主动下发的命令）
-	cmd := s.pullOneFromQueue(ctx, immediateKey, deviceKey)
-	if cmd != nil {
-		global.GVA_LOG.Info("TR069 REDIS PULL",
-			zap.String("deviceKey", deviceKey),
-			zap.String("source", "immediate"),
-			zap.String("commandId", cmd.ID),
-			zap.String("operation", cmd.Operation))
-		ack := func(ctx context.Context) error {
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
-		}
-		nack := func(ctx context.Context, reason string) error {
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			if err := s.client.RPush(ctx, immediateKey, s.marshalCommand(cmd)).Err(); err != nil {
-				return err
-			}
-			return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
-		}
-		return cmd, ack, nack, nil
-	}
-
-	// 2. 限制处理 pending 队列的数量，避免饥饿
-	pendingCount := 0
-	for pendingCount < s.cfg.MaxPendingPerSession {
-		cmd = s.pullOneFromQueue(ctx, pendingKey, deviceKey)
-		if cmd == nil {
-			break
-		}
-		pendingCount++
-		global.GVA_LOG.Info("TR069 REDIS PULL",
-			zap.String("deviceKey", deviceKey),
-			zap.String("source", "pending"),
-			zap.String("commandId", cmd.ID),
-			zap.String("operation", cmd.Operation),
-			zap.Int("batch", pendingCount),
-			zap.Int("maxBatch", s.cfg.MaxPendingPerSession))
-
-		ack := func(ctx context.Context) error {
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
-		}
-		nack := func(ctx context.Context, reason string) error {
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			if err := s.client.RPush(ctx, pendingKey, s.marshalCommand(cmd)).Err(); err != nil {
-				return err
-			}
-			return unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
-		}
-		return cmd, ack, nack, nil
-	}
-
-	// 没有命令
-	_ = unlockLockScript.Run(ctx, s.client, []string{lockKey}, s.cfg.InstanceID).Err()
-	return nil, nil, nil, nil
-}
-
-func (s *RedisCommandSource) pullOneFromQueue(ctx context.Context, queueKey, deviceKey string) *core.Command {
-	val, err := s.client.LPop(ctx, queueKey).Bytes()
-	if errors.Is(err, redis.Nil) || len(val) == 0 {
-		return nil
+	var head model.Command
+	err = s.db.WithContext(ctx).
+		Where("device_key = ? AND status IN ?", deviceKey, model.NonTerminalCommandStatuses()).
+		Order("created_at ASC").
+		Order("command_id ASC").
+		First(&head).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, nil, errors.Join(unlock(ctx))
 	}
 	if err != nil {
-		global.GVA_LOG.Error("failed to pop from queue", zap.Error(err), zap.String("queueKey", queueKey))
-		return nil
+		return nil, nil, nil, errors.Join(err, unlock(ctx))
+	}
+	if head.Status != model.CommandStatusWaitingDevice {
+		return nil, nil, nil, errors.Join(unlock(ctx))
 	}
 
-	var parsed DispatcherPayload
-	if err := json.Unmarshal(val, &parsed); err != nil {
-		return nil
+	buildingAt := time.Now()
+	building, err := s.store.Transition(ctx, service.CommandTransition{
+		CommandID:       head.CommandID,
+		FromStatuses:    []string{model.CommandStatusWaitingDevice},
+		ToStatus:        model.CommandStatusBuilding,
+		ExpectedVersion: head.Version,
+		EventType:       "BUILDING_STARTED",
+		Stage:           "core.build",
+		Updates: map[string]any{
+			"building_at":       buildingAt,
+			"phase_deadline_at": nil,
+		},
+	})
+	if errors.Is(err, service.ErrCommandTransitionConflict) {
+		return nil, nil, nil, errors.Join(unlock(ctx))
+	}
+	if err != nil {
+		return nil, nil, nil, errors.Join(err, unlock(ctx))
 	}
 
-	if parsed.DeviceKey == "" {
-		parsed.DeviceKey = deviceKey
+	ack := core.AckFunc(func(ctx context.Context) error {
+		return unlock(ctx)
+	})
+	nack := core.NackFunc(func(ctx context.Context, reason string) error {
+		return s.nackBuilding(ctx, building, reason, unlock)
+	})
+
+	params, err := service.DecodeRPCParams(building.Operation, building.ParamsJSON)
+	if err != nil {
+		return nil, nil, nil, errors.Join(err, nack(ctx, "decode persisted command params"))
+	}
+	if spec, ok := service.RPCSpecs[building.Operation]; ok && spec.Transfer && building.CommandKey != nil {
+		params["commandKey"] = *building.CommandKey
 	}
 
-	// 去重检查
-	if parsed.DedupKey != "" {
-		dedupKey := RedisDedupPrefix + parsed.DedupKey
-		seen, err := s.client.SetNX(ctx, dedupKey, "1", s.cfg.DedupTTL).Result()
-		if err == nil && !seen {
-			return nil // 已存在，跳过
-		}
-	}
-
-	cmd := &core.Command{
-		ID:        parsed.CommandID,
-		DeviceKey: parsed.DeviceKey,
-		Operation: parsed.Op,
-		DedupKey:  parsed.DedupKey,
-		Params:    map[string]interface{}{},
-		CreatedAt: time.Now(),
-	}
-	if parsed.Params != "" {
-		var m map[string]interface{}
-		if err := json.Unmarshal([]byte(parsed.Params), &m); err == nil {
-			cmd.Params = m
-		}
-	}
-	return cmd
+	return &core.Command{
+		ID:        building.CommandID,
+		DeviceKey: building.DeviceKey,
+		Operation: building.Operation,
+		Params:    params,
+		DedupKey:  building.DedupKey,
+		CreatedAt: building.CreatedAt,
+	}, ack, nack, nil
 }
 
-func (s *RedisCommandSource) marshalCommand(cmd *core.Command) string {
-	p := DispatcherPayload{
-		DeviceKey: cmd.DeviceKey,
-		CommandID: cmd.ID,
-		Op:        cmd.Operation,
-		DedupKey:  cmd.DedupKey,
+func (s *RedisCommandSource) nackBuilding(ctx context.Context, building model.Command, reason string, unlock func(context.Context) error) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if cmd.Params != nil {
-		b, _ := json.Marshal(cmd.Params)
-		p.Params = string(b)
+	var current model.Command
+	readErr := s.db.WithContext(ctx).First(&current, "command_id = ?", building.CommandID).Error
+	var transitionErr error
+	if readErr == nil && current.Status == model.CommandStatusBuilding {
+		now := time.Now()
+		deadline := now.Add(config.CurrentRuntime().CommandQueueWaitTimeout)
+		_, transitionErr = s.store.Transition(ctx, service.CommandTransition{
+			CommandID:       current.CommandID,
+			FromStatuses:    []string{model.CommandStatusBuilding},
+			ToStatus:        model.CommandStatusWaitingDevice,
+			ExpectedVersion: current.Version,
+			EventType:       "BUILDING_REQUEUED",
+			Stage:           "core.build",
+			Message:         reason,
+			Updates: map[string]any{
+				"building_at":       nil,
+				"waiting_at":        now,
+				"phase_deadline_at": deadline,
+			},
+		})
 	}
-	b, _ := json.Marshal(p)
-	return string(b)
+	return errors.Join(readErr, transitionErr, unlock(ctx))
 }
 
 var _ core.CommandSource = (*RedisCommandSource)(nil)
