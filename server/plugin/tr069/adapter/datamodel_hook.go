@@ -343,7 +343,7 @@ func (h *DataModelHook) enqueue(ctx context.Context, deviceKey string, op string
 			CommandID:  cmdID,
 			DeviceKey:  deviceKey,
 			Operation:  op,
-			ParamsJSON: paramsJSON,
+			ParamsJSON: []byte(paramsJSON),
 			DedupKey:   dedupKey,
 			Status:     "PENDING",
 			CreatedAt:  h.now(),

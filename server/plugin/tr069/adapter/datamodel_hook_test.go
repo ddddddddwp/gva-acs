@@ -86,7 +86,7 @@ func TestDataModelHook_PersistsGPVAndExpandsGPN(t *testing.T) {
 		CommandID:  "cmd-gpn",
 		DeviceKey:  session.DeviceKey,
 		Operation:  "GetParameterNames",
-		ParamsJSON: `{"parameterPath":"Device.","depth":0,"maxDepth":2}`,
+		ParamsJSON: model.LongTextJSON(`{"parameterPath":"Device.","depth":0,"maxDepth":2}`),
 		Status:     "SENDING",
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),

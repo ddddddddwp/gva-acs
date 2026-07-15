@@ -15,6 +15,8 @@ func Gorm(ctx context.Context) {
 	err := global.GVA_DB.WithContext(ctx).AutoMigrate(
 		new(model.Device),
 		new(model.Command),
+		new(model.CommandEvent),
+		new(model.CommandXML),
 		new(model.DataModelValue),
 		new(model.DeviceRPCMethods),
 		new(model.FAPService),
