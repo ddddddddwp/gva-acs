@@ -18,21 +18,27 @@ import (
 
 func TestRPCSpecsContainExactMethodMetadata(t *testing.T) {
 	want := map[string]struct {
-		permission string
-		transfer   bool
+		displayName  string
+		operation    string
+		capability   string
+		permission   string
+		confirmation string
+		resultPolicy string
+		deferred     string
+		transfer     bool
 	}{
-		"GetRPCMethods":          {permission: "query"},
-		"GetParameterValues":     {permission: "query"},
-		"GetParameterNames":      {permission: "query"},
-		"GetParameterAttributes": {permission: "query"},
-		"SetParameterValues":     {permission: "config"},
-		"SetParameterAttributes": {permission: "config"},
-		"AddObject":              {permission: "config"},
-		"DeleteObject":           {permission: "config"},
-		"Download":               {permission: "transfer", transfer: true},
-		"Upload":                 {permission: "transfer", transfer: true},
-		"Reboot":                 {permission: "maintenance"},
-		"FactoryReset":           {permission: "maintenance"},
+		"GetRPCMethods":          {displayName: "查询设备能力", operation: "GetRPCMethods", permission: "query", confirmation: "none", resultPolicy: "methods", deferred: "none"},
+		"GetParameterValues":     {displayName: "获取参数", operation: "GetParameterValues", capability: "GetParameterValues", permission: "query", confirmation: "none", resultPolicy: "parameterValues", deferred: "none"},
+		"GetParameterNames":      {displayName: "获取参数名称", operation: "GetParameterNames", capability: "GetParameterNames", permission: "query", confirmation: "none", resultPolicy: "parameterInfos", deferred: "none"},
+		"GetParameterAttributes": {displayName: "获取参数属性", operation: "GetParameterAttributes", capability: "GetParameterAttributes", permission: "query", confirmation: "none", resultPolicy: "parameterAttributes", deferred: "none"},
+		"SetParameterValues":     {displayName: "配置参数", operation: "SetParameterValues", capability: "SetParameterValues", permission: "config", confirmation: "normal", resultPolicy: "status", deferred: "none"},
+		"SetParameterAttributes": {displayName: "配置参数属性", operation: "SetParameterAttributes", capability: "SetParameterAttributes", permission: "config", confirmation: "normal", resultPolicy: "status", deferred: "none"},
+		"AddObject":              {displayName: "添加对象", operation: "AddObject", capability: "AddObject", permission: "config", confirmation: "normal", resultPolicy: "objectStatus", deferred: "none"},
+		"DeleteObject":           {displayName: "删除对象", operation: "DeleteObject", capability: "DeleteObject", permission: "config", confirmation: "danger", resultPolicy: "status", deferred: "none"},
+		"Download":               {displayName: "下载文件", operation: "Download", capability: "Download", permission: "transfer", confirmation: "normal", resultPolicy: "transfer", deferred: "transferComplete", transfer: true},
+		"Upload":                 {displayName: "上传文件", operation: "Upload", capability: "Upload", permission: "transfer", confirmation: "normal", resultPolicy: "transfer", deferred: "transferComplete", transfer: true},
+		"Reboot":                 {displayName: "重启设备", operation: "Reboot", capability: "Reboot", permission: "maintenance", confirmation: "danger", resultPolicy: "acknowledgement", deferred: "none"},
+		"FactoryReset":           {displayName: "恢复出厂设置", operation: "FactoryReset", capability: "FactoryReset", permission: "maintenance", confirmation: "danger", resultPolicy: "acknowledgement", deferred: "none"},
 	}
 
 	if len(RPCSpecs) != len(want) {
@@ -44,9 +50,90 @@ func TestRPCSpecsContainExactMethodMetadata(t *testing.T) {
 			t.Errorf("RPCSpecs missing %q", method)
 			continue
 		}
-		if spec.Method != method || spec.Permission != expected.permission || spec.Transfer != expected.transfer {
-			t.Errorf("RPCSpecs[%q] = %#v, want method=%q permission=%q transfer=%t", method, spec, method, expected.permission, expected.transfer)
+		if spec.Method != method ||
+			spec.DisplayName != expected.displayName ||
+			spec.Operation != expected.operation ||
+			spec.Capability != expected.capability ||
+			spec.Permission != expected.permission ||
+			string(spec.Confirmation) != expected.confirmation ||
+			string(spec.ResultPolicy) != expected.resultPolicy ||
+			string(spec.DeferredPolicy) != expected.deferred ||
+			spec.Transfer != expected.transfer {
+			t.Errorf("RPCSpecs[%q] = %#v, want %#v", method, spec, expected)
 		}
+		if spec.newRequest == nil || spec.normalize == nil {
+			t.Errorf("RPCSpecs[%q] missing typed decode/normalize strategy", method)
+		}
+	}
+}
+
+func TestRPCRequestPersistenceRoundTripUsesTypedNormalization(t *testing.T) {
+	tests := []struct {
+		method  string
+		request any
+		assert  func(*testing.T, map[string]interface{})
+	}{
+		{method: "GetParameterValues", request: req.GetParameterValuesRequest{Paths: []string{"Device.", "Device.WiFi."}}, assert: func(t *testing.T, params map[string]interface{}) {
+			t.Helper()
+			if _, ok := params["paths"].([]string); !ok {
+				t.Fatalf("paths type = %T, want []string", params["paths"])
+			}
+		}},
+		{method: "GetParameterNames", request: req.GetParameterNamesRequest{ParameterPath: "Device.WiFi.", NextLevel: true}},
+		{method: "GetParameterAttributes", request: req.GetParameterAttributesRequest{ParameterNames: []string{"Device.WiFi.SSID.1.SSID"}}, assert: func(t *testing.T, params map[string]interface{}) {
+			t.Helper()
+			names, ok := params["parameterNames"].([]string)
+			if !ok {
+				t.Fatalf("parameterNames type = %T, want []string", params["parameterNames"])
+			}
+			if want := []string{"Device.WiFi.SSID.1.SSID"}; !reflect.DeepEqual(names, want) {
+				t.Fatalf("parameterNames = %#v, want %#v", names, want)
+			}
+		}},
+		{method: "SetParameterValues", request: req.SetParameterValuesRequest{ParameterKey: "set-1", Parameters: []req.SetParameterValue{{Name: "Device.WiFi.SSID.1.SSID", Type: "xsd:string", Value: "lab"}}}, assert: func(t *testing.T, params map[string]interface{}) {
+			t.Helper()
+			if _, ok := params["parameters"].([]map[string]interface{}); !ok {
+				t.Fatalf("parameters type = %T, want []map[string]interface{}", params["parameters"])
+			}
+		}},
+		{method: "SetParameterAttributes", request: req.SetParameterAttributesRequest{ParameterAttributes: []req.SetParameterAttribute{{Name: "Device.WiFi.SSID.1.SSID", NotificationChange: true, Notification: 2}}}, assert: func(t *testing.T, params map[string]interface{}) {
+			t.Helper()
+			if _, ok := params["parameterAttributes"].([]map[string]interface{}); !ok {
+				t.Fatalf("parameterAttributes type = %T, want []map[string]interface{}", params["parameterAttributes"])
+			}
+		}},
+		{method: "AddObject", request: req.ObjectRequest{ObjectName: "Device.WiFi.SSID.", ParameterKey: "add-1"}},
+		{method: "DeleteObject", request: req.ObjectRequest{ObjectName: "Device.WiFi.SSID.7.", ParameterKey: "delete-1"}},
+		{method: "Download", request: req.DownloadRequest{FileType: "1 Firmware Upgrade Image", URL: "https://acs.example.test/fw.bin", FileSize: 1024, TargetFileName: "fw.bin"}},
+		{method: "Upload", request: req.UploadRequest{FileType: "1 Vendor Configuration File", URL: "https://acs.example.test/config.xml"}},
+		{method: "Reboot", request: req.RebootRequest{CommandKey: "reboot-1"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.method, func(t *testing.T) {
+			persisted, err := EncodeRPCRequest(tc.method, tc.request)
+			if err != nil {
+				t.Fatalf("EncodeRPCRequest() error = %v", err)
+			}
+			decoded, err := DecodeRPCRequest(tc.method, persisted)
+			if err != nil {
+				t.Fatalf("DecodeRPCRequest() error = %v", err)
+			}
+			if reflect.TypeOf(decoded) != reflect.TypeOf(tc.request) {
+				t.Fatalf("decoded type = %T, want %T", decoded, tc.request)
+			}
+			if !reflect.DeepEqual(decoded, tc.request) {
+				t.Fatalf("decoded = %#v, want %#v", decoded, tc.request)
+			}
+
+			params, err := DecodeRPCParams(tc.method, persisted)
+			if err != nil {
+				t.Fatalf("DecodeRPCParams() error = %v", err)
+			}
+			if tc.assert != nil {
+				tc.assert(t, params)
+			}
+		})
 	}
 }
 
@@ -111,6 +198,8 @@ func TestRPCRequestValidation(t *testing.T) {
 		{name: "SetParameterAttributes notification above range", method: "SetParameterAttributes", request: req.SetParameterAttributesRequest{ParameterAttributes: []req.SetParameterAttribute{{Name: "Device.DeviceInfo.Manufacturer", Notification: 3}}}, wantErr: true},
 		{name: "AddObject", method: "AddObject", request: req.ObjectRequest{ObjectName: "Device.WiFi.SSID."}},
 		{name: "DeleteObject instance", method: "DeleteObject", request: req.ObjectRequest{ObjectName: "Device.WiFi.SSID.7."}},
+		{name: "DeleteObject rejects collection", method: "DeleteObject", request: req.ObjectRequest{ObjectName: "Device.WiFi.SSID."}, wantErr: true},
+		{name: "DeleteObject rejects nonnumeric instance", method: "DeleteObject", request: req.ObjectRequest{ObjectName: "Device.WiFi.SSID.seven."}, wantErr: true},
 		{name: "Object missing trailing dot", method: "AddObject", request: req.ObjectRequest{ObjectName: "Device.WiFi.SSID"}, wantErr: true},
 		{name: "Object missing root", method: "AddObject", request: req.ObjectRequest{ObjectName: ".Device.WiFi."}, wantErr: true},
 		{name: "Object empty segment", method: "DeleteObject", request: req.ObjectRequest{ObjectName: "Device..WiFi."}, wantErr: true},
@@ -128,6 +217,8 @@ func TestRPCRequestValidation(t *testing.T) {
 		{name: "FactoryReset has no body", method: "FactoryReset"},
 		{name: "unknown method", method: "VendorMethod", wantErr: true},
 		{name: "wrong request type", method: "GetParameterValues", request: req.RebootRequest{}, wantErr: true},
+		{name: "Reboot rejects wrong request type", method: "Reboot", request: req.ObjectRequest{}, wantErr: true},
+		{name: "GetRPCMethods rejects a request body", method: "GetRPCMethods", request: req.RebootRequest{}, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -135,6 +226,27 @@ func TestRPCRequestValidation(t *testing.T) {
 			err := ValidateRPCRequest(tt.method, tt.request)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ValidateRPCRequest(%q, %#v) error = %v, wantErr %t", tt.method, tt.request, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDecodePersistedRPCMethodsTreatsEmptyDataAsUnknown(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  []byte
+	}{
+		{name: "nil", raw: nil},
+		{name: "zero length", raw: []byte{}},
+		{name: "whitespace", raw: []byte("  ")},
+		{name: "JSON null", raw: []byte("null")},
+		{name: "empty array", raw: []byte("[]")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decodePersistedRPCMethods(tt.raw)
+			if !errors.Is(err, ErrRPCCapabilitiesUnknown) || !strings.Contains(err.Error(), "请先查询设备能力") {
+				t.Fatalf("decodePersistedRPCMethods(%q) error = %v, want ErrRPCCapabilitiesUnknown", tt.raw, err)
 			}
 		})
 	}

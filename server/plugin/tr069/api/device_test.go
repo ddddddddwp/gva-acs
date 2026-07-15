@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
@@ -34,6 +36,7 @@ func TestLoadDeviceRPCMethodsUsesOneBatchQuery(t *testing.T) {
 	rows := []model.DeviceRPCMethods{
 		{DeviceID: 11, MethodsJSON: datatypes.JSON(`["GetRPCMethods","Reboot"]`)},
 		{DeviceID: 12, MethodsJSON: datatypes.JSON(`["GetParameterValues"]`)},
+		{DeviceID: 14, MethodsJSON: datatypes.JSON(`null`)},
 	}
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatalf("create method rows: %v", err)
@@ -48,7 +51,7 @@ func TestLoadDeviceRPCMethodsUsesOneBatchQuery(t *testing.T) {
 		t.Fatalf("register query callback: %v", err)
 	}
 
-	got, err := loadDeviceRPCMethods(context.Background(), db, []uint{11, 12, 13})
+	got, err := loadDeviceRPCMethods(context.Background(), db, []uint{11, 12, 13, 14})
 	if err != nil {
 		t.Fatalf("loadDeviceRPCMethods() error = %v", err)
 	}
@@ -63,6 +66,16 @@ func TestLoadDeviceRPCMethodsUsesOneBatchQuery(t *testing.T) {
 	}
 	if methods, ok := got[13]; !ok || methods == nil || len(methods) != 0 {
 		t.Fatalf("methods[13] = %#v, present=%t; want a present empty slice", methods, ok)
+	}
+	if methods := got[14]; methods == nil || len(methods) != 0 {
+		t.Fatalf("methods[14] = %#v, want non-nil empty slice", methods)
+	}
+	body, err := json.Marshal(deviceResponse.DeviceResponse{RPCMethods: got[14]})
+	if err != nil {
+		t.Fatalf("marshal DeviceResponse: %v", err)
+	}
+	if !strings.Contains(string(body), `"rpcMethods":[]`) {
+		t.Fatalf("DeviceResponse JSON = %s, want rpcMethods:[]", body)
 	}
 }
 

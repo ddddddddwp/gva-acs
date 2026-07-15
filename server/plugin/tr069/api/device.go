@@ -129,6 +129,9 @@ func loadDeviceRPCMethods(ctx context.Context, db *gorm.DB, deviceIDs []uint) (m
 				return nil, err
 			}
 		}
+		if methods == nil {
+			methods = []string{}
+		}
 		methodsByDevice[row.DeviceID] = methods
 	}
 	return methodsByDevice, nil
