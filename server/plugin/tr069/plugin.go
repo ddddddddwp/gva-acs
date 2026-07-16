@@ -2,6 +2,7 @@ package tr069
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/engine"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/initialize"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/router"
@@ -28,12 +30,15 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 		utils.GlobalSystemEvents.RegisterConfigChangeHandler(initialize.ReloadConfig)
 		utils.GlobalSystemEvents.RegisterShutdownHandler(func(ctx context.Context) error {
 			adapter.StopRedisDispatcher()
-			return adapter.StopCommandWakeConsumer(ctx)
+			return errors.Join(engine.Stop(ctx), adapter.StopCommandWakeConsumer(ctx))
 		})
 	})
 	initialize.ReloadConfig()
 	tr069Global.SetStartupConfig(config.CurrentRuntime().Settings)
 	initialize.Gorm(context.Background())
+	if _, err := engine.Get(); err != nil {
+		global.GVA_LOG.Error("failed to initialize TR-069 engine", zap.Error(err))
+	}
 	initialize.Api(context.Background())
 	initialize.Menu(context.Background())
 	initialize.StartTR069Server()
