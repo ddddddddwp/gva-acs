@@ -2,6 +2,8 @@ package adapter
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
@@ -150,4 +152,45 @@ func TestConnectionProfileCollectRequestsProvisioningForURLWithoutCredentials(t 
 	if !result.NeedsProvisioning || result.Profile.ProvisionState != model.ConnectionProfileStateDiscovered {
 		t.Fatalf("collect result=%#v", result)
 	}
+}
+
+func TestConnectionProfileResolveRejectsCredentialsUntilProfileIsReady(t *testing.T) {
+	repo, db := newConnectionProfileRepositoryTest(t)
+	device := createConnectionProfileDevice(t, db, "PROFILE-NOT-READY")
+	if _, err := repo.Collect(context.Background(), device.ID, map[string]string{
+		connectionRequestURLName: "http://127.0.0.1:8400",
+	}); err != nil {
+		t.Fatalf("collect URL: %v", err)
+	}
+	if err := repo.StoreCredential(context.Background(), db, device.ID, "pending-user", "pending-secret", model.ConnectionCredentialSourceAuto); err != nil {
+		t.Fatalf("store credential: %v", err)
+	}
+
+	for _, state := range []string{
+		model.ConnectionProfileStateDiscovered,
+		model.ConnectionProfileStateProvisioning,
+		model.ConnectionProfileStateFailed,
+	} {
+		t.Run(state, func(t *testing.T) {
+			if err := db.Model(new(model.ConnectionProfile)).Where("device_id = ?", device.ID).Update("provision_state", state).Error; err != nil {
+				t.Fatalf("set state: %v", err)
+			}
+			_, err := repo.Resolve(context.Background(), device.ID)
+			if !errors.Is(err, ErrConnectionProfileNotReady) {
+				t.Fatalf("Resolve() error = %v, want not-ready", err)
+			}
+			if err != nil && (containsAny(err.Error(), "pending-user", "pending-secret")) {
+				t.Fatalf("Resolve() error leaked credentials: %v", err)
+			}
+		})
+	}
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if candidate != "" && strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }

@@ -19,6 +19,8 @@ const (
 	connectionRequestPasswordName = "Device.ManagementServer.ConnectionRequestPassword"
 )
 
+var ErrConnectionProfileNotReady = errors.New("connection profile is not ready")
+
 type CollectResult struct {
 	Profile           model.ConnectionProfile
 	NeedsProvisioning bool
@@ -210,6 +212,9 @@ func (r *ConnectionProfileRepository) Resolve(ctx context.Context, deviceID uint
 	var profile model.ConnectionProfile
 	if err := r.database().WithContext(ctx).First(&profile, "device_id = ?", deviceID).Error; err != nil {
 		return ResolvedConnectionProfile{}, err
+	}
+	if profile.ProvisionState != model.ConnectionProfileStateReady {
+		return ResolvedConnectionProfile{}, ErrConnectionProfileNotReady
 	}
 	urlValue := effectiveConnectionURL(profile)
 	if urlValue == "" || profile.Username == "" || len(profile.PasswordCiphertext) == 0 {
