@@ -1,6 +1,6 @@
 <template>
-  <div class="device-list-container">
-    <div class="search-box">
+  <div>
+    <div class="gva-search-box">
       <el-form :inline="true" :model="searchInfo" class="demo-form-inline">
         <el-form-item label="序列号">
           <el-input v-model="searchInfo.serialNumber" placeholder="请输入序列号" clearable />
@@ -12,8 +12,8 @@
       </el-form>
     </div>
 
-    <div class="table-box">
-      <div class="btn-list">
+    <div class="gva-table-box">
+      <div class="gva-btn-list">
         <el-button type="primary" :icon="Plus" @click="openDialog">录入设备 (白名单)</el-button>
       </div>
 
@@ -267,19 +267,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.device-list-container {
-  padding: 20px;
-  background-color: #fff;
-}
-.search-box {
-  margin-bottom: 20px;
-}
-.table-box {
-  background-color: #fff;
-}
-.btn-list {
-  margin-bottom: 10px;
-}
 :deep(.rpc-group-title) {
   font-size: 12px;
   font-weight: 600;

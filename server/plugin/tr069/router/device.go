@@ -50,6 +50,14 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 		commandRouter.POST(":deviceId/factoryReset", commandApi.FactoryReset)
 	}
 
+	recordRouter := Router.Group("command-record")
+	recordApi := new(api.CommandRecordApi)
+	{
+		recordRouter.GET("list", recordApi.List)
+		recordRouter.GET(":commandId", recordApi.Detail)
+		recordRouter.POST(":commandId/retry", middleware.OperationRecord(), recordApi.Retry)
+	}
+
 	dmRouter := Router.Group("datamodel")
 	dmApi := new(api.DataModelApi)
 	{

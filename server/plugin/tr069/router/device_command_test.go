@@ -39,3 +39,24 @@ func TestDeviceRouterRegistersAllTypedCommandRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceRouterRegistersCommandRecordRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	new(DeviceRouter).InitDeviceRouter(engine.Group("/tr069"))
+
+	routes := make(map[string]bool)
+	for _, route := range engine.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	want := []string{
+		"GET /tr069/command-record/list",
+		"GET /tr069/command-record/:commandId",
+		"POST /tr069/command-record/:commandId/retry",
+	}
+	for _, route := range want {
+		if !routes[route] {
+			t.Errorf("command record route %q is not registered", route)
+		}
+	}
+}

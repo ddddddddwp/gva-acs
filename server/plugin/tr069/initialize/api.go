@@ -36,6 +36,11 @@ func Api(ctx context.Context) {
 		{Path: "/tr069/command/:deviceId/reboot", Description: "重启设备", ApiGroup: "TR069", Method: "POST"},
 		{Path: "/tr069/command/:deviceId/factoryReset", Description: "恢复出厂设置", ApiGroup: "TR069", Method: "POST"},
 
+		// Command record APIs
+		{Path: "/tr069/command-record/list", Description: "RPC记录列表", ApiGroup: "TR069", Method: "GET"},
+		{Path: "/tr069/command-record/:commandId", Description: "RPC记录详情", ApiGroup: "TR069", Method: "GET"},
+		{Path: "/tr069/command-record/:commandId/retry", Description: "RPC记录重新下发", ApiGroup: "TR069", Method: "POST"},
+
 		// DataModel APIs
 		{Path: "/tr069/datamodel/:deviceId/sync", Description: "全量同步数据模型", ApiGroup: "TR069", Method: "POST"},
 		{Path: "/tr069/datamodel/:deviceId/list", Description: "获取数据模型列表", ApiGroup: "TR069", Method: "GET"},
