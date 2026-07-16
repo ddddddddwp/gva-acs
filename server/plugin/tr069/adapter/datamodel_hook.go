@@ -22,11 +22,12 @@ import (
 )
 
 type DataModelHook struct {
-	base     core.CorrelationHook
-	inflight core.InflightRepo
-	ingest   core.CommandIngest
-	profiles *ConnectionProfileRepository
-	now      func() time.Time
+	base        core.CorrelationHook
+	inflight    core.InflightRepo
+	ingest      core.CommandIngest
+	profiles    *ConnectionProfileRepository
+	provisioner ConnectionCredentialScheduler
+	now         func() time.Time
 }
 
 type DataModelHookOption func(*DataModelHook)
@@ -40,6 +41,12 @@ func WithDataModelHookNow(now func() time.Time) DataModelHookOption {
 func WithDataModelHookProfiles(profiles *ConnectionProfileRepository) DataModelHookOption {
 	return func(h *DataModelHook) {
 		h.profiles = profiles
+	}
+}
+
+func WithDataModelHookProvisioner(provisioner ConnectionCredentialScheduler) DataModelHookOption {
+	return func(h *DataModelHook) {
+		h.provisioner = provisioner
 	}
 }
 
@@ -213,8 +220,13 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 		if profiles == nil {
 			profiles = NewConnectionProfileRepository(global.GVA_DB, nil)
 		}
-		if _, err := profiles.Collect(ctx, deviceID, profileValues); err != nil && global.GVA_LOG != nil {
-			global.GVA_LOG.Warn("failed to collect connection profile from GPV", zap.Uint("deviceID", deviceID), zap.Error(err))
+		collected, collectErr := profiles.Collect(ctx, deviceID, profileValues)
+		if collectErr != nil {
+			if global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to collect connection profile from GPV", zap.Uint("deviceID", deviceID), zap.Error(collectErr))
+			}
+		} else if collected.NeedsProvisioning && h.provisioner != nil {
+			h.provisioner.Schedule(deviceID)
 		}
 	}
 	return nil

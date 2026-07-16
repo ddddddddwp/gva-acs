@@ -20,10 +20,40 @@ func newGormCommandRepoTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(new(model.Command), new(model.CommandEvent)); err != nil {
+	if err := db.AutoMigrate(new(model.Command), new(model.CommandEvent), new(model.ConnectionProfile)); err != nil {
 		t.Fatalf("migrate command repo models: %v", err)
 	}
 	return db
+}
+
+func TestGormDeviceRepoProvisionerSchedulesNeededInformProfile(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(new(model.Device), new(model.DataModelValue), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate device repo models: %v", err)
+	}
+	cipher, err := NewCredentialCipher(testCredentialConfig(0x63))
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	scheduler := &recordingCredentialScheduler{accept: true}
+	repo := NewGormDeviceRepo(db, NewConnectionProfileRepository(db, cipher), scheduler)
+	info := &tr069core.InformSummary{Params: map[string]string{
+		"Device.DeviceInfo.SerialNumber":               "INFORM-SCHEDULE",
+		"Device.ManagementServer.ConnectionRequestURL": "http://127.0.0.1:8400",
+	}}
+	if _, err := repo.UpsertFromInform(context.Background(), info, "192.0.2.20"); err != nil {
+		t.Fatalf("Inform: %v", err)
+	}
+	var device model.Device
+	if err := db.First(&device, "serial_number = ?", "INFORM-SCHEDULE").Error; err != nil {
+		t.Fatalf("load device: %v", err)
+	}
+	if len(scheduler.deviceIDs) != 1 || scheduler.deviceIDs[0] != device.ID {
+		t.Fatalf("scheduled device IDs = %#v, want [%d]", scheduler.deviceIDs, device.ID)
+	}
 }
 
 func TestGormDeviceRepoInformDoesNotClearConnectionRequestURL(t *testing.T) {
@@ -225,5 +255,160 @@ func TestGormCommandRepoPersistsExplicitQueueAckFailureStage(t *testing.T) {
 	}
 	if failed.Status != model.CommandStatusFailed || failed.FailureStage != "queue.ack" {
 		t.Fatalf("failed status/stage = %s/%q", failed.Status, failed.FailureStage)
+	}
+}
+
+func TestProfileTerminalSuccessAndFailureCorrelateOnlyProvisionCommand(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		db := newGormCommandRepoTestDB(t)
+		now := time.Now()
+		command := model.Command{
+			CommandID: "profile-terminal-success", DeviceID: 31, DeviceKey: "001122-PROFILE-SUCCESS",
+			Operation: "SetParameterValues", Origin: model.CommandOriginSystem, ParamsJSON: model.LongTextJSON(`{}`),
+			Status: model.CommandStatusSent, QueuedAt: now, CreatedAt: now,
+		}
+		if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+			t.Fatalf("seed command: %v", err)
+		}
+		profile := model.ConnectionProfile{DeviceID: 31, ProvisionState: model.ConnectionProfileStateProvisioning, ProvisionCommandID: command.CommandID, LastError: "old"}
+		if err := db.Create(&profile).Error; err != nil {
+			t.Fatalf("seed profile: %v", err)
+		}
+		if err := newGormCommandRepo(db).MarkSuccess(context.Background(), command.CommandID, now); err != nil {
+			t.Fatalf("MarkSuccess: %v", err)
+		}
+		var got model.ConnectionProfile
+		if err := db.First(&got, profile.ID).Error; err != nil {
+			t.Fatalf("load profile: %v", err)
+		}
+		if got.ProvisionState != model.ConnectionProfileStateReady || got.LastError != "" {
+			t.Fatalf("profile = %#v", got)
+		}
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		db := newGormCommandRepoTestDB(t)
+		now := time.Now()
+		command := model.Command{
+			CommandID: "profile-terminal-failure", DeviceID: 32, DeviceKey: "001122-PROFILE-FAILURE",
+			Operation: "SetParameterValues", Origin: model.CommandOriginSystem, ParamsJSON: model.LongTextJSON(`{}`),
+			Status: model.CommandStatusSent, QueuedAt: now, CreatedAt: now,
+		}
+		if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+			t.Fatalf("seed command: %v", err)
+		}
+		profile := model.ConnectionProfile{DeviceID: 32, ProvisionState: model.ConnectionProfileStateProvisioning, ProvisionCommandID: command.CommandID}
+		if err := db.Create(&profile).Error; err != nil {
+			t.Fatalf("seed profile: %v", err)
+		}
+		if err := newGormCommandRepo(db).MarkFail(context.Background(), command.CommandID, 9002, "terminal fault", now); err != nil {
+			t.Fatalf("MarkFail: %v", err)
+		}
+		var got model.ConnectionProfile
+		if err := db.First(&got, profile.ID).Error; err != nil {
+			t.Fatalf("load profile: %v", err)
+		}
+		if got.ProvisionState != model.ConnectionProfileStateFailed || got.LastError != "terminal fault" {
+			t.Fatalf("profile = %#v", got)
+		}
+	})
+
+	t.Run("ordinary command", func(t *testing.T) {
+		db := newGormCommandRepoTestDB(t)
+		now := time.Now()
+		command := model.Command{
+			CommandID: "ordinary-terminal", DeviceID: 33, DeviceKey: "001122-ORDINARY",
+			Operation: "SetParameterValues", Origin: model.CommandOriginUser, ParamsJSON: model.LongTextJSON(`{}`),
+			Status: model.CommandStatusSent, QueuedAt: now, CreatedAt: now,
+		}
+		if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+			t.Fatalf("seed command: %v", err)
+		}
+		profile := model.ConnectionProfile{DeviceID: 33, ProvisionState: model.ConnectionProfileStateProvisioning, ProvisionCommandID: "some-other-command"}
+		if err := db.Create(&profile).Error; err != nil {
+			t.Fatalf("seed profile: %v", err)
+		}
+		if err := newGormCommandRepo(db).MarkSuccess(context.Background(), command.CommandID, now); err != nil {
+			t.Fatalf("MarkSuccess: %v", err)
+		}
+		var got model.ConnectionProfile
+		if err := db.First(&got, profile.ID).Error; err != nil {
+			t.Fatalf("load profile: %v", err)
+		}
+		if got.ProvisionState != model.ConnectionProfileStateProvisioning || got.ProvisionCommandID != "some-other-command" {
+			t.Fatalf("ordinary command altered profile: %#v", got)
+		}
+	})
+
+	t.Run("manual credentials supersede an old provision command", func(t *testing.T) {
+		db := newGormCommandRepoTestDB(t)
+		now := time.Now()
+		command := model.Command{
+			CommandID: "superseded-profile-terminal", DeviceID: 35, DeviceKey: "001122-SUPERSEDED",
+			Operation: "SetParameterValues", Origin: model.CommandOriginSystem, ParamsJSON: model.LongTextJSON(`{}`),
+			Status: model.CommandStatusSent, QueuedAt: now, CreatedAt: now,
+		}
+		if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+			t.Fatalf("seed command: %v", err)
+		}
+		profile := model.ConnectionProfile{
+			DeviceID: 35, ProvisionState: model.ConnectionProfileStateReady,
+			ProvisionCommandID: command.CommandID, CredentialSource: model.ConnectionCredentialSourceManual,
+		}
+		if err := db.Create(&profile).Error; err != nil {
+			t.Fatalf("seed profile: %v", err)
+		}
+		if err := newGormCommandRepo(db).MarkFail(context.Background(), command.CommandID, 9002, "old automatic command failed", now); err != nil {
+			t.Fatalf("MarkFail: %v", err)
+		}
+		var got model.ConnectionProfile
+		if err := db.First(&got, profile.ID).Error; err != nil {
+			t.Fatalf("load profile: %v", err)
+		}
+		if got.ProvisionState != model.ConnectionProfileStateReady || got.CredentialSource != model.ConnectionCredentialSourceManual || got.LastError != "" {
+			t.Fatalf("old terminal command overrode manual profile: %#v", got)
+		}
+	})
+}
+
+func TestProfileTerminalUpdateFailureRollsBackCommandAndEvent(t *testing.T) {
+	db := newGormCommandRepoTestDB(t)
+	now := time.Now()
+	command := model.Command{
+		CommandID: "profile-terminal-rollback", DeviceID: 34, DeviceKey: "001122-PROFILE-ROLLBACK",
+		Operation: "SetParameterValues", Origin: model.CommandOriginSystem, ParamsJSON: model.LongTextJSON(`{}`),
+		Status: model.CommandStatusSent, QueuedAt: now, CreatedAt: now,
+	}
+	if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+		t.Fatalf("seed command: %v", err)
+	}
+	profile := model.ConnectionProfile{DeviceID: 34, ProvisionState: model.ConnectionProfileStateProvisioning, ProvisionCommandID: command.CommandID}
+	if err := db.Create(&profile).Error; err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
+	injected := errors.New("injected profile terminal update failure")
+	if err := db.Callback().Update().Before("gorm:update").Register("test:fail_profile_terminal_update", func(tx *gorm.DB) {
+		if tx.Statement.Table == (model.ConnectionProfile{}).TableName() {
+			tx.AddError(injected)
+		}
+	}); err != nil {
+		t.Fatalf("register update failure: %v", err)
+	}
+	if err := newGormCommandRepo(db).MarkSuccess(context.Background(), command.CommandID, now); !errors.Is(err, injected) {
+		t.Fatalf("MarkSuccess error = %v, want %v", err, injected)
+	}
+	var gotCommand model.Command
+	if err := db.First(&gotCommand, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("load command: %v", err)
+	}
+	if gotCommand.Status != model.CommandStatusSent || gotCommand.Version != 0 {
+		t.Fatalf("command changed despite rollback: %#v", gotCommand)
+	}
+	var terminalEvents int64
+	if err := db.Model(new(model.CommandEvent)).Where("command_id = ? AND event_type = ?", command.CommandID, "RESPONSE_COMPLETED").Count(&terminalEvents).Error; err != nil {
+		t.Fatalf("count terminal events: %v", err)
+	}
+	if terminalEvents != 0 {
+		t.Fatalf("terminal events after rollback = %d", terminalEvents)
 	}
 }

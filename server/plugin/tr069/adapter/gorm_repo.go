@@ -20,12 +20,17 @@ import (
 )
 
 type GormDeviceRepo struct {
-	db       *gorm.DB
-	profiles *ConnectionProfileRepository
+	db          *gorm.DB
+	profiles    *ConnectionProfileRepository
+	provisioner ConnectionCredentialScheduler
 }
 
-func NewGormDeviceRepo(db *gorm.DB, profiles *ConnectionProfileRepository) *GormDeviceRepo {
-	return &GormDeviceRepo{db: db, profiles: profiles}
+func NewGormDeviceRepo(db *gorm.DB, profiles *ConnectionProfileRepository, provisioners ...ConnectionCredentialScheduler) *GormDeviceRepo {
+	repo := &GormDeviceRepo{db: db, profiles: profiles}
+	if len(provisioners) > 0 {
+		repo.provisioner = provisioners[0]
+	}
+	return repo
 }
 
 func (r *GormDeviceRepo) database() *gorm.DB {
@@ -204,8 +209,13 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 					return "", err
 				}
 			}
-			if _, err := r.profileRepository().Collect(ctx, dbDevice.ID, info.Params); err != nil && global.GVA_LOG != nil {
-				global.GVA_LOG.Warn("failed to collect connection profile from Inform", zap.Uint("deviceID", dbDevice.ID), zap.Error(err))
+			collected, collectErr := r.profileRepository().Collect(ctx, dbDevice.ID, info.Params)
+			if collectErr != nil {
+				if global.GVA_LOG != nil {
+					global.GVA_LOG.Warn("failed to collect connection profile from Inform", zap.Uint("deviceID", dbDevice.ID), zap.Error(collectErr))
+				}
+			} else if collected.NeedsProvisioning && r.provisioner != nil {
+				r.provisioner.Schedule(dbDevice.ID)
 			}
 		}
 	}
@@ -413,23 +423,27 @@ func (r *GormCommandRepo) MarkSuccess(ctx context.Context, commandID string, fin
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
 	}
-	current, err := r.current(ctx, commandID)
-	if err != nil {
-		return err
-	}
-	_, err = r.commandStore().Transition(ctx, service.CommandTransition{
-		CommandID:       commandID,
-		FromStatuses:    []string{model.CommandStatusSent, model.CommandStatusWaitingTransfer},
-		ToStatus:        model.CommandStatusCompleted,
-		ExpectedVersion: current.Version,
-		EventType:       "RESPONSE_COMPLETED",
-		Stage:           "response",
-		Updates: map[string]any{
-			"finished_at":       finishedAt,
-			"phase_deadline_at": nil,
-		},
+	return r.database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Command
+		if err := tx.WithContext(ctx).First(&current, "command_id = ?", commandID).Error; err != nil {
+			return err
+		}
+		if _, err := service.NewCommandStore(tx).Transition(ctx, service.CommandTransition{
+			CommandID:       commandID,
+			FromStatuses:    []string{model.CommandStatusSent, model.CommandStatusWaitingTransfer},
+			ToStatus:        model.CommandStatusCompleted,
+			ExpectedVersion: current.Version,
+			EventType:       "RESPONSE_COMPLETED",
+			Stage:           "response",
+			Updates: map[string]any{
+				"finished_at":       finishedAt,
+				"phase_deadline_at": nil,
+			},
+		}); err != nil {
+			return err
+		}
+		return (&ConnectionProfileRepository{db: tx}).MarkTerminal(ctx, tx, commandID, model.ConnectionProfileStateReady, "")
 	})
-	return err
 }
 
 func (r *GormCommandRepo) MarkFail(ctx context.Context, commandID string, faultCode int, faultString string, finishedAt time.Time) error {
@@ -444,37 +458,41 @@ func (r *GormCommandRepo) markFailAtStage(ctx context.Context, commandID string,
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
 	}
-	current, err := r.current(ctx, commandID)
-	if err != nil {
-		return err
-	}
-	stage := explicitStage
-	if stage == "" {
-		stage = "cwmp.fault"
-		if current.Status == model.CommandStatusBuilding {
-			stage = "core.build"
+	return r.database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Command
+		if err := tx.WithContext(ctx).First(&current, "command_id = ?", commandID).Error; err != nil {
+			return err
 		}
-	}
-	_, err = r.commandStore().Transition(ctx, service.CommandTransition{
-		CommandID: commandID,
-		FromStatuses: []string{
-			model.CommandStatusWaitingDevice,
-			model.CommandStatusBuilding,
-			model.CommandStatusSent,
-			model.CommandStatusWaitingTransfer,
-		},
-		ToStatus:        model.CommandStatusFailed,
-		ExpectedVersion: current.Version,
-		EventType:       "COMMAND_FAILED",
-		Stage:           stage,
-		Message:         faultString,
-		Updates: map[string]any{
-			"failure_stage":     stage,
-			"fault_code":        faultCode,
-			"fault_string":      faultString,
-			"finished_at":       finishedAt,
-			"phase_deadline_at": nil,
-		},
+		stage := explicitStage
+		if stage == "" {
+			stage = "cwmp.fault"
+			if current.Status == model.CommandStatusBuilding {
+				stage = "core.build"
+			}
+		}
+		if _, err := service.NewCommandStore(tx).Transition(ctx, service.CommandTransition{
+			CommandID: commandID,
+			FromStatuses: []string{
+				model.CommandStatusWaitingDevice,
+				model.CommandStatusBuilding,
+				model.CommandStatusSent,
+				model.CommandStatusWaitingTransfer,
+			},
+			ToStatus:        model.CommandStatusFailed,
+			ExpectedVersion: current.Version,
+			EventType:       "COMMAND_FAILED",
+			Stage:           stage,
+			Message:         faultString,
+			Updates: map[string]any{
+				"failure_stage":     stage,
+				"fault_code":        faultCode,
+				"fault_string":      faultString,
+				"finished_at":       finishedAt,
+				"phase_deadline_at": nil,
+			},
+		}); err != nil {
+			return err
+		}
+		return (&ConnectionProfileRepository{db: tx}).MarkTerminal(ctx, tx, commandID, model.ConnectionProfileStateFailed, faultString)
 	})
-	return err
 }

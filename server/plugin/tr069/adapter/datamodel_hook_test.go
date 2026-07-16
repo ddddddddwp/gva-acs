@@ -61,6 +61,40 @@ func TestDataModelHookGPVCollectsConnectionProfile(t *testing.T) {
 	}
 }
 
+func TestDataModelHookProvisionerSchedulesNeededGPVProfile(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	previousDB := appGlobal.GVA_DB
+	appGlobal.GVA_DB = db
+	t.Cleanup(func() { appGlobal.GVA_DB = previousDB })
+	if err := db.AutoMigrate(new(model.Device), new(model.DataModelValue), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	device := model.Device{OUI: "001122", SerialNumber: "GPV-SCHEDULE"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	cipher, err := NewCredentialCipher(testCredentialConfig(0x64))
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	scheduler := &recordingCredentialScheduler{accept: true}
+	hook := NewDataModelHook(nil, nil, nil,
+		WithDataModelHookProfiles(NewConnectionProfileRepository(db, cipher)),
+		WithDataModelHookProvisioner(scheduler),
+	)
+	if err := hook.persistGPV(context.Background(), device.ID, []tr069.Parameter{
+		{Name: connectionRequestURLName, Value: "http://127.0.0.1:8400", Type: "xsd:string"},
+	}); err != nil {
+		t.Fatalf("persist GPV: %v", err)
+	}
+	if len(scheduler.deviceIDs) != 1 || scheduler.deviceIDs[0] != device.ID {
+		t.Fatalf("scheduled device IDs = %#v, want [%d]", scheduler.deviceIDs, device.ID)
+	}
+}
+
 func TestDataModelHook_PersistsGPVAndExpandsGPN(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
