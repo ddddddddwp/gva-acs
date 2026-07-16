@@ -15,7 +15,9 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
@@ -27,7 +29,6 @@ import (
 
 const (
 	maxConnectionRequestResponseBytes = 64 << 10
-	maxConnectionRequestErrorBytes    = 1024
 	connectionRequestWakeSucceeded    = "SUCCESS"
 	connectionRequestWakeFailed       = "FAILED"
 )
@@ -36,21 +37,26 @@ var errConnectionRequestRedirect = errors.New("connection request redirects are 
 
 type connectionRequestLookupFunc func(context.Context, string, string) ([]netip.Addr, error)
 
+type connectionRequestRoute struct {
+	origin        string
+	pinnedAddress string
+	policyKey     string
+}
+
+type connectionRequestRouteContextKey struct{}
+
 var connectionRequestDialer = &net.Dialer{
 	Timeout:   30 * time.Second,
 	KeepAlive: 30 * time.Second,
 }
 
-var connectionRequestTransport = &http.Transport{
-	Proxy:                 nil,
-	DialContext:           dialConnectionRequest,
-	ForceAttemptHTTP2:     true,
-	MaxIdleConns:          100,
-	MaxIdleConnsPerHost:   10,
-	IdleConnTimeout:       90 * time.Second,
-	TLSHandshakeTimeout:   10 * time.Second,
-	ExpectContinueTimeout: time.Second,
-	TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+type connectionRequestRoutingTransport struct {
+	mu         sync.Mutex
+	transports map[string]*http.Transport
+}
+
+var connectionRequestTransport = &connectionRequestRoutingTransport{
+	transports: make(map[string]*http.Transport),
 }
 
 var connectionRequestClient = &http.Client{
@@ -58,6 +64,61 @@ var connectionRequestClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errConnectionRequestRedirect
 	},
+}
+
+func (t *connectionRequestRoutingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if t == nil || request == nil {
+		return nil, errors.New("connection request transport is unavailable")
+	}
+	route, ok := request.Context().Value(connectionRequestRouteContextKey{}).(connectionRequestRoute)
+	if !ok || route.origin == "" || route.pinnedAddress == "" || route.policyKey == "" {
+		return nil, errors.New("connection request route is unavailable")
+	}
+	origin, err := normalizedConnectionRequestOrigin(request.URL)
+	if err != nil || origin != route.origin {
+		return nil, errors.New("connection request route origin mismatch")
+	}
+	return t.transportFor(route).RoundTrip(request)
+}
+
+func (t *connectionRequestRoutingTransport) transportFor(route connectionRequestRoute) *http.Transport {
+	key := route.origin + "\x00" + route.pinnedAddress + "\x00" + route.policyKey
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if transport := t.transports[key]; transport != nil {
+		return transport
+	}
+	pinnedAddress := route.pinnedAddress
+	transport := &http.Transport{
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return connectionRequestDialer.DialContext(ctx, network, pinnedAddress)
+		},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+	t.transports[key] = transport
+	return transport
+}
+
+func (t *connectionRequestRoutingTransport) CloseIdleConnections() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	transports := make([]*http.Transport, 0, len(t.transports))
+	for _, transport := range t.transports {
+		transports = append(transports, transport)
+	}
+	t.mu.Unlock()
+	for _, transport := range transports {
+		transport.CloseIdleConnections()
+	}
 }
 
 type ConnectionRequestResult struct {
@@ -167,17 +228,30 @@ func recordConnectionRequestWake(ctx context.Context, deviceID uint, result Conn
 }
 
 func boundedConnectionRequestError(err error) string {
+	return connectionRequestErrorCategory(err)
+}
+
+func connectionRequestErrorCategory(err error) string {
 	if err == nil {
 		return ""
 	}
-	text := err.Error()
-	if len(text) > maxConnectionRequestErrorBytes {
-		text = text[:maxConnectionRequestErrorBytes]
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
 	}
-	return text
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	if errors.Is(err, errConnectionRequestRedirect) {
+		return "redirect_rejected"
+	}
+	return "connection_request_failed"
 }
 
 func doConnectionRequest(ctx context.Context, connURL string, user string, pass string, timeout time.Duration) (int, error) {
+	return doConnectionRequestWithLookup(ctx, connURL, user, pass, timeout, net.DefaultResolver.LookupNetIP)
+}
+
+func doConnectionRequestWithLookup(ctx context.Context, connURL string, user string, pass string, timeout time.Duration, lookup connectionRequestLookupFunc) (int, error) {
 	parsed, err := validateConnectionRequestURL(connURL)
 	if err != nil {
 		return 0, err
@@ -190,6 +264,13 @@ func doConnectionRequest(ctx context.Context, connURL string, user string, pass 
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	route, err := resolveConnectionRequestRoute(
+		requestCtx, parsed, tr069config.CurrentRuntime().Settings.ConnectionRequest.AllowedCIDRs, lookup,
+	)
+	if err != nil {
+		return 0, err
+	}
+	requestCtx = context.WithValue(requestCtx, connectionRequestRouteContextKey{}, route)
 
 	first, err := newConnectionRequest(requestCtx, parsed, "")
 	if err != nil {
@@ -298,23 +379,72 @@ func validateConnectionRequestURL(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
-func dialConnectionRequest(ctx context.Context, network, address string) (net.Conn, error) {
-	allowedCIDRs := tr069config.CurrentRuntime().Settings.ConnectionRequest.AllowedCIDRs
-	pinned, err := resolveConnectionRequestAddress(ctx, network, address, allowedCIDRs, net.DefaultResolver.LookupNetIP)
-	if err != nil {
-		return nil, err
+func normalizedConnectionRequestOrigin(parsed *url.URL) (string, error) {
+	if parsed == nil {
+		return "", errors.New("connection request URL is invalid")
 	}
-	return connectionRequestDialer.DialContext(ctx, network, pinned)
+	port := parsed.Port()
+	if port == "" {
+		switch parsed.Scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		default:
+			return "", errors.New("connection request URL scheme is invalid")
+		}
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" {
+		return "", errors.New("connection request URL host is required")
+	}
+	return parsed.Scheme + "://" + net.JoinHostPort(host, port), nil
+}
+
+func resolveConnectionRequestRoute(ctx context.Context, parsed *url.URL, allowedCIDRs []string, lookup connectionRequestLookupFunc) (connectionRequestRoute, error) {
+	port := parsed.Port()
+	if port == "" {
+		switch parsed.Scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		default:
+			return connectionRequestRoute{}, errors.New("connection request URL scheme is invalid")
+		}
+	}
+	host := strings.ToLower(parsed.Hostname())
+	origin, err := normalizedConnectionRequestOrigin(parsed)
+	if err != nil {
+		return connectionRequestRoute{}, err
+	}
+	prefixes, policyKey, err := connectionRequestCIDRPolicy(allowedCIDRs)
+	if err != nil {
+		return connectionRequestRoute{}, err
+	}
+	pinned, err := resolveConnectionRequestAddressWithPrefixes(ctx, "tcp", net.JoinHostPort(host, port), prefixes, lookup)
+	if err != nil {
+		return connectionRequestRoute{}, err
+	}
+	return connectionRequestRoute{
+		origin:        origin,
+		pinnedAddress: pinned,
+		policyKey:     policyKey,
+	}, nil
 }
 
 func resolveConnectionRequestAddress(ctx context.Context, network, address string, allowedCIDRs []string, lookup connectionRequestLookupFunc) (string, error) {
+	prefixes, _, err := connectionRequestCIDRPolicy(allowedCIDRs)
+	if err != nil {
+		return "", err
+	}
+	return resolveConnectionRequestAddressWithPrefixes(ctx, network, address, prefixes, lookup)
+}
+
+func resolveConnectionRequestAddressWithPrefixes(ctx context.Context, network, address string, prefixes []netip.Prefix, lookup connectionRequestLookupFunc) (string, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil || host == "" || port == "" {
 		return "", errors.New("connection request network address is invalid")
-	}
-	prefixes, err := parseConnectionRequestCIDRs(allowedCIDRs)
-	if err != nil {
-		return "", err
 	}
 
 	var addresses []netip.Addr
@@ -339,6 +469,19 @@ func resolveConnectionRequestAddress(ctx context.Context, network, address strin
 	return "", errors.New("connection request address is outside allowed CIDRs")
 }
 
+func connectionRequestCIDRPolicy(values []string) ([]netip.Prefix, string, error) {
+	prefixes, err := parseConnectionRequestCIDRs(values)
+	if err != nil {
+		return nil, "", err
+	}
+	canonical := make([]string, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		canonical = append(canonical, prefix.String())
+	}
+	sort.Strings(canonical)
+	return prefixes, strings.Join(canonical, ","), nil
+}
+
 func parseConnectionRequestCIDRs(values []string) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(values))
 	for _, value := range values {
@@ -351,6 +494,9 @@ func parseConnectionRequestCIDRs(values []string) ([]netip.Prefix, error) {
 			return nil, fmt.Errorf("invalid connection request allowed CIDR %q", value)
 		}
 		prefixes = append(prefixes, prefix.Masked())
+	}
+	if len(prefixes) == 0 {
+		return nil, errors.New("connection request allowed CIDRs are required")
 	}
 	return prefixes, nil
 }
@@ -367,9 +513,6 @@ func connectionRequestAddressMatchesNetwork(address netip.Addr, network string) 
 }
 
 func connectionRequestIPAllowed(address netip.Addr, prefixes []netip.Prefix) bool {
-	if len(prefixes) == 0 {
-		return true
-	}
 	for _, prefix := range prefixes {
 		if prefix.Contains(address) {
 			return true
@@ -528,25 +671,23 @@ func escapeDigestQuoted(value string) string {
 	return strings.ReplaceAll(value, `"`, `\"`)
 }
 
-func writeConnectionRequestLog(res ConnectionRequestResult, deviceID uint, attempt int) {
+func writeConnectionRequestLog(res ConnectionRequestResult, deviceID uint, _ int) {
 	status := "OK"
 	if res.Err != nil {
 		status = "ERR"
 	}
-	safeURL := safeConnectionRequestURL(res.URL)
-	s := fmt.Sprintf("----- TR069 CONNECTION REQUEST BEGIN -----\nstatus: %s\ndeviceId: %d\nattempt: %d\nurl: %s\nhttpStatus: %d\nelapsed: %s\nerror: %v\n----- TR069 CONNECTION REQUEST END -----",
-		status, deviceID, attempt, safeURL, res.StatusCode, res.Elapsed.String(), res.Err)
+	errorCategory := connectionRequestErrorCategory(res.Err)
+	s := fmt.Sprintf("----- TR069 CONNECTION REQUEST BEGIN -----\nstatus: %s\ndeviceId: %d\nhttpStatus: %d\nelapsed: %s\nerrorCategory: %s\n----- TR069 CONNECTION REQUEST END -----",
+		status, deviceID, res.StatusCode, res.Elapsed.String(), errorCategory)
 	_, _ = fmt.Fprintln(os.Stdout, s)
 	infolog.Write(s)
 	if res.Err != nil && global.GVA_LOG != nil {
-		global.GVA_LOG.Warn("TR069 connection request failed", zap.Uint("deviceId", deviceID), zap.String("url", safeURL), zap.Int("attempt", attempt), zap.Error(res.Err))
+		global.GVA_LOG.Warn("TR069 connection request failed",
+			zap.Uint("deviceId", deviceID),
+			zap.String("status", status),
+			zap.Int("httpStatus", res.StatusCode),
+			zap.Duration("elapsed", res.Elapsed),
+			zap.String("errorCategory", errorCategory),
+		)
 	}
-}
-
-func safeConnectionRequestURL(raw string) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "<invalid>"
-	}
-	return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}).String()
 }

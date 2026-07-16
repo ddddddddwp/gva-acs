@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +16,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,6 +26,8 @@ import (
 	tr069config "github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/glebarez/sqlite"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"gorm.io/gorm"
 )
 
@@ -83,7 +88,26 @@ func newDigestConnectionRequestServer(t *testing.T, username, password, algorith
 	return server, &calls
 }
 
+func useConnectionRequestAllowedCIDRs(t *testing.T, allowedCIDRs []string) {
+	t.Helper()
+	previous := tr069config.CurrentRuntime()
+	connectionRequestTransport.CloseIdleConnections()
+	t.Cleanup(func() {
+		connectionRequestTransport.CloseIdleConnections()
+		tr069config.StoreRuntime(previous.Settings)
+	})
+	settings := previous.Settings
+	settings.ConnectionRequest.AllowedCIDRs = append([]string(nil), allowedCIDRs...)
+	tr069config.StoreRuntime(settings)
+}
+
+func allowLoopbackConnectionRequests(t *testing.T) {
+	t.Helper()
+	useConnectionRequestAllowedCIDRs(t, []string{"127.0.0.0/8"})
+}
+
 func TestDoConnectionRequestUsesDigestAndReusesConnection(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
 	server, calls := newDigestConnectionRequestServer(t, "acs", "secret", "MD5")
 	var connections atomic.Int32
 	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
@@ -104,6 +128,7 @@ func TestDoConnectionRequestUsesDigestAndReusesConnection(t *testing.T) {
 }
 
 func TestDoConnectionRequestSupportsSHA256Digest(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
 	server, calls := newDigestConnectionRequestServer(t, "sha-user", "sha-secret", "SHA-256")
 	server.Start()
 	defer server.Close()
@@ -114,7 +139,59 @@ func TestDoConnectionRequestSupportsSHA256Digest(t *testing.T) {
 	}
 }
 
+func TestDoConnectionRequestPinsOneDNSResolutionAcrossClosedDigestConnection(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
+	var calls atomic.Int32
+	var connections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		if !strings.HasPrefix(r.Host, "cpe.example:") {
+			t.Errorf("Host = %q, want original cpe.example host", r.Host)
+		}
+		if call == 1 {
+			w.Header().Set("Connection", "close")
+			w.Header().Set("WWW-Authenticate", `Digest realm="cpe", nonce="abc", qop="auth", algorithm=MD5`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if !testDigestResponseMatches(r, "acs", "secret", "MD5") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	var lookups atomic.Int32
+	lookup := func(context.Context, string, string) ([]netip.Addr, error) {
+		if lookups.Add(1) == 1 {
+			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+		}
+		return []netip.Addr{netip.MustParseAddr("192.0.2.10")}, nil
+	}
+	port := server.Listener.Addr().(*net.TCPAddr).Port
+	status, err := doConnectionRequestWithLookup(
+		context.Background(), fmt.Sprintf("http://cpe.example:%d/wake", port), "acs", "secret", time.Second, lookup,
+	)
+	if err != nil || status != http.StatusNoContent || calls.Load() != 2 {
+		t.Fatalf("status=%d calls=%d err=%v", status, calls.Load(), err)
+	}
+	if lookups.Load() != 1 {
+		t.Fatalf("DNS lookups = %d, want exactly one for both Digest requests", lookups.Load())
+	}
+	if connections.Load() != 2 {
+		t.Fatalf("TCP connections = %d, want two pinned connections after Connection: close", connections.Load())
+	}
+}
+
 func TestDoConnectionRequestRejectsWrongDigestCredentials(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
 	server, calls := newDigestConnectionRequestServer(t, "acs", "correct-secret", "MD5")
 	server.Start()
 	defer server.Close()
@@ -129,6 +206,7 @@ func TestDoConnectionRequestRejectsWrongDigestCredentials(t *testing.T) {
 }
 
 func TestDoConnectionRequestRejectsRedirect(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
 	var targetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		targetCalls.Add(1)
@@ -182,7 +260,37 @@ func TestDoConnectionRequestRejectsDisallowedCIDR(t *testing.T) {
 	}
 }
 
+func TestDoConnectionRequestRejectsEmptyAllowedCIDRsBeforeNetwork(t *testing.T) {
+	useConnectionRequestAllowedCIDRs(t, nil)
+	var calls atomic.Int32
+	var lookups atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	port := server.Listener.Addr().(*net.TCPAddr).Port
+	lookup := func(context.Context, string, string) ([]netip.Addr, error) {
+		lookups.Add(1)
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	}
+
+	status, err := doConnectionRequestWithLookup(
+		context.Background(), fmt.Sprintf("http://cpe.example:%d/wake", port), "", "", time.Second, lookup,
+	)
+	if status != 0 || err == nil || !strings.Contains(strings.ToLower(err.Error()), "cidr") {
+		t.Fatalf("status=%d err=%v, want missing CIDR policy rejection", status, err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("server calls = %d, want no network request", calls.Load())
+	}
+	if lookups.Load() != 0 {
+		t.Fatalf("DNS lookups = %d, want fail-closed before resolution", lookups.Load())
+	}
+}
+
 func TestDoConnectionRequestHonorsTimeout(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		w.WriteHeader(http.StatusNoContent)
@@ -196,7 +304,20 @@ func TestDoConnectionRequestHonorsTimeout(t *testing.T) {
 	}
 }
 
-func TestWriteConnectionRequestLogRemovesURLUserinfo(t *testing.T) {
+func TestWriteConnectionRequestLogOmitsAllURLAndSecretMaterial(t *testing.T) {
+	previousRuntime := tr069config.CurrentRuntime()
+	settings := previousRuntime.Settings
+	settings.InfoLogEnable = true
+	settings.InfoLogDir = t.TempDir()
+	tr069config.StoreRuntime(settings)
+	previousLogger := global.GVA_LOG
+	core, observed := observer.New(zap.DebugLevel)
+	global.GVA_LOG = zap.New(core)
+	t.Cleanup(func() {
+		global.GVA_LOG = previousLogger
+		tr069config.StoreRuntime(previousRuntime.Settings)
+	})
+
 	oldStdout := os.Stdout
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -205,7 +326,11 @@ func TestWriteConnectionRequestLogRemovesURLUserinfo(t *testing.T) {
 	os.Stdout = writer
 	t.Cleanup(func() { os.Stdout = oldStdout })
 
-	writeConnectionRequestLog(ConnectionRequestResult{URL: "http://alice:super-secret@example.com/wake?token=hidden"}, 7, 0)
+	writeConnectionRequestLog(ConnectionRequestResult{
+		URL:     "http://alice:super-secret@example.com/wake?token=hidden",
+		Elapsed: 25 * time.Millisecond,
+		Err:     errors.New("Get http://example.com/wake?token=hidden Authorization: Digest password=super-secret"),
+	}, 7, 0)
 	_ = writer.Close()
 	os.Stdout = oldStdout
 	output, err := io.ReadAll(reader)
@@ -213,12 +338,28 @@ func TestWriteConnectionRequestLogRemovesURLUserinfo(t *testing.T) {
 		t.Fatalf("read log: %v", err)
 	}
 	_ = reader.Close()
-	text := string(output)
-	if strings.Contains(text, "alice") || strings.Contains(text, "super-secret") || strings.Contains(text, "hidden") {
-		t.Fatalf("log leaked URL credentials: %q", text)
+	infoPath := filepath.Join(settings.InfoLogDir, time.Now().Format("2006-01-02"), "tr069info.log")
+	infoOutput, err := os.ReadFile(infoPath)
+	if err != nil {
+		t.Fatalf("read infolog: %v", err)
 	}
-	if !strings.Contains(text, "http://example.com/wake") {
-		t.Fatalf("sanitized URL missing from log: %q", text)
+	var zapOutput strings.Builder
+	for _, entry := range observed.All() {
+		zapOutput.WriteString(entry.Message)
+		zapOutput.WriteString(fmt.Sprint(entry.ContextMap()))
+	}
+	combined := string(output) + string(infoOutput) + zapOutput.String()
+	for _, forbidden := range []string{
+		"http://", "example.com", "/wake", "token=hidden", "alice", "super-secret", "Authorization", "Digest", "password=",
+	} {
+		if strings.Contains(combined, forbidden) {
+			t.Fatalf("observability leaked %q: %q", forbidden, combined)
+		}
+	}
+	for _, required := range []string{"deviceId", "7", "elapsed", "25ms", "connection_request_failed"} {
+		if !strings.Contains(combined, required) {
+			t.Fatalf("safe log field %q missing: %q", required, combined)
+		}
 	}
 }
 
@@ -326,6 +467,7 @@ func TestResolveConnectionRequestAddressRejectsEveryDisallowedIP(t *testing.T) {
 }
 
 func TestConnectionRequestSharedTransportReusesAcrossCalls(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
 	var connections atomic.Int32
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -348,15 +490,20 @@ func TestConnectionRequestSharedTransportReusesAcrossCalls(t *testing.T) {
 	}
 }
 
-func TestConnectionRequestCIDRPolicyHotReloadsForNewDial(t *testing.T) {
+func TestConnectionRequestCIDRPolicyRevocationDoesNotReuseAllowedConnection(t *testing.T) {
 	previous := tr069config.CurrentRuntime()
-	t.Cleanup(func() { tr069config.StoreRuntime(previous.Settings) })
+	connectionRequestTransport.CloseIdleConnections()
+	t.Cleanup(func() {
+		connectionRequestTransport.CloseIdleConnections()
+		tr069config.StoreRuntime(previous.Settings)
+	})
 	settings := previous.Settings
 	settings.ConnectionRequest.AllowedCIDRs = []string{"127.0.0.0/8"}
 	tr069config.StoreRuntime(settings)
 
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Connection", "close")
+		calls.Add(1)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
@@ -368,6 +515,133 @@ func TestConnectionRequestCIDRPolicyHotReloadsForNewDial(t *testing.T) {
 	tr069config.StoreRuntime(settings)
 	if status, err := doConnectionRequest(context.Background(), server.URL, "", "", time.Second); status != 0 || err == nil {
 		t.Fatalf("request after CIDR reload = (%d, %v), want rejection", status, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("server calls after policy revocation = %d, want old connection unused", calls.Load())
+	}
+}
+
+func TestConnectionRequestTransportPoolIsVersionedByCIDRPolicy(t *testing.T) {
+	previous := tr069config.CurrentRuntime()
+	connectionRequestTransport.CloseIdleConnections()
+	t.Cleanup(func() {
+		connectionRequestTransport.CloseIdleConnections()
+		tr069config.StoreRuntime(previous.Settings)
+	})
+	settings := previous.Settings
+	settings.ConnectionRequest.AllowedCIDRs = []string{"127.0.0.0/8"}
+	tr069config.StoreRuntime(settings)
+
+	var connections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	if status, err := doConnectionRequest(context.Background(), server.URL, "", "", time.Second); err != nil || status != http.StatusNoContent {
+		t.Fatalf("first policy request = (%d, %v)", status, err)
+	}
+	settings.ConnectionRequest.AllowedCIDRs = []string{"127.0.0.1/32"}
+	tr069config.StoreRuntime(settings)
+	if status, err := doConnectionRequest(context.Background(), server.URL, "", "", time.Second); err != nil || status != http.StatusNoContent {
+		t.Fatalf("second policy request = (%d, %v)", status, err)
+	}
+	if connections.Load() != 2 {
+		t.Fatalf("TCP connections = %d, want distinct pools for distinct CIDR policies", connections.Load())
+	}
+}
+
+func TestConnectionRequestTransportPoolIsIsolatedByPinnedIP(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
+	firstListener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen first pinned IP: %v", err)
+	}
+	port := firstListener.Addr().(*net.TCPAddr).Port
+	secondListener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.2:%d", port))
+	if err != nil {
+		_ = firstListener.Close()
+		t.Fatalf("listen second pinned IP: %v", err)
+	}
+	var firstCalls atomic.Int32
+	firstServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	_ = firstServer.Listener.Close()
+	firstServer.Listener = firstListener
+	firstServer.Start()
+	defer firstServer.Close()
+	var secondCalls atomic.Int32
+	secondServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	_ = secondServer.Listener.Close()
+	secondServer.Listener = secondListener
+	secondServer.Start()
+	defer secondServer.Close()
+
+	requestURL := fmt.Sprintf("http://cpe.example:%d/wake", port)
+	for _, pinned := range []string{"127.0.0.1", "127.0.0.2"} {
+		lookup := func(context.Context, string, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr(pinned)}, nil
+		}
+		status, err := doConnectionRequestWithLookup(context.Background(), requestURL, "", "", time.Second, lookup)
+		if err != nil || status != http.StatusNoContent {
+			t.Fatalf("request pinned to %s = (%d, %v)", pinned, status, err)
+		}
+	}
+	if firstCalls.Load() != 1 || secondCalls.Load() != 1 {
+		t.Fatalf("pinned server calls = %d/%d, want 1/1", firstCalls.Load(), secondCalls.Load())
+	}
+}
+
+func TestConnectionRequestPinnedTLSRoutePreservesOriginalSNI(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
+	sni := make(chan string, 1)
+	var handlerCalls atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		handlerCalls.Add(1)
+	}))
+	server.TLS = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			select {
+			case sni <- hello.ServerName:
+			default:
+			}
+			return nil, nil
+		},
+	}
+	server.StartTLS()
+	defer server.Close()
+	port := server.Listener.Addr().(*net.TCPAddr).Port
+	lookup := func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	}
+	status, err := doConnectionRequestWithLookup(
+		context.Background(), fmt.Sprintf("https://cpe.example:%d/wake", port), "", "", time.Second, lookup,
+	)
+	if status != 0 || err == nil {
+		t.Fatalf("TLS request = (%d, %v), want certificate failure after ClientHello", status, err)
+	}
+	if handlerCalls.Load() != 0 {
+		t.Fatalf("TLS handler calls = %d, want certificate rejection before HTTP", handlerCalls.Load())
+	}
+	select {
+	case got := <-sni:
+		if got != "cpe.example" {
+			t.Fatalf("TLS SNI = %q, want cpe.example", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("TLS server did not observe ClientHello")
 	}
 }
 
@@ -500,6 +774,7 @@ func TestTriggerConnectionRequestUsesHotReloadedRuntimeTimeout(t *testing.T) {
 }
 
 func TestDoConnectionRequestRejectsNon2xx(t *testing.T) {
+	allowLoopbackConnectionRequests(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}))

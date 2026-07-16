@@ -136,7 +136,7 @@ func TestCommandWakeConsumerRecordsBoundedConnectionRequestFailure(t *testing.T)
 	}
 	source := newChannelWakeTokenSource(2)
 	source.Push(command.DeviceKey)
-	injected := errors.New("connection refused")
+	injected := errors.New("Get http://alice:consumer-secret@example.com/wake?token=hidden Authorization: Digest")
 	var mu sync.Mutex
 	calls := 0
 	consumer := newCommandWakeConsumer(db, source, func(_ context.Context, _ uint, cfg ConnectionRequestConfig) ConnectionRequestResult {
@@ -160,8 +160,13 @@ func TestCommandWakeConsumerRecordsBoundedConnectionRequestFailure(t *testing.T)
 		var event model.CommandEvent
 		err := db.Where("command_id = ? AND event_type = ?", command.CommandID, "WAKE_FAILED").First(&event).Error
 		if err == nil {
-			if event.Stage != "connection_request" || event.Message != injected.Error() {
+			if event.Stage != "connection_request" || event.Message != "connection_request_failed" {
 				t.Fatalf("WAKE_FAILED event = %#v", event)
+			}
+			for _, forbidden := range []string{"http://", "example.com", "/wake", "alice", "consumer-secret", "hidden", "Authorization", "Digest"} {
+				if strings.Contains(event.Message, forbidden) {
+					t.Fatalf("WAKE_FAILED event leaked %q: %q", forbidden, event.Message)
+				}
 			}
 			break
 		}
