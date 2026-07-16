@@ -28,3 +28,18 @@ test('parameter tree delegates light and dark colors to Element theme variables'
     assert.match(source, new RegExp(variable))
   }
 })
+
+test('complete parameter names are selectable and directly copyable', () => {
+  assert.match(source, /content="复制完整参数名"/)
+  assert.match(source, /copyText\(scope\.row\.name, '参数名'\)/)
+  assert.match(source, /parameter-full-name/)
+  assert.match(source, /user-select:\s*text/)
+})
+
+test('parameter value copy is explicit and clipboard failures are reported', () => {
+  assert.match(source, /content="复制参数值"/)
+  assert.match(source, /copyText\(formatValue\(scope\.row\.valueJson\), '参数值'\)/)
+  assert.match(source, /const copyText = async/)
+  assert.match(source, /await copy\(String\(text\)\)/)
+  assert.match(source, /复制失败，请手动选择文本复制/)
+})

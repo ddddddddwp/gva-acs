@@ -90,17 +90,43 @@
                 >
                   <el-table-column prop="name" label="参数名" min-width="200" show-overflow-tooltip sortable>
                      <template #default="scope">
-                        <span class="font-mono text-xs">{{ scope.row.name.replace(currentPath, '') }}</span>
-                        <span class="dm-secondary-text text-xs ml-2">({{ scope.row.name }})</span>
+                        <div class="parameter-name-cell">
+                          <div class="parameter-name-heading">
+                            <span class="font-mono text-xs">{{ scope.row.name.replace(currentPath, '') }}</span>
+                            <el-tooltip content="复制完整参数名" placement="top">
+                              <el-button
+                                link
+                                type="primary"
+                                :icon="CopyDocument"
+                                aria-label="复制完整参数名"
+                                @click.stop="copyText(scope.row.name, '参数名')"
+                              />
+                            </el-tooltip>
+                          </div>
+                          <span
+                            class="parameter-full-name dm-secondary-text text-xs"
+                            title="点击复制完整参数名"
+                            role="button"
+                            tabindex="0"
+                            @click.stop="copyText(scope.row.name, '参数名')"
+                            @keydown.enter.stop="copyText(scope.row.name, '参数名')"
+                          >{{ scope.row.name }}</span>
+                        </div>
                      </template>
                   </el-table-column>
                   <el-table-column prop="valueJson" label="值" min-width="150" show-overflow-tooltip>
                     <template #default="scope">
-                      <div class="flex items-center justify-between group">
+                      <div class="flex items-center justify-between">
                         <span class="font-mono text-sm truncate">{{ formatValue(scope.row.valueJson) }}</span>
-                        <el-icon class="dm-copy-icon cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity" @click="copyValue(formatValue(scope.row.valueJson))">
-                          <CopyDocument />
-                        </el-icon>
+                        <el-tooltip content="复制参数值" placement="top">
+                          <el-button
+                            link
+                            type="primary"
+                            :icon="CopyDocument"
+                            aria-label="复制参数值"
+                            @click.stop="copyText(formatValue(scope.row.valueJson), '参数值')"
+                          />
+                        </el-tooltip>
                       </div>
                     </template>
                   </el-table-column>
@@ -170,7 +196,7 @@ const defaultProps = {
   label: 'label'
 }
 
-const { copy } = useClipboard()
+const { copy, isSupported } = useClipboard()
 
 watch(filterText, (val) => {
   treeRef.value?.filter(val)
@@ -285,10 +311,15 @@ const formatDate = (time) => {
   return '-'
 }
 
-const copyValue = (text) => {
-  if (!text) return
-  copy(text)
-  ElMessage.success('已复制')
+const copyText = async (text, target) => {
+  if (text === null || text === undefined || String(text) === '') return
+  try {
+    if (!isSupported.value) throw new Error('clipboard is not supported')
+    await copy(String(text))
+    ElMessage.success(`${target}已复制`)
+  } catch {
+    ElMessage.error('复制失败，请手动选择文本复制')
+  }
 }
 
 </script>
@@ -318,11 +349,23 @@ const copyValue = (text) => {
 .dm-border-right {
   border-right: 1px solid var(--el-border-color-light);
 }
-.dm-copy-icon {
-  color: var(--el-text-color-secondary);
+.parameter-name-cell {
+  min-width: 0;
 }
-.dm-copy-icon:hover {
-  color: var(--el-color-primary);
+.parameter-name-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.parameter-full-name {
+  display: block;
+  cursor: copy;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+.parameter-full-name:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
 }
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
