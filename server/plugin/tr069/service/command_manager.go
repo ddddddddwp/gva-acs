@@ -21,6 +21,12 @@ type SubmitResult struct {
 
 type CommandWakeupFunc func(ctx context.Context, deviceKey string) error
 
+type CommandPayloadProtector interface {
+	Protect(ctx context.Context, tx *gorm.DB, deviceID uint, operation, origin string, encoded []byte) ([]byte, error)
+}
+
+type CommandCreatedHook func(ctx context.Context, tx *gorm.DB, command *model.Command) error
+
 var ErrCommandNotRetryable = errors.New("command is not retryable")
 
 const (
@@ -29,9 +35,16 @@ const (
 )
 
 type CommandManager struct {
-	db     *gorm.DB
-	wakeup CommandWakeupFunc
-	now    func() time.Time
+	db        *gorm.DB
+	wakeup    CommandWakeupFunc
+	now       func() time.Time
+	protector CommandPayloadProtector
+}
+
+func WithCommandPayloadProtector(protector CommandPayloadProtector) CommandManagerOption {
+	return func(manager *CommandManager) {
+		manager.protector = protector
+	}
 }
 
 type CommandManagerOption func(*CommandManager)
@@ -74,7 +87,28 @@ func (m *CommandManager) Submit(ctx context.Context, deviceID uint, operation st
 	if err != nil {
 		return SubmitResult{}, err
 	}
-	return m.submitPersisted(ctx, deviceID, operation, paramsJSON, "")
+	return m.submitPersisted(ctx, deviceID, operation, paramsJSON, commandSubmission{
+		origin: model.CommandOriginUser,
+	})
+}
+
+func (m *CommandManager) SubmitSystem(ctx context.Context, deviceID uint, operation string, request any, dedupKey string, hook CommandCreatedHook) (SubmitResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if m == nil {
+		return SubmitResult{}, errors.New("command manager is required")
+	}
+	if m.database() == nil {
+		return SubmitResult{}, errors.New("db not initialized")
+	}
+	paramsJSON, err := EncodeRPCRequest(operation, request)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+	return m.submitPersisted(ctx, deviceID, operation, paramsJSON, commandSubmission{
+		origin: model.CommandOriginSystem, dedupKey: dedupKey, system: true, hook: hook,
+	})
 }
 
 func (m *CommandManager) Retry(ctx context.Context, commandID string) (SubmitResult, error) {
@@ -99,24 +133,35 @@ func (m *CommandManager) Retry(ctx context.Context, commandID string) (SubmitRes
 		return SubmitResult{}, err
 	}
 	paramsJSON := append([]byte(nil), original.ParamsJSON...)
-	return m.submitPersisted(ctx, original.DeviceID, original.Operation, paramsJSON, original.CommandID)
+	return m.submitPersisted(ctx, original.DeviceID, original.Operation, paramsJSON, commandSubmission{
+		origin: model.CommandOriginUser, retryOf: original.CommandID,
+	})
 }
 
-func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, operation string, paramsJSON []byte, retryOf string) (SubmitResult, error) {
+type commandSubmission struct {
+	origin   string
+	dedupKey string
+	retryOf  string
+	system   bool
+	hook     CommandCreatedHook
+}
+
+func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, operation string, paramsJSON []byte, submission commandSubmission) (SubmitResult, error) {
 	db := m.database()
 	if db == nil {
 		return SubmitResult{}, errors.New("db not initialized")
 	}
 	now := m.now()
 	command := model.Command{
-		CommandID:  uuid.NewString(),
-		DeviceID:   deviceID,
-		Operation:  operation,
-		ParamsJSON: model.LongTextJSON(paramsJSON),
-		RetryOf:    retryOf,
-		QueuedAt:   now,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		CommandID: uuid.NewString(),
+		DeviceID:  deviceID,
+		Operation: operation,
+		Origin:    submission.origin,
+		DedupKey:  submission.dedupKey,
+		RetryOf:   submission.retryOf,
+		QueuedAt:  now,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if spec, ok := RPCSpecs[operation]; ok && spec.Transfer {
 		commandKey := "rpc-" + uuid.NewString()
@@ -130,13 +175,28 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 			First(&device, deviceID).Error; err != nil {
 			return err
 		}
-		if err := ValidateRPCSubmission(ctx, tx, deviceID, operation, now); err != nil {
-			return err
+		if submission.system {
+			if device.LastInform.IsZero() || now.Sub(device.LastInform) >= commandOnlineThreshold {
+				return ErrDeviceOffline
+			}
+		} else {
+			if err := ValidateRPCSubmission(ctx, tx, deviceID, operation, now); err != nil {
+				return err
+			}
 		}
 		if device.OUI == "" || device.SerialNumber == "" {
 			return fmt.Errorf("device missing oui/serialNumber: %d", deviceID)
 		}
 		command.DeviceKey = fmt.Sprintf("%s-%s", device.OUI, device.SerialNumber)
+		protected := append([]byte(nil), paramsJSON...)
+		if m.protector != nil {
+			var err error
+			protected, err = m.protector.Protect(ctx, tx, deviceID, operation, command.Origin, protected)
+			if err != nil {
+				return err
+			}
+		}
+		command.ParamsJSON = model.LongTextJSON(protected)
 
 		var head model.Command
 		headErr := tx.Where("device_id = ? AND status IN ?", deviceID, model.NonTerminalCommandStatuses()).
@@ -154,7 +214,13 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 		default:
 			command.Status = model.CommandStatusQueued
 		}
-		return NewCommandStore(tx).Create(ctx, &command)
+		if err := NewCommandStore(tx).Create(ctx, &command); err != nil {
+			return err
+		}
+		if submission.hook != nil {
+			return submission.hook(ctx, tx, &command)
+		}
+		return nil
 	})
 	if err != nil {
 		return SubmitResult{}, err

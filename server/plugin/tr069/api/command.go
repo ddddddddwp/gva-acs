@@ -14,7 +14,15 @@ import (
 
 type CommandApi struct{}
 
-var commandService = service.NewCommandService(service.NewCommandManager(nil, adapter.EnqueueImmediate))
+var commandPayloadProtector = adapter.NewConnectionProfilePayloadProtector(
+	adapter.NewConnectionProfileRepository(nil, adapter.NewRuntimeCredentialCipher()),
+)
+
+var commandService = service.NewCommandService(service.NewCommandManager(
+	nil,
+	adapter.EnqueueImmediate,
+	service.WithCommandPayloadProtector(commandPayloadProtector),
+))
 
 func commandFailureMessage(err error) string {
 	switch {

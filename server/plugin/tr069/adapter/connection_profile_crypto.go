@@ -23,6 +23,31 @@ type CredentialCipher interface {
 	Decrypt(version string, ciphertext []byte) (string, error)
 }
 
+type runtimeCredentialCipher struct{}
+
+// NewRuntimeCredentialCipher resolves keys from the latest immutable runtime
+// snapshot for every operation so configuration hot reload and key rotation
+// apply without rebuilding API or engine singletons.
+func NewRuntimeCredentialCipher() CredentialCipher {
+	return runtimeCredentialCipher{}
+}
+
+func (runtimeCredentialCipher) Encrypt(plaintext string) (EncryptedCredential, error) {
+	cipher, err := NewCredentialCipher(config.CurrentRuntime().Settings.ConnectionRequest)
+	if err != nil {
+		return EncryptedCredential{}, err
+	}
+	return cipher.Encrypt(plaintext)
+}
+
+func (runtimeCredentialCipher) Decrypt(version string, ciphertext []byte) (string, error) {
+	cipher, err := NewCredentialCipher(config.CurrentRuntime().Settings.ConnectionRequest)
+	if err != nil {
+		return "", err
+	}
+	return cipher.Decrypt(version, ciphertext)
+}
+
 type aesGCMCredentialCipher struct {
 	activeVersion string
 	keys          map[string][]byte

@@ -66,7 +66,11 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 				MaxPendingPerSession: cfg.CommandQueueMaxPendingPerSession,
 			}
 			var err error
-			queue, err = adapter.NewRedisCommandSource(queueCfg)
+			profileRepository := adapter.NewConnectionProfileRepository(nil, adapter.NewRuntimeCredentialCipher())
+			queue, err = adapter.NewRedisCommandSource(
+				queueCfg,
+				adapter.WithRedisCommandHydrator(adapter.NewConnectionProfilePayloadProtector(profileRepository)),
+			)
 			if err != nil {
 				global.GVA_LOG.Error("failed to create Redis command source", zap.Error(err))
 				queue = defaults.NewMemoryQueue()

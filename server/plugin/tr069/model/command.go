@@ -9,6 +9,11 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+const (
+	CommandOriginUser   = "USER"
+	CommandOriginSystem = "SYSTEM"
+)
+
 // LongTextJSON preserves datatypes.JSON's scan and JSON encoding behavior while
 // keeping legacy command JSON columns as text instead of strict MySQL JSON.
 type LongTextJSON datatypes.JSON
@@ -63,6 +68,7 @@ type Command struct {
 	DeviceID        uint         `json:"deviceId" gorm:"index:idx_tr069_command_device_head,priority:1"`
 	DeviceKey       string       `json:"deviceKey" gorm:"size:128;index"`
 	Operation       string       `json:"operation" gorm:"size:64;index"`
+	Origin          string       `json:"origin" gorm:"size:16;index"`
 	ParamsJSON      LongTextJSON `json:"params" gorm:"type:longtext"`
 	ResultJSON      LongTextJSON `json:"result" gorm:"type:longtext"`
 	RetryOf         string       `json:"retryOf" gorm:"size:64;index"`

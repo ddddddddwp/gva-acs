@@ -89,3 +89,32 @@ func TestCredentialCipherReadsConfiguredHistoricalKey(t *testing.T) {
 		t.Fatalf("decrypt historical=(%q,%v)", plain, err)
 	}
 }
+
+func TestRuntimeCredentialCipherUsesHotReloadedKeys(t *testing.T) {
+	previous := config.CurrentRuntime()
+	t.Cleanup(func() { config.StoreRuntime(previous.Settings) })
+
+	oldConfig := testCredentialConfig(0x46)
+	settings := previous.Settings
+	settings.ConnectionRequest = oldConfig
+	config.StoreRuntime(settings)
+	runtimeCipher := NewRuntimeCredentialCipher()
+	encrypted, err := runtimeCipher.Encrypt("hot-reload-secret")
+	if err != nil {
+		t.Fatalf("encrypt with initial runtime key: %v", err)
+	}
+
+	newConfig := testCredentialConfig(0x47)
+	newConfig.CredentialKeyVersion = "v2"
+	newConfig.CredentialDecryptionKeys = map[string]string{"v1": oldConfig.CredentialEncryptionKey}
+	settings.ConnectionRequest = newConfig
+	config.StoreRuntime(settings)
+	plain, err := runtimeCipher.Decrypt(encrypted.Version, encrypted.Ciphertext)
+	if err != nil || plain != "hot-reload-secret" {
+		t.Fatalf("decrypt after runtime rotation=(%q,%v)", plain, err)
+	}
+	rotated, err := runtimeCipher.Encrypt("new-secret")
+	if err != nil || rotated.Version != "v2" {
+		t.Fatalf("encrypt after runtime rotation=(%q,%v)", rotated.Version, err)
+	}
+}

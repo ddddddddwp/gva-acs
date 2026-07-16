@@ -57,23 +57,32 @@ func validateRedisLockRelease(key string, deleted int64) error {
 }
 
 type RedisCommandSource struct {
-	db     *gorm.DB
-	store  *service.CommandStore
-	locker commandDeviceLocker
-	cfg    RedisCommandSourceConfig
+	db       *gorm.DB
+	store    *service.CommandStore
+	locker   commandDeviceLocker
+	cfg      RedisCommandSourceConfig
+	hydrator CommandPayloadHydrator
 }
 
-func NewRedisCommandSource(cfg RedisCommandSourceConfig) (*RedisCommandSource, error) {
+type RedisCommandSourceOption func(*RedisCommandSource)
+
+func WithRedisCommandHydrator(hydrator CommandPayloadHydrator) RedisCommandSourceOption {
+	return func(source *RedisCommandSource) {
+		source.hydrator = hydrator
+	}
+}
+
+func NewRedisCommandSource(cfg RedisCommandSourceConfig, options ...RedisCommandSourceOption) (*RedisCommandSource, error) {
 	if global.GVA_REDIS == nil {
 		return nil, errors.New("Redis client not initialized")
 	}
 	if global.GVA_DB == nil {
 		return nil, errors.New("database not initialized")
 	}
-	return newRedisCommandSource(global.GVA_DB, redisCommandDeviceLocker{client: global.GVA_REDIS}, cfg), nil
+	return newRedisCommandSource(global.GVA_DB, redisCommandDeviceLocker{client: global.GVA_REDIS}, cfg, options...), nil
 }
 
-func newRedisCommandSource(db *gorm.DB, locker commandDeviceLocker, cfg RedisCommandSourceConfig) *RedisCommandSource {
+func newRedisCommandSource(db *gorm.DB, locker commandDeviceLocker, cfg RedisCommandSourceConfig, options ...RedisCommandSourceOption) *RedisCommandSource {
 	if cfg.InstanceID == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -84,7 +93,11 @@ func newRedisCommandSource(db *gorm.DB, locker commandDeviceLocker, cfg RedisCom
 	if cfg.LockTTL <= 0 {
 		cfg.LockTTL = 30 * time.Second
 	}
-	return &RedisCommandSource{db: db, store: service.NewCommandStore(db), locker: locker, cfg: cfg}
+	source := &RedisCommandSource{db: db, store: service.NewCommandStore(db), locker: locker, cfg: cfg}
+	for _, option := range options {
+		option(source)
+	}
+	return source
 }
 
 var unlockLockScript = redis.NewScript(`
@@ -167,6 +180,11 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 	params, err := service.DecodeRPCParams(building.Operation, building.ParamsJSON)
 	if err != nil {
 		return nil, nil, nil, errors.Join(err, nack(ctx, "decode persisted command params"))
+	}
+	if s.hydrator != nil {
+		if err := s.hydrator.Hydrate(ctx, building.DeviceID, building.Operation, params); err != nil {
+			return nil, nil, nil, errors.Join(err, nack(ctx, "hydrate protected command params"))
+		}
 	}
 	if spec, ok := service.RPCSpecs[building.Operation]; ok && spec.Transfer && building.CommandKey != nil {
 		params["commandKey"] = *building.CommandKey

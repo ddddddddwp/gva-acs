@@ -229,6 +229,27 @@ func (r *ConnectionProfileRepository) Resolve(ctx context.Context, deviceID uint
 	}, nil
 }
 
+func (r *ConnectionProfileRepository) LoadCredential(ctx context.Context, deviceID uint) (string, string, error) {
+	if r == nil || r.database() == nil || r.cipher == nil {
+		return "", "", errors.New("connection profile repository is not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var profile model.ConnectionProfile
+	if err := r.database().WithContext(ctx).First(&profile, "device_id = ?", deviceID).Error; err != nil {
+		return "", "", err
+	}
+	if profile.Username == "" || len(profile.PasswordCiphertext) == 0 {
+		return "", "", errors.New("connection profile credential is incomplete")
+	}
+	password, err := r.cipher.Decrypt(profile.CredentialKeyVersion, profile.PasswordCiphertext)
+	if err != nil {
+		return "", "", err
+	}
+	return profile.Username, password, nil
+}
+
 func (r *ConnectionProfileRepository) Get(ctx context.Context, deviceID uint) (model.ConnectionProfile, error) {
 	if r == nil || r.database() == nil {
 		return model.ConnectionProfile{}, errors.New("connection profile repository database is required")

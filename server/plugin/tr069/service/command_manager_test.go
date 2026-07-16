@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -14,6 +15,12 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
+
+type testCommandPayloadProtector struct{}
+
+func (testCommandPayloadProtector) Protect(_ context.Context, _ *gorm.DB, _ uint, _, _ string, encoded []byte) ([]byte, error) {
+	return bytes.ReplaceAll(encoded, []byte("system-secret"), []byte("protected-secret")), nil
+}
 
 func newCommandManagerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -42,6 +49,48 @@ func setCommandManagerCapabilities(t *testing.T, db *gorm.DB, deviceID uint, met
 	t.Helper()
 	if err := db.Create(&model.DeviceRPCMethods{DeviceID: deviceID, MethodsJSON: datatypes.JSON(methods)}).Error; err != nil {
 		t.Fatalf("create device capabilities: %v", err)
+	}
+}
+
+func TestCommandManagerSubmitSystemProtectsPayloadAndBypassesUnknownCapabilities(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "SYSTEM-PROVISION", now)
+	hookCalled := false
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+		WithCommandPayloadProtector(testCommandPayloadProtector{}),
+	)
+	request := req.SetParameterValuesRequest{Parameters: []req.SetParameterValue{
+		{Name: "Device.ManagementServer.ConnectionRequestUsername", Type: "xsd:string", Value: "system-user"},
+		{Name: "Device.ManagementServer.ConnectionRequestPassword", Type: "xsd:string", Value: "system-secret"},
+	}}
+	result, err := manager.SubmitSystem(context.Background(), device.ID, "SetParameterValues", request, "connection-profile:1:v1", func(_ context.Context, tx *gorm.DB, command *model.Command) error {
+		hookCalled = true
+		var count int64
+		if err := tx.Model(new(model.Command)).Where("command_id = ?", command.CommandID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			t.Fatalf("hook command count=%d", count)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubmitSystem: %v", err)
+	}
+	if result.CommandID == "" || !hookCalled {
+		t.Fatalf("result=%#v hookCalled=%t", result, hookCalled)
+	}
+	var command model.Command
+	if err := db.First(&command, "command_id = ?", result.CommandID).Error; err != nil {
+		t.Fatalf("load command: %v", err)
+	}
+	if command.Origin != model.CommandOriginSystem || command.DedupKey != "connection-profile:1:v1" {
+		t.Fatalf("command origin/dedup=%q/%q", command.Origin, command.DedupKey)
+	}
+	if strings.Contains(string(command.ParamsJSON), "system-secret") || !strings.Contains(string(command.ParamsJSON), "protected-secret") {
+		t.Fatalf("protected params=%s", command.ParamsJSON)
 	}
 }
 
