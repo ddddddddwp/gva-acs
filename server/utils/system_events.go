@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -16,6 +17,9 @@ type SystemEvents struct {
 
 // RegisterShutdownHandler 注册在 HTTP 服务关闭期间运行的清理函数。
 func (e *SystemEvents) RegisterShutdownHandler(handler func(context.Context) error) {
+	if e == nil {
+		return
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.shutdownHandlers = append(e.shutdownHandlers, handler)
@@ -51,15 +55,33 @@ func (e *SystemEvents) TriggerConfigChange() {
 
 // TriggerShutdown 使用处理函数快照执行所有清理函数，并保留每个错误。
 func (e *SystemEvents) TriggerShutdown(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	e.mu.RLock()
 	handlers := append([]func(context.Context) error{}, e.shutdownHandlers...)
 	e.mu.RUnlock()
 
 	var shutdownErr error
 	for _, handler := range handlers {
-		shutdownErr = errors.Join(shutdownErr, handler(ctx))
+		if handler == nil {
+			continue
+		}
+		shutdownErr = errors.Join(shutdownErr, invokeShutdownHandler(ctx, handler))
 	}
 	return shutdownErr
+}
+
+func invokeShutdownHandler(ctx context.Context, handler func(context.Context) error) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("shutdown handler panic: %v", recovered))
+		}
+	}()
+	return handler(ctx)
 }
 
 // TriggerReload 触发所有注册的重载处理函数

@@ -163,6 +163,9 @@ func doConnectionRequest(ctx context.Context, connURL string, user string, pass 
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return resp.StatusCode, fmt.Errorf("connection request returned HTTP status %d", resp.StatusCode)
+	}
 	return resp.StatusCode, nil
 }
 

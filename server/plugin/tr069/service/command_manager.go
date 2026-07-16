@@ -189,17 +189,9 @@ func (m *CommandManager) failWakeup(ctx context.Context, command model.Command, 
 				First(&current, "command_id = ?", command.CommandID).Error; err != nil {
 				return err
 			}
-			if model.IsTerminalCommandStatus(current.Status) {
+			if current.Status != model.CommandStatusWaitingDevice && current.Status != model.CommandStatusBuilding {
 				terminal = current
-				return NewCommandStore(tx).AppendEvent(cleanupCtx, &model.CommandEvent{
-					CommandID:  current.CommandID,
-					EventType:  "DISPATCH_FAILED",
-					FromStatus: current.Status,
-					ToStatus:   current.Status,
-					Stage:      "redis.enqueue",
-					Message:    wakeupErr.Error(),
-					CreatedAt:  m.now(),
-				})
+				return nil
 			}
 
 			finishedAt := m.now()

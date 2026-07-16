@@ -407,6 +407,14 @@ func (r *GormCommandRepo) MarkSuccess(ctx context.Context, commandID string, fin
 }
 
 func (r *GormCommandRepo) MarkFail(ctx context.Context, commandID string, faultCode int, faultString string, finishedAt time.Time) error {
+	return r.markFailAtStage(ctx, commandID, faultCode, faultString, finishedAt, "")
+}
+
+func (r *GormCommandRepo) MarkFailAtStage(ctx context.Context, commandID string, faultCode int, faultString string, finishedAt time.Time, failureStage core.CommandFailureStage) error {
+	return r.markFailAtStage(ctx, commandID, faultCode, faultString, finishedAt, string(failureStage))
+}
+
+func (r *GormCommandRepo) markFailAtStage(ctx context.Context, commandID string, faultCode int, faultString string, finishedAt time.Time, explicitStage string) error {
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
 	}
@@ -414,9 +422,12 @@ func (r *GormCommandRepo) MarkFail(ctx context.Context, commandID string, faultC
 	if err != nil {
 		return err
 	}
-	stage := "cwmp.fault"
-	if current.Status == model.CommandStatusBuilding {
-		stage = "core.build"
+	stage := explicitStage
+	if stage == "" {
+		stage = "cwmp.fault"
+		if current.Status == model.CommandStatusBuilding {
+			stage = "core.build"
+		}
 	}
 	_, err = r.commandStore().Transition(ctx, service.CommandTransition{
 		CommandID: commandID,

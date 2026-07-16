@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -48,18 +49,26 @@ func initServer(address string, router *gin.Engine, readTimeout, writeTimeout ti
 	<-quit
 	zap.L().Info("关闭WEB服务...")
 
-	// 设置5秒的超时时间
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-
-	defer cancel()
-
-	if err := utils.GlobalSystemEvents.TriggerShutdown(ctx); err != nil {
-		zap.L().Error("系统清理任务执行异常", zap.Error(err))
-	}
-
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := shutdownServer(srv, utils.GlobalSystemEvents, 5*time.Second); err != nil {
 		zap.L().Fatal("WEB服务关闭异常", zap.Error(err))
 	}
 
 	zap.L().Info("WEB服务已关闭")
+}
+
+func shutdownServer(srv server, events *utils.SystemEvents, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), timeout)
+	var drainErr error
+	if srv != nil {
+		drainErr = srv.Shutdown(drainCtx)
+	}
+	cancelDrain()
+
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), timeout)
+	cleanupErr := events.TriggerShutdown(cleanupCtx)
+	cancelCleanup()
+	return errors.Join(drainErr, cleanupErr)
 }

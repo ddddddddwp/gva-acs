@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -77,5 +78,20 @@ func TestTriggerShutdownUsesUnlockedHandlerSnapshot(t *testing.T) {
 	}
 	if firstCalls != 2 || secondCalls != 1 {
 		t.Fatalf("second trigger calls=(%d,%d), want=(2,1)", firstCalls, secondCalls)
+	}
+}
+
+func TestTriggerShutdownSkipsNilRecoversPanicAndContinues(t *testing.T) {
+	events := &SystemEvents{}
+	events.RegisterShutdownHandler(nil)
+	events.RegisterShutdownHandler(func(context.Context) error { panic("broken plugin") })
+	called := false
+	events.RegisterShutdownHandler(func(context.Context) error { called = true; return nil })
+	err := events.TriggerShutdown(nil)
+	if err == nil || !strings.Contains(err.Error(), "broken plugin") {
+		t.Fatalf("TriggerShutdown() error = %v, want recovered panic", err)
+	}
+	if !called {
+		t.Fatal("handler after panic was not called")
 	}
 }

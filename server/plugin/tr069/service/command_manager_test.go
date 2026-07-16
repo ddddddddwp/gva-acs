@@ -161,6 +161,34 @@ func TestCommandManagerRedisEnqueueFailureTerminatesCreatedCommand(t *testing.T)
 	}
 }
 
+func TestCommandManagerWakeFailurePreservesAlreadySentCommand(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 16, 13, 10, 0, 0, time.UTC)
+	command := model.Command{
+		CommandID: "wake-raced-with-send", DeviceID: 1, DeviceKey: "001122-SENT",
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`),
+		Status: model.CommandStatusSent, RequestID: "cwmp-sent", QueuedAt: now, CreatedAt: now,
+	}
+	if err := NewCommandStore(db).Create(context.Background(), &command); err != nil {
+		t.Fatalf("seed SENT command: %v", err)
+	}
+	manager := NewCommandManager(db, nil, WithCommandManagerNow(func() time.Time { return now }))
+	result, err := manager.failWakeup(context.Background(), command, SubmitResult{CommandID: command.CommandID, Status: model.CommandStatusWaitingDevice}, errors.New("redis unavailable"))
+	if err != nil {
+		t.Fatalf("failWakeup() error = %v, want redundant wake failure ignored", err)
+	}
+	if result.Status != model.CommandStatusSent {
+		t.Fatalf("failWakeup() status = %s, want SENT", result.Status)
+	}
+	var current model.Command
+	if err := db.First(&current, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("reload command: %v", err)
+	}
+	if current.Status != model.CommandStatusSent || current.FailureStage != "" {
+		t.Fatalf("wake compensation changed sent command: %#v", current)
+	}
+}
+
 func TestCommandManagerWakeupCompensationSurvivesRequestCancellation(t *testing.T) {
 	db := newCommandManagerTestDB(t)
 	now := time.Date(2026, 7, 16, 13, 15, 0, 0, time.UTC)

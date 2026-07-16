@@ -9,6 +9,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
+	tr069core "github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -158,5 +159,28 @@ func TestGormCommandRepoTerminalCallbacksUseStoreAndNeverRecreateMissingCommands
 	}
 	if failed.Status != model.CommandStatusFailed || failed.FailureStage != "core.build" || failed.FaultCode != 9003 {
 		t.Fatalf("failed callback command = %#v", failed)
+	}
+}
+
+func TestGormCommandRepoPersistsExplicitQueueAckFailureStage(t *testing.T) {
+	db := newGormCommandRepoTestDB(t)
+	now := time.Now()
+	command := model.Command{
+		CommandID: "queue-ack-failure", DeviceID: 24, DeviceKey: "001122-ACK", Operation: "Reboot",
+		ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusSent, QueuedAt: now, CreatedAt: now,
+	}
+	if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+		t.Fatalf("seed SENT command: %v", err)
+	}
+	repo := newGormCommandRepo(db)
+	if err := repo.MarkFailAtStage(context.Background(), command.CommandID, 9002, "ownership lost", now, tr069core.CommandFailureStageQueueAck); err != nil {
+		t.Fatalf("MarkFailAtStage() error: %v", err)
+	}
+	var failed model.Command
+	if err := db.First(&failed, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("reload failed command: %v", err)
+	}
+	if failed.Status != model.CommandStatusFailed || failed.FailureStage != "queue.ack" {
+		t.Fatalf("failed status/stage = %s/%q", failed.Status, failed.FailureStage)
 	}
 }
