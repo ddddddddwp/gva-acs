@@ -29,17 +29,20 @@ test('parameter tree delegates light and dark colors to Element theme variables'
   }
 })
 
-test('complete parameter names are selectable and directly copyable', () => {
-  assert.match(source, /content="复制完整参数名"/)
-  assert.match(source, /copyText\(scope\.row\.name, '参数名'\)/)
-  assert.match(source, /parameter-full-name/)
-  assert.match(source, /user-select:\s*text/)
+test('parameter table keeps only the compact parameter-name copy action', () => {
+  assert.match(source, /content="复制参数名"/)
+  assert.match(source, /aria-label="复制参数名"/)
+  assert.match(source, /copyParameterName\(scope\.row\.name\)/)
+  assert.match(source, /class="parameter-name-text/)
+  assert.doesNotMatch(source, /复制完整参数名/)
+  assert.doesNotMatch(source, /复制参数值/)
+  assert.doesNotMatch(source, /copyText\(/)
+  assert.doesNotMatch(source, /scope\.row\.name\.replace\(currentPath/)
 })
 
-test('parameter value copy is explicit and clipboard failures are reported', () => {
-  assert.match(source, /content="复制参数值"/)
-  assert.match(source, /copyText\(formatValue\(scope\.row\.valueJson\), '参数值'\)/)
-  assert.match(source, /const copyText = async/)
-  assert.match(source, /await copy\(String\(text\)\)/)
-  assert.match(source, /复制失败，请手动选择文本复制/)
+test('parameter-name copy remains selectable and keyboard accessible', () => {
+  assert.match(source, /user-select:\s*text/)
+  assert.match(source, /\.parameter-name-cell:hover\s+\.parameter-name-copy/)
+  assert.match(source, /\.parameter-name-copy:focus-visible/)
+  assert.match(source, /复制失败，请手动选择参数名复制/)
 })

@@ -88,46 +88,28 @@
                   v-loading="loadingValues"
                   stripe
                 >
-                  <el-table-column prop="name" label="参数名" min-width="200" show-overflow-tooltip sortable>
+                  <el-table-column prop="name" label="参数名" min-width="260" sortable>
                      <template #default="scope">
                         <div class="parameter-name-cell">
-                          <div class="parameter-name-heading">
-                            <span class="font-mono text-xs">{{ scope.row.name.replace(currentPath, '') }}</span>
-                            <el-tooltip content="复制完整参数名" placement="top">
-                              <el-button
-                                link
-                                type="primary"
-                                :icon="CopyDocument"
-                                aria-label="复制完整参数名"
-                                @click.stop="copyText(scope.row.name, '参数名')"
-                              />
-                            </el-tooltip>
-                          </div>
-                          <span
-                            class="parameter-full-name dm-secondary-text text-xs"
-                            title="点击复制完整参数名"
-                            role="button"
-                            tabindex="0"
-                            @click.stop="copyText(scope.row.name, '参数名')"
-                            @keydown.enter.stop="copyText(scope.row.name, '参数名')"
-                          >{{ scope.row.name }}</span>
+                          <el-tooltip :content="scope.row.name" placement="top" :show-after="500">
+                            <span class="parameter-name-text font-mono text-xs">{{ scope.row.name }}</span>
+                          </el-tooltip>
+                          <el-tooltip content="复制参数名" placement="top">
+                            <el-button
+                              class="parameter-name-copy"
+                              link
+                              type="primary"
+                              :icon="CopyDocument"
+                              aria-label="复制参数名"
+                              @click.stop="copyParameterName(scope.row.name)"
+                            />
+                          </el-tooltip>
                         </div>
                      </template>
                   </el-table-column>
                   <el-table-column prop="valueJson" label="值" min-width="150" show-overflow-tooltip>
                     <template #default="scope">
-                      <div class="flex items-center justify-between">
-                        <span class="font-mono text-sm truncate">{{ formatValue(scope.row.valueJson) }}</span>
-                        <el-tooltip content="复制参数值" placement="top">
-                          <el-button
-                            link
-                            type="primary"
-                            :icon="CopyDocument"
-                            aria-label="复制参数值"
-                            @click.stop="copyText(formatValue(scope.row.valueJson), '参数值')"
-                          />
-                        </el-tooltip>
-                      </div>
+                      <span class="font-mono text-sm truncate">{{ formatValue(scope.row.valueJson) }}</span>
                     </template>
                   </el-table-column>
                   <el-table-column prop="valueType" label="类型" width="100">
@@ -311,14 +293,14 @@ const formatDate = (time) => {
   return '-'
 }
 
-const copyText = async (text, target) => {
-  if (text === null || text === undefined || String(text) === '') return
+const copyParameterName = async (name) => {
+  if (name === null || name === undefined || String(name) === '') return
   try {
     if (!isSupported.value) throw new Error('clipboard is not supported')
-    await copy(String(text))
-    ElMessage.success(`${target}已复制`)
+    await copy(String(name))
+    ElMessage.success('参数名已复制')
   } catch {
-    ElMessage.error('复制失败，请手动选择文本复制')
+    ElMessage.error('复制失败，请手动选择参数名复制')
   }
 }
 
@@ -350,22 +332,27 @@ const copyText = async (text, target) => {
   border-right: 1px solid var(--el-border-color-light);
 }
 .parameter-name-cell {
-  min-width: 0;
-}
-.parameter-name-heading {
   display: flex;
   align-items: center;
-  gap: 4px;
+  min-width: 0;
+  gap: 6px;
 }
-.parameter-full-name {
-  display: block;
-  cursor: copy;
+.parameter-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   user-select: text;
-  overflow-wrap: anywhere;
 }
-.parameter-full-name:focus-visible {
-  outline: 2px solid var(--el-color-primary);
-  outline-offset: 2px;
+.parameter-name-copy {
+  flex: none;
+  opacity: 0;
+  color: var(--el-color-primary);
+  transition: opacity 0.15s ease;
+}
+.parameter-name-cell:hover .parameter-name-copy,
+.parameter-name-copy:focus-visible {
+  opacity: 1;
 }
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
