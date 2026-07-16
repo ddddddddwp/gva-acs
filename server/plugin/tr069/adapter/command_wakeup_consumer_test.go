@@ -3,6 +3,8 @@ package adapter
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -57,7 +59,9 @@ func TestCommandWakeConsumerConsumesSubmitTokenAndTriggersConnectionRequest(t *t
 	triggered := make(chan uint, 1)
 	consumer := newCommandWakeConsumer(db, source, func(_ context.Context, deviceID uint, _ ConnectionRequestConfig) ConnectionRequestResult {
 		triggered <- deviceID
-		return ConnectionRequestResult{StatusCode: 200}
+		return ConnectionRequestResult{
+			URL: "http://alice:consumer-secret@cpe.example/wake", StatusCode: http.StatusNoContent, Elapsed: 25 * time.Millisecond,
+		}
 	}, CommandWakeConsumerConfig{})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -101,6 +105,12 @@ func TestCommandWakeConsumerConsumesSubmitTokenAndTriggersConnectionRequest(t *t
 		var event model.CommandEvent
 		err := db.Where("command_id = ? AND event_type = ?", result.CommandID, "WAKE_TRIGGERED").First(&event).Error
 		if err == nil {
+			if event.Message != "http_status=204 elapsed=25ms" {
+				t.Fatalf("wake event summary = %q", event.Message)
+			}
+			if strings.Contains(event.Message, "alice") || strings.Contains(event.Message, "consumer-secret") {
+				t.Fatalf("wake event leaked connection credentials: %q", event.Message)
+			}
 			break
 		}
 		if time.Now().After(deadline) {

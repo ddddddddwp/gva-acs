@@ -203,13 +203,14 @@ func (c *CommandWakeConsumer) handleToken(ctx context.Context, deviceKey string)
 	}
 	if result.Err != nil {
 		event.EventType = "WAKE_FAILED"
-		event.Message = result.Err.Error()
+		event.Message = boundedConnectionRequestError(result.Err)
 		if err := c.store.AppendEvent(ctx, event); err != nil {
 			return errors.Join(result.Err, err)
 		}
 		return result.Err
 	}
 	event.EventType = "WAKE_TRIGGERED"
+	event.Message = fmt.Sprintf("http_status=%d elapsed=%s", result.StatusCode, result.Elapsed)
 	return c.store.AppendEvent(ctx, event)
 }
 

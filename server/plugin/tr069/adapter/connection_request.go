@@ -2,21 +2,63 @@ package adapter
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
-	"encoding/json"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	tr069config "github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/infolog"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"go.uber.org/zap"
 )
+
+const (
+	maxConnectionRequestResponseBytes = 64 << 10
+	maxConnectionRequestErrorBytes    = 1024
+	connectionRequestWakeSucceeded    = "SUCCESS"
+	connectionRequestWakeFailed       = "FAILED"
+)
+
+var errConnectionRequestRedirect = errors.New("connection request redirects are disabled")
+
+type connectionRequestLookupFunc func(context.Context, string, string) ([]netip.Addr, error)
+
+var connectionRequestDialer = &net.Dialer{
+	Timeout:   30 * time.Second,
+	KeepAlive: 30 * time.Second,
+}
+
+var connectionRequestTransport = &http.Transport{
+	Proxy:                 nil,
+	DialContext:           dialConnectionRequest,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          100,
+	MaxIdleConnsPerHost:   10,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: time.Second,
+	TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+}
+
+var connectionRequestClient = &http.Client{
+	Transport: connectionRequestTransport,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return errConnectionRequestRedirect
+	},
+}
 
 type ConnectionRequestResult struct {
 	URL        string
@@ -31,142 +73,459 @@ type ConnectionRequestConfig struct {
 }
 
 func TriggerConnectionRequest(ctx context.Context, deviceID uint, cfg ConnectionRequestConfig) ConnectionRequestResult {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Second
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if cfg.Retries < 0 {
 		cfg.Retries = 0
 	}
 
-	connURL, user, pass, ok := connectionRequestTarget(ctx, deviceID)
-	if !ok {
-		return ConnectionRequestResult{Err: fmt.Errorf("missing connection request url for deviceId=%d", deviceID)}
+	runtime := tr069config.CurrentRuntime()
+	profile, err := resolveConnectionRequestTarget(ctx, deviceID, runtime.Settings.ConnectionRequest)
+	if err != nil {
+		result := ConnectionRequestResult{Err: fmt.Errorf("resolve connection request profile for deviceId=%d: %w", deviceID, err)}
+		recordConnectionRequestWake(ctx, deviceID, result)
+		return result
+	}
+	if profile.AuthScheme != "" && !strings.EqualFold(profile.AuthScheme, "digest") {
+		result := ConnectionRequestResult{
+			URL: profile.URL,
+			Err: fmt.Errorf("unsupported connection request authentication scheme for deviceId=%d", deviceID),
+		}
+		recordConnectionRequestWake(ctx, deviceID, result)
+		return result
 	}
 
-	var lastErr error
+	timeout := runtime.ConnectionRequestTimeout
+	if timeout <= 0 {
+		timeout = cfg.Timeout
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
+	var result ConnectionRequestResult
 	for attempt := 0; attempt <= cfg.Retries; attempt++ {
 		start := time.Now()
-		status, err := doConnectionRequest(ctx, connURL, user, pass, cfg.Timeout)
-		elapsed := time.Since(start)
-		res := ConnectionRequestResult{
-			URL:        connURL,
+		status, requestErr := doConnectionRequest(ctx, profile.URL, profile.Username, profile.Password, timeout)
+		result = ConnectionRequestResult{
+			URL:        profile.URL,
 			StatusCode: status,
-			Elapsed:    elapsed,
-			Err:        err,
+			Elapsed:    time.Since(start),
+			Err:        requestErr,
 		}
-		writeConnectionRequestLog(res, deviceID, attempt)
-		if err == nil {
-			return res
+		writeConnectionRequestLog(result, deviceID, attempt)
+		if requestErr == nil {
+			break
 		}
-		lastErr = err
 	}
-	return ConnectionRequestResult{URL: connURL, Err: lastErr}
+	if summaryErr := recordConnectionRequestWake(ctx, deviceID, result); summaryErr != nil {
+		result.Err = errors.Join(result.Err, summaryErr)
+	}
+	return result
 }
 
-func connectionRequestTarget(ctx context.Context, deviceID uint) (connURL string, user string, pass string, ok bool) {
+func resolveConnectionRequestTarget(ctx context.Context, deviceID uint, settings tr069config.ConnectionRequestConfig) (ResolvedConnectionProfile, error) {
 	if global.GVA_DB == nil {
-		return "", "", "", false
+		return ResolvedConnectionProfile{}, errors.New("connection profile database is not initialized")
 	}
-	var d model.Device
-	if err := global.GVA_DB.WithContext(ctx).Select("id", "connection_req_url").First(&d, deviceID).Error; err != nil {
-		return "", "", "", false
-	}
-	if strings.TrimSpace(d.ConnectionReqURL) == "" {
-		return "", "", "", false
-	}
-	connURL = strings.TrimSpace(d.ConnectionReqURL)
-
-	// 验证URL使用HTTPS协议
-	u, err := url.Parse(connURL)
+	cipher, err := NewCredentialCipher(settings)
 	if err != nil {
-		global.GVA_LOG.Error("failed to parse connection request URL", zap.String("url", connURL), zap.Error(err))
-		return "", "", "", false
+		return ResolvedConnectionProfile{}, err
 	}
-	if u.Scheme != "https" {
-		global.GVA_LOG.Error("connection request URL must use HTTPS", zap.String("url", connURL), zap.Uint("deviceID", deviceID))
-		return "", "", "", false
-	}
-	if u.User != nil {
-		user = u.User.Username()
-		if pwd, ok := u.User.Password(); ok {
-			pass = pwd
-		}
-	}
-	if user == "" {
-		if u2, p2, ok := loadConnectionRequestCreds(ctx, deviceID); ok {
-			user, pass = u2, p2
-		}
-	}
-	return connURL, user, pass, true
+	return NewConnectionProfileRepository(global.GVA_DB, cipher).Resolve(ctx, deviceID)
 }
 
-func loadConnectionRequestCreds(ctx context.Context, deviceID uint) (string, string, bool) {
-	if global.GVA_DB == nil {
-		return "", "", false
+// connectionRequestTarget preserves the legacy internal lookup shape while resolving
+// exactly one Connection Profile row instead of querying the device and data-model tables.
+func connectionRequestTarget(ctx context.Context, deviceID uint) (connURL string, user string, pass string, ok bool) {
+	profile, err := resolveConnectionRequestTarget(ctx, deviceID, tr069config.CurrentRuntime().Settings.ConnectionRequest)
+	if err != nil {
+		return "", "", "", false
 	}
-	var rows []model.DataModelValue
-	if err := global.GVA_DB.WithContext(ctx).
-		Select("name", "value_json").
-		Where("device_id = ? AND name IN ?", deviceID, []string{
-			"Device.ManagementServer.ConnectionRequestUsername",
-			"Device.ManagementServer.ConnectionRequestPassword",
-		}).Find(&rows).Error; err != nil {
-		return "", "", false
+	return profile.URL, profile.Username, profile.Password, true
+}
+
+func recordConnectionRequestWake(ctx context.Context, deviceID uint, result ConnectionRequestResult) error {
+	if global.GVA_DB == nil || deviceID == 0 {
+		return nil
 	}
-	var user string
-	var pass string
-	for _, r := range rows {
-		var v string
-		if err := json.Unmarshal(r.ValueJSON, &v); err != nil {
-			global.GVA_LOG.Warn("failed to unmarshal credential value", zap.String("name", r.Name), zap.Error(err))
-			continue
-		}
-		switch r.Name {
-		case "Device.ManagementServer.ConnectionRequestUsername":
-			user = v
-		case "Device.ManagementServer.ConnectionRequestPassword":
-			pass = v
-		}
+	status := connectionRequestWakeSucceeded
+	lastError := ""
+	if result.Err != nil {
+		status = connectionRequestWakeFailed
+		lastError = boundedConnectionRequestError(result.Err)
 	}
-	if user == "" {
-		return "", "", false
+	now := time.Now()
+	return global.GVA_DB.WithContext(ctx).Model(&model.ConnectionProfile{}).
+		Where("device_id = ?", deviceID).
+		UpdateColumns(map[string]any{
+			"last_wake_at":     &now,
+			"last_wake_status": status,
+			"last_error":       lastError,
+		}).Error
+}
+
+func boundedConnectionRequestError(err error) string {
+	if err == nil {
+		return ""
 	}
-	return user, pass, true
+	text := err.Error()
+	if len(text) > maxConnectionRequestErrorBytes {
+		text = text[:maxConnectionRequestErrorBytes]
+	}
+	return text
 }
 
 func doConnectionRequest(ctx context.Context, connURL string, user string, pass string, timeout time.Duration) (int, error) {
-	cctx := ctx
-	if cctx == nil {
-		cctx = context.Background()
+	parsed, err := validateConnectionRequestURL(connURL)
+	if err != nil {
+		return 0, err
 	}
-	cctx, cancel := context.WithTimeout(cctx, timeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(cctx, http.MethodGet, connURL, nil)
+	first, err := newConnectionRequest(requestCtx, parsed, "")
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("User-Agent", "gva-tr069-acs/connection-request")
-	if user != "" {
-		req.SetBasicAuth(user, pass)
+	response, err := connectionRequestClient.Do(first)
+	if err != nil {
+		return connectionRequestHTTPFailure(response, err)
+	}
+	if response.StatusCode != http.StatusUnauthorized {
+		return finishConnectionRequestResponse(response)
 	}
 
-	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-		},
+	challenge := findDigestChallenge(response.Header.Values("WWW-Authenticate"))
+	drainAndCloseConnectionRequestBody(response.Body)
+	if challenge == "" {
+		return http.StatusUnauthorized, connectionRequestStatusError(http.StatusUnauthorized)
 	}
-	resp, err := client.Do(req)
+	if user == "" {
+		return http.StatusUnauthorized, errors.New("connection request digest credentials are required")
+	}
+	authorization, err := digestAuthorization(challenge, http.MethodGet, parsed.RequestURI(), user, pass)
+	if err != nil {
+		return http.StatusUnauthorized, err
+	}
+	authenticated, err := newConnectionRequest(requestCtx, parsed, authorization)
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return resp.StatusCode, fmt.Errorf("connection request returned HTTP status %d", resp.StatusCode)
+	response, err = connectionRequestClient.Do(authenticated)
+	if err != nil {
+		return connectionRequestHTTPFailure(response, err)
 	}
-	return resp.StatusCode, nil
+	return finishConnectionRequestResponse(response)
+}
+
+func newConnectionRequest(ctx context.Context, parsed *url.URL, authorization string) (*http.Request, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, errors.New("create connection request")
+	}
+	request.Header.Set("User-Agent", "gva-tr069-acs/connection-request")
+	if authorization != "" {
+		request.Header.Set("Authorization", authorization)
+	}
+	return request, nil
+}
+
+func finishConnectionRequestResponse(response *http.Response) (int, error) {
+	if response == nil {
+		return 0, errors.New("connection request returned no response")
+	}
+	status := response.StatusCode
+	drainAndCloseConnectionRequestBody(response.Body)
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		return status, connectionRequestStatusError(status)
+	}
+	return status, nil
+}
+
+func connectionRequestHTTPFailure(response *http.Response, err error) (int, error) {
+	status := 0
+	if response != nil {
+		status = response.StatusCode
+		if response.Body != nil {
+			drainAndCloseConnectionRequestBody(response.Body)
+		}
+	}
+	if errors.Is(err, errConnectionRequestRedirect) {
+		return status, errConnectionRequestRedirect
+	}
+	var urlError *url.Error
+	if errors.As(err, &urlError) {
+		return status, fmt.Errorf("connection request %s failed: %w", urlError.Op, urlError.Err)
+	}
+	return status, fmt.Errorf("connection request failed: %w", err)
+}
+
+func connectionRequestStatusError(status int) error {
+	return fmt.Errorf("connection request returned HTTP status %d", status)
+}
+
+func drainAndCloseConnectionRequestBody(body io.ReadCloser) {
+	if body == nil {
+		return
+	}
+	_, _ = io.CopyN(io.Discard, body, maxConnectionRequestResponseBytes)
+	_ = body.Close()
+}
+
+func validateConnectionRequestURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed == nil || parsed.IsAbs() == false || parsed.Opaque != "" {
+		return nil, errors.New("connection request URL is invalid")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, errors.New("connection request URL must use http or https")
+	}
+	if parsed.Host == "" || parsed.Hostname() == "" {
+		return nil, errors.New("connection request URL host is required")
+	}
+	if parsed.User != nil {
+		return nil, errors.New("connection request URL must not contain credentials")
+	}
+	parsed.Fragment = ""
+	return parsed, nil
+}
+
+func dialConnectionRequest(ctx context.Context, network, address string) (net.Conn, error) {
+	allowedCIDRs := tr069config.CurrentRuntime().Settings.ConnectionRequest.AllowedCIDRs
+	pinned, err := resolveConnectionRequestAddress(ctx, network, address, allowedCIDRs, net.DefaultResolver.LookupNetIP)
+	if err != nil {
+		return nil, err
+	}
+	return connectionRequestDialer.DialContext(ctx, network, pinned)
+}
+
+func resolveConnectionRequestAddress(ctx context.Context, network, address string, allowedCIDRs []string, lookup connectionRequestLookupFunc) (string, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host == "" || port == "" {
+		return "", errors.New("connection request network address is invalid")
+	}
+	prefixes, err := parseConnectionRequestCIDRs(allowedCIDRs)
+	if err != nil {
+		return "", err
+	}
+
+	var addresses []netip.Addr
+	if literal, parseErr := netip.ParseAddr(host); parseErr == nil {
+		addresses = []netip.Addr{literal}
+	} else {
+		if lookup == nil {
+			return "", errors.New("connection request DNS resolver is unavailable")
+		}
+		addresses, err = lookup(ctx, "ip", host)
+		if err != nil {
+			return "", fmt.Errorf("connection request DNS lookup failed: %w", err)
+		}
+	}
+	for _, candidate := range addresses {
+		candidate = candidate.Unmap()
+		if !connectionRequestAddressMatchesNetwork(candidate, network) || !connectionRequestIPAllowed(candidate, prefixes) {
+			continue
+		}
+		return net.JoinHostPort(candidate.String(), port), nil
+	}
+	return "", errors.New("connection request address is outside allowed CIDRs")
+}
+
+func parseConnectionRequestCIDRs(values []string) ([]netip.Prefix, error) {
+	prefixes := make([]netip.Prefix, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid connection request allowed CIDR %q", value)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
+}
+
+func connectionRequestAddressMatchesNetwork(address netip.Addr, network string) bool {
+	switch network {
+	case "tcp4":
+		return address.Is4()
+	case "tcp6":
+		return address.Is6()
+	default:
+		return true
+	}
+}
+
+func connectionRequestIPAllowed(address netip.Addr, prefixes []netip.Prefix) bool {
+	if len(prefixes) == 0 {
+		return true
+	}
+	for _, prefix := range prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+func findDigestChallenge(values []string) string {
+	for _, value := range values {
+		lower := strings.ToLower(value)
+		if index := strings.Index(lower, "digest "); index >= 0 {
+			return strings.TrimSpace(value[index:])
+		}
+	}
+	return ""
+}
+
+func digestAuthorization(challenge, method, requestURI, username, password string) (string, error) {
+	parameters, err := parseDigestChallenge(challenge)
+	if err != nil {
+		return "", err
+	}
+	realm := parameters["realm"]
+	nonce := parameters["nonce"]
+	if realm == "" || nonce == "" {
+		return "", errors.New("digest challenge is missing realm or nonce")
+	}
+	algorithm := parameters["algorithm"]
+	if algorithm == "" {
+		algorithm = "MD5"
+	}
+	if !strings.EqualFold(algorithm, "MD5") && !strings.EqualFold(algorithm, "SHA-256") {
+		return "", errors.New("unsupported digest algorithm")
+	}
+	algorithm = strings.ToUpper(algorithm)
+	if algorithm == "SHA-256" {
+		algorithm = "SHA-256"
+	}
+	if !digestQOPSupportsAuth(parameters["qop"]) {
+		return "", errors.New("unsupported digest qop")
+	}
+
+	cnonceBytes := make([]byte, 16)
+	if _, err := rand.Read(cnonceBytes); err != nil {
+		return "", errors.New("generate digest client nonce")
+	}
+	cnonce := hex.EncodeToString(cnonceBytes)
+	nonceCount := "00000001"
+	ha1 := digestHash(algorithm, username+":"+realm+":"+password)
+	ha2 := digestHash(algorithm, method+":"+requestURI)
+	response := digestHash(algorithm, strings.Join([]string{
+		ha1, nonce, nonceCount, cnonce, "auth", ha2,
+	}, ":"))
+
+	parts := []string{
+		`username="` + escapeDigestQuoted(username) + `"`,
+		`realm="` + escapeDigestQuoted(realm) + `"`,
+		`nonce="` + escapeDigestQuoted(nonce) + `"`,
+		`uri="` + escapeDigestQuoted(requestURI) + `"`,
+		`response="` + response + `"`,
+		"algorithm=" + algorithm,
+		"qop=auth",
+		"nc=" + nonceCount,
+		`cnonce="` + cnonce + `"`,
+	}
+	if opaque := parameters["opaque"]; opaque != "" {
+		parts = append(parts, `opaque="`+escapeDigestQuoted(opaque)+`"`)
+	}
+	return "Digest " + strings.Join(parts, ", "), nil
+}
+
+func parseDigestChallenge(challenge string) (map[string]string, error) {
+	challenge = strings.TrimSpace(challenge)
+	if len(challenge) < len("Digest ") || !strings.EqualFold(challenge[:len("Digest")], "Digest") {
+		return nil, errors.New("authentication challenge is not Digest")
+	}
+	input := strings.TrimSpace(challenge[len("Digest"):])
+	parameters := make(map[string]string)
+	for len(input) > 0 {
+		input = strings.TrimLeft(input, " ,\t")
+		if input == "" {
+			break
+		}
+		equals := strings.IndexByte(input, '=')
+		if equals <= 0 {
+			return nil, errors.New("digest challenge parameter is invalid")
+		}
+		name := strings.ToLower(strings.TrimSpace(input[:equals]))
+		input = strings.TrimSpace(input[equals+1:])
+		var value string
+		if strings.HasPrefix(input, `"`) {
+			input = input[1:]
+			var builder strings.Builder
+			escaped := false
+			closed := false
+			for index, character := range input {
+				if escaped {
+					builder.WriteRune(character)
+					escaped = false
+					continue
+				}
+				if character == '\\' {
+					escaped = true
+					continue
+				}
+				if character == '"' {
+					value = builder.String()
+					input = input[index+1:]
+					closed = true
+					break
+				}
+				builder.WriteRune(character)
+			}
+			if !closed {
+				return nil, errors.New("digest challenge quoted value is invalid")
+			}
+		} else {
+			comma := strings.IndexByte(input, ',')
+			if comma < 0 {
+				value = strings.TrimSpace(input)
+				input = ""
+			} else {
+				value = strings.TrimSpace(input[:comma])
+				input = input[comma+1:]
+			}
+		}
+		if name == "" {
+			return nil, errors.New("digest challenge parameter name is invalid")
+		}
+		parameters[name] = value
+	}
+	return parameters, nil
+}
+
+func digestQOPSupportsAuth(value string) bool {
+	for _, candidate := range strings.Split(value, ",") {
+		if strings.EqualFold(strings.TrimSpace(candidate), "auth") {
+			return true
+		}
+	}
+	return false
+}
+
+func digestHash(algorithm, value string) string {
+	if strings.EqualFold(algorithm, "SHA-256") {
+		sum := sha256.Sum256([]byte(value))
+		return hex.EncodeToString(sum[:])
+	}
+	sum := md5.Sum([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func escapeDigestQuoted(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	return strings.ReplaceAll(value, `"`, `\"`)
 }
 
 func writeConnectionRequestLog(res ConnectionRequestResult, deviceID uint, attempt int) {
@@ -174,17 +533,7 @@ func writeConnectionRequestLog(res ConnectionRequestResult, deviceID uint, attem
 	if res.Err != nil {
 		status = "ERR"
 	}
-	// 清理URL以避免在日志中暴露凭证
-	safeURL := res.URL
-	if parsedURL, err := url.Parse(res.URL); err == nil && parsedURL != nil {
-		// 移除用户信息，只保留scheme、host和path
-		cleanURL := url.URL{
-			Scheme: parsedURL.Scheme,
-			Host:   parsedURL.Host,
-			Path:   parsedURL.Path,
-		}
-		safeURL = cleanURL.String()
-	}
+	safeURL := safeConnectionRequestURL(res.URL)
 	s := fmt.Sprintf("----- TR069 CONNECTION REQUEST BEGIN -----\nstatus: %s\ndeviceId: %d\nattempt: %d\nurl: %s\nhttpStatus: %d\nelapsed: %s\nerror: %v\n----- TR069 CONNECTION REQUEST END -----",
 		status, deviceID, attempt, safeURL, res.StatusCode, res.Elapsed.String(), res.Err)
 	_, _ = fmt.Fprintln(os.Stdout, s)
@@ -192,4 +541,12 @@ func writeConnectionRequestLog(res ConnectionRequestResult, deviceID uint, attem
 	if res.Err != nil && global.GVA_LOG != nil {
 		global.GVA_LOG.Warn("TR069 connection request failed", zap.Uint("deviceId", deviceID), zap.String("url", safeURL), zap.Int("attempt", attempt), zap.Error(res.Err))
 	}
+}
+
+func safeConnectionRequestURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "<invalid>"
+	}
+	return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}).String()
 }
