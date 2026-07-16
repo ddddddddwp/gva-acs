@@ -118,5 +118,10 @@ func logRuntimeConfig(next config.TR069Config) {
 		zap.Int("rpcResponseTimeout", next.RPCResponseTimeout),
 		zap.Int("transferCompleteTimeout", next.TransferCompleteTimeout),
 		zap.Int("rpcXMLRetentionDays", next.RPCXMLRetentionDays),
+		zap.Bool("connectionRequestAutoProvisionCredentials", next.ConnectionRequest.AutoProvisionCredentials),
+		zap.String("connectionRequestCredentialKeyVersion", next.ConnectionRequest.CredentialKeyVersion),
+		zap.Int("connectionRequestTimeout", next.ConnectionRequest.RequestTimeout),
+		zap.String("connectionRequestAuthScheme", next.ConnectionRequest.AuthScheme),
+		zap.Int("connectionRequestAllowedCIDRCount", len(next.ConnectionRequest.AllowedCIDRs)),
 	)
 }

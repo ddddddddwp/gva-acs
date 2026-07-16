@@ -306,3 +306,13 @@ tr069:
     rpcResponseTimeout: 90
     transferCompleteTimeout: 43200
     rpcXMLRetentionDays: 30
+    connectionRequest:
+        autoProvisionCredentials: true
+        credentialKeyVersion: v1
+        credentialEncryptionKey: ""
+        credentialDecryptionKeys: {}
+        requestTimeout: 10
+        authScheme: digest
+        allowedCIDRs:
+            - 127.0.0.0/8
+            - 172.16.0.0/12

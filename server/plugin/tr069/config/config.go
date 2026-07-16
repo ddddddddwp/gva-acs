@@ -1,5 +1,15 @@
 package config
 
+type ConnectionRequestConfig struct {
+	AutoProvisionCredentials bool              `mapstructure:"autoProvisionCredentials" json:"autoProvisionCredentials" yaml:"autoProvisionCredentials"`
+	CredentialKeyVersion     string            `mapstructure:"credentialKeyVersion" json:"credentialKeyVersion" yaml:"credentialKeyVersion"`
+	CredentialEncryptionKey  string            `mapstructure:"credentialEncryptionKey" json:"-" yaml:"credentialEncryptionKey"`
+	CredentialDecryptionKeys map[string]string `mapstructure:"credentialDecryptionKeys" json:"-" yaml:"credentialDecryptionKeys"`
+	RequestTimeout           int               `mapstructure:"requestTimeout" json:"requestTimeout" yaml:"requestTimeout"`
+	AllowedCIDRs             []string          `mapstructure:"allowedCIDRs" json:"allowedCIDRs" yaml:"allowedCIDRs"`
+	AuthScheme               string            `mapstructure:"authScheme" json:"authScheme" yaml:"authScheme"`
+}
+
 type TR069Config struct {
 	Address string `mapstructure:"address" json:"address" yaml:"address"`
 	Debug   bool   `mapstructure:"debug" json:"debug" yaml:"debug"`
@@ -53,4 +63,7 @@ type TR069Config struct {
 
 	// RPCXMLRetentionDays: RPC XML 的保留天数，默认 30 天
 	RPCXMLRetentionDays int `mapstructure:"rpcXMLRetentionDays" json:"rpcXMLRetentionDays" yaml:"rpcXMLRetentionDays"`
+
+	// ConnectionRequest controls CPE wakeup and per-device credential provisioning.
+	ConnectionRequest ConnectionRequestConfig `mapstructure:"connectionRequest" json:"connectionRequest" yaml:"connectionRequest"`
 }
