@@ -134,8 +134,8 @@ func TestCommandManagerRedisEnqueueFailureTerminatesCreatedCommand(t *testing.T)
 	manager := NewCommandManager(db, func(context.Context, string) error { return injected }, WithCommandManagerNow(func() time.Time { return now }))
 
 	result, err := manager.Submit(context.Background(), device.ID, "GetRPCMethods", nil)
-	if !errors.Is(err, ErrCommandQueueUnavailable) || !errors.Is(err, injected) {
-		t.Fatalf("Submit() error = %v, want queue and injected errors", err)
+	if err != nil {
+		t.Fatalf("Submit() error = %v, want stable FAILED result without transport error", err)
 	}
 	if result.CommandID == "" || result.Status != model.CommandStatusFailed {
 		t.Fatalf("Submit() result = %#v, want stable FAILED result", result)
@@ -158,6 +158,41 @@ func TestCommandManagerRedisEnqueueFailureTerminatesCreatedCommand(t *testing.T)
 	}
 	if failureEvent.FromStatus != model.CommandStatusWaitingDevice || failureEvent.ToStatus != model.CommandStatusFailed {
 		t.Fatalf("redis failure transition = %s -> %s", failureEvent.FromStatus, failureEvent.ToStatus)
+	}
+}
+
+func TestCommandManagerWakeupCompensationSurvivesRequestCancellation(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 16, 13, 15, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "CANCELED-WAKE", now)
+	ctx, cancel := context.WithCancel(context.Background())
+	wakeupErr := errors.New("redis connection reset")
+	manager := NewCommandManager(db, func(context.Context, string) error {
+		cancel()
+		return wakeupErr
+	}, WithCommandManagerNow(func() time.Time { return now }))
+
+	result, err := manager.Submit(ctx, device.ID, "GetRPCMethods", nil)
+	if err != nil {
+		t.Fatalf("Submit() error = %v, want detached compensation to succeed", err)
+	}
+	if result.CommandID == "" || result.Status != model.CommandStatusFailed {
+		t.Fatalf("Submit() result = %#v, want stable FAILED result", result)
+	}
+
+	var command model.Command
+	if err := db.First(&command, "command_id = ?", result.CommandID).Error; err != nil {
+		t.Fatalf("load compensated command: %v", err)
+	}
+	if command.Status != model.CommandStatusFailed || command.FailureStage != "redis.enqueue" {
+		t.Fatalf("compensated status/stage = %s/%q, want FAILED/redis.enqueue", command.Status, command.FailureStage)
+	}
+	var failureEvent model.CommandEvent
+	if err := db.Where("command_id = ? AND event_type = ?", result.CommandID, "DISPATCH_FAILED").First(&failureEvent).Error; err != nil {
+		t.Fatalf("load compensation event: %v", err)
+	}
+	if !strings.Contains(failureEvent.Message, wakeupErr.Error()) {
+		t.Fatalf("compensation message = %q, want %q", failureEvent.Message, wakeupErr)
 	}
 }
 

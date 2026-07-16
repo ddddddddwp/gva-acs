@@ -16,13 +16,13 @@ var dmService = service.NewCommandService(service.NewCommandManager(nil, adapter
 
 // FullSync
 // @Tags TR069
-// @Summary 同步设备参数(立即下发 Device. GetParameterValues)
-// @Description 立即下发一次参数路径固定为 Device. 的 GetParameterValues 命令，并触发 Connection Request 主动连接设备
+// @Summary 创建 Device. GetParameterValues 全量同步任务
+// @Description 持久化创建参数路径固定为 Device. 的 GetParameterValues 排队任务；后台消费者会尝试通过 Connection Request 唤醒设备，响应不表示 CPE 已收到命令
 // @Security ApiKeyAuth
 // @accept application/json
 // @Produce application/json
 // @Param deviceId path int true "设备ID"
-// @Success 200 {object} response.Response{data=map[string]string,msg=string} "下发成功"
+// @Success 200 {object} response.Response{data=map[string]string,msg=string} "任务创建结果"
 // @Router /tr069/datamodel/{deviceId}/sync [post]
 func (a *DataModelApi) FullSync(c *gin.Context) {
 	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
@@ -31,7 +31,7 @@ func (a *DataModelApi) FullSync(c *gin.Context) {
 		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithDetailed(result, "任务已下发，等待设备响应", c)
+	response.OkWithDetailed(result, commandSubmitMessage(result), c)
 }
 
 // GetDataModelList

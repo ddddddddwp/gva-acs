@@ -13,6 +13,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -34,12 +35,25 @@ type redisCommandDeviceLocker struct {
 	client redis.UniversalClient
 }
 
+var ErrRedisLockOwnershipLost = errors.New("redis device lock ownership lost")
+
 func (l redisCommandDeviceLocker) Lock(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
 	return l.client.SetNX(ctx, key, owner, ttl).Result()
 }
 
 func (l redisCommandDeviceLocker) Unlock(ctx context.Context, key, owner string) error {
-	return unlockLockScript.Run(ctx, l.client, []string{key}, owner).Err()
+	deleted, err := unlockLockScript.Run(ctx, l.client, []string{key}, owner).Int64()
+	if err != nil {
+		return fmt.Errorf("release Redis device lock %q: %w", key, err)
+	}
+	return validateRedisLockRelease(key, deleted)
+}
+
+func validateRedisLockRelease(key string, deleted int64) error {
+	if deleted != 1 {
+		return fmt.Errorf("%w: %s", ErrRedisLockOwnershipLost, key)
+	}
+	return nil
 }
 
 type RedisCommandSource struct {
@@ -92,7 +106,8 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 	}
 
 	lockKey := RedisDeviceLockPrefix + deviceKey
-	locked, err := s.locker.Lock(ctx, lockKey, s.cfg.InstanceID, s.cfg.LockTTL)
+	owner := s.cfg.InstanceID + ":" + uuid.NewString()
+	locked, err := s.locker.Lock(ctx, lockKey, owner, s.cfg.LockTTL)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to acquire device lock: %w", err)
 	}
@@ -103,7 +118,7 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		return s.locker.Unlock(ctx, lockKey, s.cfg.InstanceID)
+		return s.locker.Unlock(ctx, lockKey, owner)
 	}
 
 	var head model.Command
@@ -174,14 +189,14 @@ func (s *RedisCommandSource) nackBuilding(ctx context.Context, building model.Co
 	var current model.Command
 	readErr := s.db.WithContext(ctx).First(&current, "command_id = ?", building.CommandID).Error
 	var transitionErr error
-	if readErr == nil && current.Status == model.CommandStatusBuilding {
+	if readErr == nil && current.Status == model.CommandStatusBuilding && current.Version == building.Version {
 		now := time.Now()
 		deadline := now.Add(config.CurrentRuntime().CommandQueueWaitTimeout)
 		_, transitionErr = s.store.Transition(ctx, service.CommandTransition{
 			CommandID:       current.CommandID,
 			FromStatuses:    []string{model.CommandStatusBuilding},
 			ToStatus:        model.CommandStatusWaitingDevice,
-			ExpectedVersion: current.Version,
+			ExpectedVersion: building.Version,
 			EventType:       "BUILDING_REQUEUED",
 			Stage:           "core.build",
 			Message:         reason,

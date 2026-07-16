@@ -23,6 +23,11 @@ type CommandWakeupFunc func(ctx context.Context, deviceKey string) error
 
 var ErrCommandNotRetryable = errors.New("command is not retryable")
 
+const (
+	commandWakeupCompensationTimeout  = 5 * time.Second
+	commandWakeupCompensationAttempts = 3
+)
+
 type CommandManager struct {
 	db     *gorm.DB
 	wakeup CommandWakeupFunc
@@ -169,24 +174,67 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 }
 
 func (m *CommandManager) failWakeup(ctx context.Context, command model.Command, result SubmitResult, wakeupErr error) (SubmitResult, error) {
-	finishedAt := m.now()
-	failed, transitionErr := NewCommandStore(m.database()).Transition(ctx, CommandTransition{
-		CommandID:       command.CommandID,
-		FromStatuses:    []string{model.CommandStatusWaitingDevice},
-		ToStatus:        model.CommandStatusFailed,
-		ExpectedVersion: command.Version,
-		EventType:       "DISPATCH_FAILED",
-		Stage:           "redis.enqueue",
-		Message:         wakeupErr.Error(),
-		Updates: map[string]any{
-			"failure_stage":     "redis.enqueue",
-			"fault_string":      wakeupErr.Error(),
-			"finished_at":       finishedAt,
-			"phase_deadline_at": nil,
-		},
-	})
-	if transitionErr == nil {
-		result.Status = failed.Status
+	if wakeupErr == nil {
+		wakeupErr = ErrCommandQueueUnavailable
 	}
-	return result, errors.Join(ErrCommandQueueUnavailable, fmt.Errorf("redis.enqueue: %w", wakeupErr), transitionErr)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), commandWakeupCompensationTimeout)
+	defer cancel()
+
+	var terminal model.Command
+	var compensationErr error
+	for attempt := 0; attempt < commandWakeupCompensationAttempts; attempt++ {
+		compensationErr = m.database().WithContext(cleanupCtx).Transaction(func(tx *gorm.DB) error {
+			var current model.Command
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				First(&current, "command_id = ?", command.CommandID).Error; err != nil {
+				return err
+			}
+			if model.IsTerminalCommandStatus(current.Status) {
+				terminal = current
+				return NewCommandStore(tx).AppendEvent(cleanupCtx, &model.CommandEvent{
+					CommandID:  current.CommandID,
+					EventType:  "DISPATCH_FAILED",
+					FromStatus: current.Status,
+					ToStatus:   current.Status,
+					Stage:      "redis.enqueue",
+					Message:    wakeupErr.Error(),
+					CreatedAt:  m.now(),
+				})
+			}
+
+			finishedAt := m.now()
+			failed, err := NewCommandStore(tx).Transition(cleanupCtx, CommandTransition{
+				CommandID:       current.CommandID,
+				FromStatuses:    []string{current.Status},
+				ToStatus:        model.CommandStatusFailed,
+				ExpectedVersion: current.Version,
+				EventType:       "DISPATCH_FAILED",
+				Stage:           "redis.enqueue",
+				Message:         wakeupErr.Error(),
+				Updates: map[string]any{
+					"failure_stage":     "redis.enqueue",
+					"fault_string":      wakeupErr.Error(),
+					"finished_at":       finishedAt,
+					"phase_deadline_at": nil,
+				},
+			})
+			if err == nil {
+				terminal = failed
+			}
+			return err
+		})
+		if compensationErr == nil {
+			result.Status = terminal.Status
+			return result, nil
+		}
+		if !errors.Is(compensationErr, ErrCommandTransitionConflict) {
+			break
+		}
+	}
+
+	return result, errors.Join(
+		ErrCommandQueueUnavailable,
+		fmt.Errorf("redis.enqueue: %w", wakeupErr),
+		fmt.Errorf("persist wakeup compensation: %w", compensationErr),
+	)
 }

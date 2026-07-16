@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ddddddddwp/gva-acs/server/utils"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -51,6 +52,10 @@ func initServer(address string, router *gin.Engine, readTimeout, writeTimeout ti
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
 	defer cancel()
+
+	if err := utils.GlobalSystemEvents.TriggerShutdown(ctx); err != nil {
+		zap.L().Error("系统清理任务执行异常", zap.Error(err))
+	}
 
 	if err := srv.Shutdown(ctx); err != nil {
 		zap.L().Fatal("WEB服务关闭异常", zap.Error(err))

@@ -6,6 +6,7 @@ import (
 
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	req "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,13 @@ func commandFailureMessage(err error) string {
 	}
 }
 
+func commandSubmitMessage(result service.SubmitResult) string {
+	if result.Status == model.CommandStatusFailed {
+		return "任务已持久化，但设备唤醒调度失败"
+	}
+	return "任务已创建并进入持久化队列"
+}
+
 // SyncRPCMethods
 // @Tags TR069
 // @Summary 下发 GetRPCMethods
@@ -42,7 +50,7 @@ func (a *CommandApi) SyncRPCMethods(c *gin.Context) {
 		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithDetailed(result, "任务已下发", c)
+	response.OkWithDetailed(result, commandSubmitMessage(result), c)
 }
 
 // GetParameterValues
@@ -67,7 +75,7 @@ func (a *CommandApi) GetParameterValues(c *gin.Context) {
 		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithDetailed(result, "任务已下发", c)
+	response.OkWithDetailed(result, commandSubmitMessage(result), c)
 }
 
 // SetParameterValues
@@ -92,5 +100,5 @@ func (a *CommandApi) SetParameterValues(c *gin.Context) {
 		response.FailWithMessage(commandFailureMessage(err), c)
 		return
 	}
-	response.OkWithDetailed(result, "任务已下发", c)
+	response.OkWithDetailed(result, commandSubmitMessage(result), c)
 }

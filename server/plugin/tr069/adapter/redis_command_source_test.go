@@ -2,7 +2,10 @@ package adapter
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,21 +18,25 @@ import (
 )
 
 type commandSourceLocker struct {
-	mu   sync.Mutex
-	held map[string]string
+	mu     sync.Mutex
+	held   map[string]string
+	owners []string
+	ttls   []time.Duration
 }
 
 func newCommandSourceLocker() *commandSourceLocker {
 	return &commandSourceLocker{held: make(map[string]string)}
 }
 
-func (l *commandSourceLocker) Lock(_ context.Context, key, owner string, _ time.Duration) (bool, error) {
+func (l *commandSourceLocker) Lock(_ context.Context, key, owner string, ttl time.Duration) (bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if _, exists := l.held[key]; exists {
 		return false, nil
 	}
 	l.held[key] = owner
+	l.owners = append(l.owners, owner)
+	l.ttls = append(l.ttls, ttl)
 	return true, nil
 }
 
@@ -38,8 +45,21 @@ func (l *commandSourceLocker) Unlock(_ context.Context, key, owner string) error
 	defer l.mu.Unlock()
 	if l.held[key] == owner {
 		delete(l.held, key)
+		return nil
 	}
-	return nil
+	return fmt.Errorf("%w: %s", ErrRedisLockOwnershipLost, key)
+}
+
+func (l *commandSourceLocker) expire(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.held, key)
+}
+
+func (l *commandSourceLocker) currentOwner(key string) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.held[key]
 }
 
 func (l *commandSourceLocker) isHeld(key string) bool {
@@ -55,10 +75,162 @@ func newRedisCommandSourceTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(new(model.Command), new(model.CommandEvent)); err != nil {
+	if err := db.AutoMigrate(new(model.Device), new(model.DeviceRPCMethods), new(model.Command), new(model.CommandEvent)); err != nil {
 		t.Fatalf("migrate command source models: %v", err)
 	}
 	return db
+}
+
+func TestRedisCommandSourceUsesUniqueOwnerPerAcquisitionAndConfiguredTTL(t *testing.T) {
+	db := newRedisCommandSourceTestDB(t)
+	locker := newCommandSourceLocker()
+	ttl := 47 * time.Second
+	source := newRedisCommandSource(db, locker, RedisCommandSourceConfig{InstanceID: "source-instance", LockTTL: ttl})
+
+	for range 2 {
+		cmd, ack, nack, err := source.Pull(context.Background(), "001122-NO-COMMAND")
+		if err != nil || cmd != nil || ack != nil || nack != nil {
+			t.Fatalf("empty Pull() = command:%#v ack:%v nack:%v error:%v", cmd, ack != nil, nack != nil, err)
+		}
+	}
+	if len(locker.owners) != 2 || locker.owners[0] == locker.owners[1] {
+		t.Fatalf("lock owners = %#v, want two unique acquisition tokens", locker.owners)
+	}
+	for _, owner := range locker.owners {
+		if !strings.HasPrefix(owner, "source-instance:") {
+			t.Fatalf("owner = %q, want source-instance UUID prefix", owner)
+		}
+	}
+	if !reflect.DeepEqual(locker.ttls, []time.Duration{ttl, ttl}) {
+		t.Fatalf("lock TTLs = %#v, want both %s", locker.ttls, ttl)
+	}
+}
+
+func TestValidateRedisLockReleaseReportsLostOwnershipOnZeroDelete(t *testing.T) {
+	if err := validateRedisLockRelease("tr069:lock:device:test", 0); !errors.Is(err, ErrRedisLockOwnershipLost) {
+		t.Fatalf("zero-delete error = %v, want ownership-lost", err)
+	}
+	if err := validateRedisLockRelease("tr069:lock:device:test", 1); err != nil {
+		t.Fatalf("single-delete error = %v, want nil", err)
+	}
+}
+
+func TestRedisCommandSourceStaleAckCannotReleaseNewAcquisition(t *testing.T) {
+	db := newRedisCommandSourceTestDB(t)
+	now := time.Now().Add(-time.Minute)
+	command := model.Command{
+		CommandID: "stale-ack", DeviceID: 21, DeviceKey: "001122-STALE", Operation: "GetRPCMethods",
+		ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusWaitingDevice,
+		QueuedAt: now, WaitingAt: &now, CreatedAt: now,
+	}
+	if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+		t.Fatalf("seed command: %v", err)
+	}
+	locker := newCommandSourceLocker()
+	source := newRedisCommandSource(db, locker, RedisCommandSourceConfig{InstanceID: "stale-test", LockTTL: time.Second})
+	_, staleAck, _, err := source.Pull(context.Background(), command.DeviceKey)
+	if err != nil || staleAck == nil {
+		t.Fatalf("first Pull() ack/error = %v/%v", staleAck != nil, err)
+	}
+	lockKey := RedisDeviceLockPrefix + command.DeviceKey
+	firstOwner := locker.currentOwner(lockKey)
+	locker.expire(lockKey)
+
+	var building model.Command
+	if err := db.First(&building, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("load first BUILDING state: %v", err)
+	}
+	waitingAt := time.Now()
+	deadline := waitingAt.Add(time.Minute)
+	if _, err := service.NewCommandStore(db).Transition(context.Background(), service.CommandTransition{
+		CommandID: building.CommandID, FromStatuses: []string{model.CommandStatusBuilding},
+		ToStatus: model.CommandStatusWaitingDevice, ExpectedVersion: building.Version,
+		EventType: "STALE_LOCK_RECOVERED", Stage: "test", Updates: map[string]any{
+			"building_at": nil, "waiting_at": waitingAt, "phase_deadline_at": deadline,
+		},
+	}); err != nil {
+		t.Fatalf("recover expired BUILDING state: %v", err)
+	}
+	_, currentAck, _, err := source.Pull(context.Background(), command.DeviceKey)
+	if err != nil || currentAck == nil {
+		t.Fatalf("second Pull() ack/error = %v/%v", currentAck != nil, err)
+	}
+	secondOwner := locker.currentOwner(lockKey)
+	if firstOwner == secondOwner {
+		t.Fatalf("owners reused across acquisitions: %q", firstOwner)
+	}
+
+	if err := staleAck(context.Background()); !errors.Is(err, ErrRedisLockOwnershipLost) {
+		t.Fatalf("stale ack error = %v, want ownership-lost", err)
+	}
+	if got := locker.currentOwner(lockKey); got != secondOwner {
+		t.Fatalf("stale ack changed current owner from %q to %q", secondOwner, got)
+	}
+	if err := currentAck(context.Background()); err != nil {
+		t.Fatalf("current ack: %v", err)
+	}
+	if locker.isHeld(lockKey) {
+		t.Fatal("current acquisition lock remained after matching ack")
+	}
+}
+
+func TestCommandManagerWakeFailureCompensatesConcurrentPull(t *testing.T) {
+	db := newRedisCommandSourceTestDB(t)
+	now := time.Now()
+	device := model.Device{OUI: "001122", SerialNumber: "WAKE-PULL-RACE", LastInform: now.Add(-time.Second)}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	wakeupEntered := make(chan struct{})
+	releaseWakeup := make(chan struct{})
+	wakeupErr := errors.New("redis enqueue failed after concurrent pull")
+	manager := service.NewCommandManager(db, func(context.Context, string) error {
+		close(wakeupEntered)
+		<-releaseWakeup
+		return wakeupErr
+	}, service.WithCommandManagerNow(func() time.Time { return now }))
+	type submitOutcome struct {
+		result service.SubmitResult
+		err    error
+	}
+	submitted := make(chan submitOutcome, 1)
+	go func() {
+		result, err := manager.Submit(context.Background(), device.ID, "GetRPCMethods", nil)
+		submitted <- submitOutcome{result: result, err: err}
+	}()
+	<-wakeupEntered
+
+	locker := newCommandSourceLocker()
+	source := newRedisCommandSource(db, locker, RedisCommandSourceConfig{InstanceID: "wake-pull-race"})
+	pulled, ack, _, err := source.Pull(context.Background(), "001122-WAKE-PULL-RACE")
+	if err != nil || pulled == nil || ack == nil {
+		t.Fatalf("concurrent Pull() = command:%#v ack:%v error:%v", pulled, ack != nil, err)
+	}
+	close(releaseWakeup)
+	outcome := <-submitted
+	if outcome.err != nil {
+		t.Fatalf("Submit() error = %v, want compensated terminal result", outcome.err)
+	}
+	if outcome.result.Status != model.CommandStatusFailed {
+		t.Fatalf("Submit() status = %q, want FAILED", outcome.result.Status)
+	}
+	if err := ack(context.Background()); err != nil {
+		t.Fatalf("release concurrent Pull lock: %v", err)
+	}
+	var failed model.Command
+	if err := db.First(&failed, "command_id = ?", outcome.result.CommandID).Error; err != nil {
+		t.Fatalf("load compensated command: %v", err)
+	}
+	if failed.Status != model.CommandStatusFailed || failed.FailureStage != "redis.enqueue" {
+		t.Fatalf("compensated concurrent state = %s/%q, want FAILED/redis.enqueue", failed.Status, failed.FailureStage)
+	}
+	var event model.CommandEvent
+	if err := db.Where("command_id = ? AND event_type = ?", failed.CommandID, "DISPATCH_FAILED").First(&event).Error; err != nil {
+		t.Fatalf("load concurrent compensation event: %v", err)
+	}
+	if event.FromStatus != model.CommandStatusBuilding || event.ToStatus != model.CommandStatusFailed {
+		t.Fatalf("concurrent compensation transition = %s -> %s, want BUILDING -> FAILED", event.FromStatus, event.ToStatus)
+	}
 }
 
 func TestRedisCommandSourcePullUsesDatabaseHeadAndTypedParams(t *testing.T) {

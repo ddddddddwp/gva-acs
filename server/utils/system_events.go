@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"context"
+	"errors"
 	"sync"
 )
 
@@ -8,7 +10,15 @@ import (
 type SystemEvents struct {
 	reloadHandlers       []func() error
 	configChangeHandlers []func()
+	shutdownHandlers     []func(context.Context) error
 	mu                   sync.RWMutex
+}
+
+// RegisterShutdownHandler 注册在 HTTP 服务关闭期间运行的清理函数。
+func (e *SystemEvents) RegisterShutdownHandler(handler func(context.Context) error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.shutdownHandlers = append(e.shutdownHandlers, handler)
 }
 
 // 全局事件管理器
@@ -37,6 +47,19 @@ func (e *SystemEvents) TriggerConfigChange() {
 	for _, handler := range handlers {
 		handler()
 	}
+}
+
+// TriggerShutdown 使用处理函数快照执行所有清理函数，并保留每个错误。
+func (e *SystemEvents) TriggerShutdown(ctx context.Context) error {
+	e.mu.RLock()
+	handlers := append([]func(context.Context) error{}, e.shutdownHandlers...)
+	e.mu.RUnlock()
+
+	var shutdownErr error
+	for _, handler := range handlers {
+		shutdownErr = errors.Join(shutdownErr, handler(ctx))
+	}
+	return shutdownErr
 }
 
 // TriggerReload 触发所有注册的重载处理函数
