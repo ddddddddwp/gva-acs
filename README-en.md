@@ -159,7 +159,7 @@ cd server
 swag init
 ````
 
-> After executing the above command，server directory will appear in the docs folder `docs.go`, `swagger.json`, `swagger.yaml` Three file updates，After starting the go service, type in the browser [http://localhost:8888/swagger/index.html](http://localhost:8888/swagger/index.html) You can view swagger document
+> After executing the above command，server directory will appear in the docs folder `docs.go`, `swagger.json`, `swagger.yaml` Three file updates，After starting the go service, type in the browser [http://localhost:18888/swagger/index.html](http://localhost:18888/swagger/index.html) You can view swagger document
 
 
 ## 3. Technical selection
@@ -314,4 +314,3 @@ If you find this project useful, you can buy author a glass of juice :tropical_d
 ## 10. Commercial considerations
 
 If you use this project for commercial purposes, please comply with the Apache2.0 agreement and retain the author's technical support statement.
-

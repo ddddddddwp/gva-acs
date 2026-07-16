@@ -1,0 +1,41 @@
+name: Sync GVA upstream mirror
+
+on:
+  schedule:
+    # Monday 03:15 Asia/Taipei (Sunday 19:15 UTC).
+    - cron: '15 19 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-gva-upstream
+  cancel-in-progress: false
+
+jobs:
+  refresh-mirror:
+    name: Refresh gva-upstream
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the project repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch official GVA main
+        run: |
+          git remote add gva-official https://github.com/flipped-aurora/gin-vue-admin.git
+          git fetch --no-tags gva-official main:refs/remotes/gva-official/main
+          git fetch --no-tags origin gva-upstream:refs/remotes/origin/gva-upstream || true
+
+      - name: Update only the mirror branch
+        shell: bash
+        run: |
+          expected="$(git rev-parse --verify refs/remotes/origin/gva-upstream 2>/dev/null || true)"
+          if [[ -n "$expected" ]]; then
+            lease="--force-with-lease=refs/heads/gva-upstream:$expected"
+          else
+            lease="--force-with-lease=refs/heads/gva-upstream:"
+          fi
+          git push "$lease" origin refs/remotes/gva-official/main:refs/heads/gva-upstream

@@ -28,7 +28,7 @@ kill_port() {
 }
 
 # Close ports before restart
-for port in 8888 7458 8080; do
+for port in 18888 7458 18080; do
   kill_port "$port"
 done
 

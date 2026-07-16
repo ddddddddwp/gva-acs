@@ -59,9 +59,9 @@ kill_from_pidfile() {
 kill_from_pidfile "${BACKEND_PID_FILE}"
 kill_from_pidfile "${WEB_PID_FILE}"
 
-kill_port 8888
+kill_port 18888
 kill_port 7458
-kill_port 8080
+kill_port 18080
 
 mkdir -p /tmp >/dev/null 2>&1 || true
 rm -f "${BACKEND_LOG}" "${WEB_LOG}" >/dev/null 2>&1 || true
@@ -86,9 +86,9 @@ rm -f "${BACKEND_LOG}" "${WEB_LOG}" >/dev/null 2>&1 || true
   echo $! > "${WEB_PID_FILE}"
 )
 
-echo "backend: http://localhost:8888 (log: ${BACKEND_LOG})"
+echo "backend: http://localhost:18888 (log: ${BACKEND_LOG})"
 echo "tr069:   http://localhost:7458"
-echo "web:     http://localhost:8080 (log: ${WEB_LOG})"
+echo "web:     http://localhost:18080 (log: ${WEB_LOG})"
 
 if [[ "${1:-}" == "--follow" ]]; then
   echo "follow:  tail -f ${BACKEND_LOG}"

@@ -4,7 +4,7 @@ mcp:
   path: /mcp
   addr: 8889
   base_url: http://127.0.0.1:8889/mcp
-  upstream_base_url: http://127.0.0.1:8888
+  upstream_base_url: http://127.0.0.1:18888
   auth_header: x-token
   request_timeout: 15
 

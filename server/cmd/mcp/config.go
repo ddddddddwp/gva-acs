@@ -116,7 +116,7 @@ func applyStandaloneDefaults(configPath string, cfg *standaloneConfig) {
 		cfg.MCP.RequestTimeout = 15
 	}
 	if cfg.MCP.UpstreamBaseURL == "" {
-		cfg.MCP.UpstreamBaseURL = "http://127.0.0.1:8888"
+		cfg.MCP.UpstreamBaseURL = "http://127.0.0.1:18888"
 	}
 	if cfg.MCP.BaseURL == "" {
 		cfg.MCP.BaseURL = fmt.Sprintf("http://127.0.0.1:%d%s", cfg.MCP.Addr, cfg.MCP.Path)

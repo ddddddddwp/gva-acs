@@ -562,8 +562,8 @@ npm run dev
 Verify:
 
 ```bash
-curl --noproxy '*' -fsS http://127.0.0.1:8888/health
-curl --noproxy '*' -fsS http://127.0.0.1:8080/api/health
+curl --noproxy '*' -fsS http://127.0.0.1:18888/health
+curl --noproxy '*' -fsS http://127.0.0.1:18080/api/health
 redis-cli -h 127.0.0.1 -p 6379 PING
 ```
 
@@ -573,7 +573,7 @@ Expected: both health calls return `"ok"`; Redis returns `PONG`.
 
 With the BS/OAM stack running and a recent Inform received:
 
-1. Open `http://127.0.0.1:8080/#/layout/tr069/device`.
+1. Open `http://127.0.0.1:18080/#/layout/tr069/device`.
 2. Confirm the row shows `同步参数 | 参数 | 更多` and no `详情`.
 3. Click `同步参数` on the online BS.
 4. Query MySQL and confirm exactly one new `tr069_commands` row with `operation='GetParameterValues'` and `params_json='{"paths":["Device."]}'`.
