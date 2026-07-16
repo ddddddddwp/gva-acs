@@ -10,9 +10,9 @@
   >
     <div class="dm-container h-full flex flex-col">
       <!-- Top Actions Bar -->
-      <div class="dm-header flex justify-between items-center px-6 py-4 border-b border-gray-200 bg-white">
+      <div class="dm-header dm-surface dm-border-bottom flex justify-between items-center px-6 py-4">
         <div class="flex items-center gap-3">
-          <span class="text-lg font-bold text-gray-800 tracking-wide font-mono">{{ deviceRow.serialNumber || 'Unknown Device' }}</span>
+          <span class="dm-title text-lg font-bold tracking-wide font-mono">{{ deviceRow.serialNumber || 'Unknown Device' }}</span>
           <el-tag :type="deviceRow.online ? 'success' : 'info'" effect="dark" size="small" class="ml-2 rounded-full px-3">
             {{ deviceRow.online ? '在线' : '离线' }}
           </el-tag>
@@ -27,8 +27,8 @@
       <!-- Main Content Split -->
       <div class="dm-content flex-1 flex overflow-hidden">
         <!-- Left: Tree Structure -->
-        <div class="dm-sidebar w-1/3 min-w-[300px] border-r border-gray-100 flex flex-col bg-white">
-          <div class="p-3 border-b border-gray-50">
+        <div class="dm-sidebar dm-surface dm-border-right w-1/3 min-w-[300px] flex flex-col">
+          <div class="dm-border-bottom p-3">
             <el-input
               v-model="filterText"
               placeholder="搜索参数节点..."
@@ -51,13 +51,13 @@
               <template #default="{ node, data }">
                 <div class="custom-tree-node flex items-center text-sm py-1">
                   <!-- User requested to remove icons to save space -->
-                  <span class="truncate font-medium text-gray-700" :title="node.label">{{ node.label }}</span>
-                  <span v-if="data.children && data.children.length > 0" class="text-gray-400 text-xs ml-2">({{ data.children.length }})</span>
+                  <span class="dm-node-label truncate font-medium" :title="node.label">{{ node.label }}</span>
+                  <span v-if="data.children && data.children.length > 0" class="dm-secondary-text text-xs ml-2">({{ data.children.length }})</span>
                 </div>
               </template>
             </el-tree>
             
-            <div v-if="loadingStructure" class="py-10 text-center text-gray-400">
+            <div v-if="loadingStructure" class="dm-secondary-text py-10 text-center">
               <el-icon class="is-loading text-xl mb-2"><Loading /></el-icon>
               <p class="text-xs">正在加载数据结构...</p>
             </div>
@@ -65,13 +65,13 @@
         </div>
 
         <!-- Right: Parameter Values -->
-        <div class="dm-main flex-1 flex flex-col bg-gray-50/30">
+        <div class="dm-main dm-subtle-surface flex-1 flex flex-col">
           <div v-if="currentPath" class="h-full flex flex-col">
             <!-- Breadcrumb / Path Header -->
-            <div class="p-4 bg-white border-b border-gray-100 flex justify-between items-center shadow-sm z-10">
+            <div class="dm-path-header dm-surface dm-border-bottom p-4 flex justify-between items-center shadow-sm z-10">
               <div class="flex flex-col gap-1">
-                <span class="text-xs text-gray-400">当前路径</span>
-                <span class="font-mono text-sm font-semibold text-primary break-all">{{ currentPath }}</span>
+                <span class="dm-secondary-text text-xs">当前路径</span>
+                <span class="dm-path font-mono text-sm font-semibold break-all">{{ currentPath }}</span>
               </div>
               <el-button type="primary" text bg size="small" :icon="RefreshRight" @click="refreshValues" :loading="loadingValues">
                 刷新数值
@@ -91,14 +91,14 @@
                   <el-table-column prop="name" label="参数名" min-width="200" show-overflow-tooltip sortable>
                      <template #default="scope">
                         <span class="font-mono text-xs">{{ scope.row.name.replace(currentPath, '') }}</span>
-                        <span class="text-gray-400 text-xs ml-2">({{ scope.row.name }})</span>
+                        <span class="dm-secondary-text text-xs ml-2">({{ scope.row.name }})</span>
                      </template>
                   </el-table-column>
                   <el-table-column prop="valueJson" label="值" min-width="150" show-overflow-tooltip>
                     <template #default="scope">
                       <div class="flex items-center justify-between group">
                         <span class="font-mono text-sm truncate">{{ formatValue(scope.row.valueJson) }}</span>
-                        <el-icon class="cursor-pointer opacity-0 group-hover:opacity-100 text-gray-400 hover:text-primary transition-opacity" @click="copyValue(formatValue(scope.row.valueJson))">
+                        <el-icon class="dm-copy-icon cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity" @click="copyValue(formatValue(scope.row.valueJson))">
                           <CopyDocument />
                         </el-icon>
                       </div>
@@ -111,7 +111,7 @@
                   </el-table-column>
                   <el-table-column prop="updatedAt" label="更新时间" width="160">
                     <template #default="scope">
-                      <span class="text-xs text-gray-500">{{ formatDate(scope.row.UpdatedAt) }}</span>
+                      <span class="dm-secondary-text text-xs">{{ formatDate(scope.row.UpdatedAt) }}</span>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -120,7 +120,7 @@
           </div>
 
           <!-- Empty State -->
-          <div v-else class="h-full flex flex-col items-center justify-center text-gray-400">
+          <div v-else class="dm-secondary-text h-full flex flex-col items-center justify-center">
             <el-empty description="请从左侧选择一个节点查看参数" :image-size="120" />
           </div>
         </div>
@@ -294,12 +294,42 @@ const copyValue = (text) => {
 </script>
 
 <style scoped>
+.dm-container,
+.dm-surface {
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color);
+}
+.dm-subtle-surface {
+  background: var(--el-fill-color-light);
+}
+.dm-title,
+.dm-node-label {
+  color: var(--el-text-color-primary);
+}
+.dm-secondary-text {
+  color: var(--el-text-color-secondary);
+}
+.dm-path {
+  color: var(--el-color-primary);
+}
+.dm-border-bottom {
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+.dm-border-right {
+  border-right: 1px solid var(--el-border-color-light);
+}
+.dm-copy-icon {
+  color: var(--el-text-color-secondary);
+}
+.dm-copy-icon:hover {
+  color: var(--el-color-primary);
+}
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #e5e7eb;
+  background: var(--el-border-color-light);
   border-radius: 3px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
