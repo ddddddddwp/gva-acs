@@ -16,6 +16,8 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 		deviceRouter.GET("list", deviceApi.GetDeviceList)
 		deviceRouter.POST("", deviceApi.CreateDevice)
 		deviceRouter.DELETE(":deviceId", deviceApi.DeleteDevice)
+		deviceRouter.GET(":deviceId/connection-profile", deviceApi.GetConnectionProfile)
+		deviceRouter.PUT(":deviceId/connection-profile", middleware.OperationRecord(), deviceApi.UpdateConnectionProfile)
 	}
 
 	// FAP (Base Station) Specific Management

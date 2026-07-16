@@ -26,6 +26,41 @@ func (i *captureIngest) Enqueue(ctx context.Context, cmd *core.Command) error {
 	return nil
 }
 
+func TestDataModelHookGPVCollectsConnectionProfile(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	previousDB := appGlobal.GVA_DB
+	appGlobal.GVA_DB = db
+	t.Cleanup(func() { appGlobal.GVA_DB = previousDB })
+	if err := db.AutoMigrate(new(model.Device), new(model.DataModelValue), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	device := model.Device{OUI: "001122", SerialNumber: "GPV-PROFILE"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	cipher, err := NewCredentialCipher(testCredentialConfig(0x62))
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	profiles := NewConnectionProfileRepository(db, cipher)
+	hook := NewDataModelHook(nil, nil, nil, WithDataModelHookProfiles(profiles))
+
+	if err := hook.persistGPV(context.Background(), device.ID, []tr069.Parameter{
+		{Name: connectionRequestURLName, Value: "http://127.0.0.1:8400", Type: "xsd:string"},
+		{Name: connectionRequestUsernameName, Value: "gpv-user", Type: "xsd:string"},
+	}); err != nil {
+		t.Fatalf("persist GPV: %v", err)
+	}
+
+	profile := loadConnectionProfile(t, db, device.ID)
+	if profile.DiscoveredURL != "http://127.0.0.1:8400" || profile.Username != "gpv-user" {
+		t.Fatalf("profile=%#v", profile)
+	}
+}
+
 func TestDataModelHook_PersistsGPVAndExpandsGPN(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

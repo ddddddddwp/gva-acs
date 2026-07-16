@@ -3,12 +3,18 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/model/common/request"
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	tr069Config "github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	tr069Request "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
 	deviceResponse "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/response"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -19,6 +25,86 @@ import (
 const offlineThreshold = 180 // 3分钟
 
 type DeviceApi struct{}
+
+func connectionProfileResponse(profile model.ConnectionProfile) deviceResponse.ConnectionProfileResponse {
+	effectiveURL := strings.TrimSpace(profile.OverrideURL)
+	if effectiveURL == "" {
+		effectiveURL = strings.TrimSpace(profile.DiscoveredURL)
+	}
+	return deviceResponse.ConnectionProfileResponse{
+		DeviceID: profile.DeviceID, EffectiveURL: effectiveURL,
+		DiscoveredURL: profile.DiscoveredURL, OverrideURL: profile.OverrideURL,
+		Username: profile.Username, CredentialSource: profile.CredentialSource,
+		AuthScheme: profile.AuthScheme, ProvisionState: profile.ProvisionState,
+		ProvisionCommandID: profile.ProvisionCommandID, LastError: profile.LastError,
+		LastWakeAt: profile.LastWakeAt, LastWakeStatus: profile.LastWakeStatus,
+	}
+}
+
+func connectionProfileDeviceID(c *gin.Context) (uint, bool) {
+	value, err := strconv.ParseUint(c.Param("deviceId"), 10, 64)
+	if err != nil || value == 0 {
+		response.FailWithMessage("设备ID错误", c)
+		return 0, false
+	}
+	return uint(value), true
+}
+
+func connectionProfileRepository(requireCipher bool) (*adapter.ConnectionProfileRepository, error) {
+	var credentialCipher adapter.CredentialCipher
+	if requireCipher {
+		var err error
+		credentialCipher, err = adapter.NewCredentialCipher(tr069Config.CurrentRuntime().Settings.ConnectionRequest)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return adapter.NewConnectionProfileRepository(global.GVA_DB, credentialCipher), nil
+}
+
+func (a *DeviceApi) GetConnectionProfile(c *gin.Context) {
+	deviceID, ok := connectionProfileDeviceID(c)
+	if !ok {
+		return
+	}
+	repository, _ := connectionProfileRepository(false)
+	profile, err := repository.Get(c.Request.Context(), deviceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.FailWithMessage("设备尚无 Connection Profile", c)
+			return
+		}
+		response.FailWithMessage("获取 Connection Profile 失败", c)
+		return
+	}
+	response.OkWithDetailed(connectionProfileResponse(profile), "获取成功", c)
+}
+
+func (a *DeviceApi) UpdateConnectionProfile(c *gin.Context) {
+	deviceID, ok := connectionProfileDeviceID(c)
+	if !ok {
+		return
+	}
+	var input tr069Request.ConnectionProfileOverrideRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.FailWithMessage("参数错误", c)
+		return
+	}
+	repository, err := connectionProfileRepository(input.Username != "" || input.Password != "")
+	if err != nil {
+		response.FailWithMessage("Connection Profile 凭据加密配置不可用", c)
+		return
+	}
+	profile, err := repository.UpdateOverride(c.Request.Context(), deviceID, adapter.ConnectionProfileOverride{
+		OverrideURL: input.OverrideURL, Username: input.Username, Password: input.Password,
+		ClearOverride: input.ClearOverride, ClearCredentials: input.ClearCredentials,
+	})
+	if err != nil {
+		response.FailWithMessage("更新 Connection Profile 失败: "+err.Error(), c)
+		return
+	}
+	response.OkWithDetailed(connectionProfileResponse(profile), "更新成功", c)
+}
 
 // GetDeviceList
 // @Tags TR069
@@ -187,6 +273,9 @@ func (a *DeviceApi) DeleteDevice(c *gin.Context) {
 		}
 		// 2. Delete DataModel Values (Hard Delete)
 		if err := tx.Unscoped().Where("device_id = ?", device.ID).Delete(&model.DataModelValue{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("device_id = ?", device.ID).Delete(&model.ConnectionProfile{}).Error; err != nil {
 			return err
 		}
 		// 3. Delete Device (Hard Delete)

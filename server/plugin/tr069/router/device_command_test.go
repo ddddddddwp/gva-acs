@@ -60,3 +60,21 @@ func TestDeviceRouterRegistersCommandRecordRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceRouterRegistersConnectionProfileRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	new(DeviceRouter).InitDeviceRouter(engine.Group("/tr069"))
+	routes := make(map[string]bool)
+	for _, route := range engine.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	for _, want := range []string{
+		"GET /tr069/device/:deviceId/connection-profile",
+		"PUT /tr069/device/:deviceId/connection-profile",
+	} {
+		if !routes[want] {
+			t.Errorf("connection profile route %q is not registered", want)
+		}
+	}
+}

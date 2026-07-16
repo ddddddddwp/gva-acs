@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ type DataModelHook struct {
 	base     core.CorrelationHook
 	inflight core.InflightRepo
 	ingest   core.CommandIngest
+	profiles *ConnectionProfileRepository
 	now      func() time.Time
 }
 
@@ -32,6 +34,12 @@ type DataModelHookOption func(*DataModelHook)
 func WithDataModelHookNow(now func() time.Time) DataModelHookOption {
 	return func(h *DataModelHook) {
 		h.now = now
+	}
+}
+
+func WithDataModelHookProfiles(profiles *ConnectionProfileRepository) DataModelHookOption {
+	return func(h *DataModelHook) {
+		h.profiles = profiles
 	}
 }
 
@@ -156,6 +164,7 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 
 	now := h.now()
 	records := make([]model.DataModelValue, 0, len(params))
+	profileValues := make(map[string]string, 3)
 
 	for _, p := range params {
 		if p.Name == "" {
@@ -181,6 +190,10 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 			ValueJSON:       b,
 			LastCollectedAt: now,
 		})
+		switch p.Name {
+		case connectionRequestURLName, connectionRequestUsernameName, connectionRequestPasswordName:
+			profileValues[p.Name] = fmt.Sprint(p.Value)
+		}
 	}
 
 	if len(records) == 0 {
@@ -194,6 +207,15 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 	}).Create(records).Error; err != nil {
 		global.GVA_LOG.Error("failed to batch persist GPV", zap.Error(err))
 		return err
+	}
+	if len(profileValues) > 0 {
+		profiles := h.profiles
+		if profiles == nil {
+			profiles = NewConnectionProfileRepository(global.GVA_DB, nil)
+		}
+		if _, err := profiles.Collect(ctx, deviceID, profileValues); err != nil && global.GVA_LOG != nil {
+			global.GVA_LOG.Warn("failed to collect connection profile from GPV", zap.Uint("deviceID", deviceID), zap.Error(err))
+		}
 	}
 	return nil
 }

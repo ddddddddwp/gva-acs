@@ -19,9 +19,34 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type GormDeviceRepo struct{}
+type GormDeviceRepo struct {
+	db       *gorm.DB
+	profiles *ConnectionProfileRepository
+}
+
+func NewGormDeviceRepo(db *gorm.DB, profiles *ConnectionProfileRepository) *GormDeviceRepo {
+	return &GormDeviceRepo{db: db, profiles: profiles}
+}
+
+func (r *GormDeviceRepo) database() *gorm.DB {
+	if r != nil && r.db != nil {
+		return r.db
+	}
+	return global.GVA_DB
+}
+
+func (r *GormDeviceRepo) profileRepository() *ConnectionProfileRepository {
+	if r != nil && r.profiles != nil {
+		return r.profiles
+	}
+	return NewConnectionProfileRepository(r.database(), nil)
+}
 
 func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.InformSummary, ip string) (string, error) {
+	db := r.database()
+	if db == nil {
+		return "", gorm.ErrInvalidDB
+	}
 	deviceID, ok := deviceIDFromContext(ctx)
 	if !ok {
 		deviceID = nil
@@ -76,26 +101,29 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 		}
 	}
 
-	err := global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "serial_number"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"oui",
-			"product_class",
-			"manufacturer",
-			"software_ver",
-			"hardware_ver",
-			"spec_ver",
-			"ip",
-			"connection_req_url",
-			"last_inform",
-		}),
+	updateColumns := []string{
+		"oui",
+		"product_class",
+		"manufacturer",
+		"software_ver",
+		"hardware_ver",
+		"spec_ver",
+		"ip",
+		"last_inform",
+	}
+	if device.ConnectionReqURL != "" {
+		updateColumns = append(updateColumns, "connection_req_url")
+	}
+	err := db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "serial_number"}},
+		DoUpdates: clause.AssignmentColumns(updateColumns),
 	}).Create(&device).Error
 	if err != nil {
 		return "", err
 	}
 
 	// Force restore if soft-deleted
-	if err := global.GVA_DB.Unscoped().Model(&model.Device{}).Where("serial_number = ?", serial).Update("deleted_at", nil).Error; err != nil {
+	if err := db.Unscoped().Model(&model.Device{}).Where("serial_number = ?", serial).Update("deleted_at", nil).Error; err != nil {
 		global.GVA_LOG.Warn("failed to restore soft-deleted device", zap.String("serial", serial), zap.Error(err))
 	}
 
@@ -115,12 +143,12 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	if info != nil && len(info.Params) > 0 {
 		var dbDevice model.Device
 		// Use Unscoped to find the device even if it was soft-deleted
-		if err := global.GVA_DB.Unscoped().WithContext(ctx).Select("id, deleted_at").Where("serial_number = ?", serial).First(&dbDevice).Error; err != nil {
+		if err := db.Unscoped().WithContext(ctx).Select("id, deleted_at").Where("serial_number = ?", serial).First(&dbDevice).Error; err != nil {
 			global.GVA_LOG.Warn("failed to find device for parameter sync", zap.String("serial", serial), zap.Error(err))
 		} else {
 			// If it was deleted, restore it (clear deleted_at)
 			if dbDevice.DeletedAt.Valid {
-				if err := global.GVA_DB.Unscoped().Model(&dbDevice).Update("deleted_at", nil).Error; err != nil {
+				if err := db.Unscoped().Model(&dbDevice).Update("deleted_at", nil).Error; err != nil {
 					global.GVA_LOG.Warn("failed to restore device", zap.Uint("deviceID", dbDevice.ID), zap.Error(err))
 				}
 			}
@@ -168,18 +196,16 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 				// Batch Upsert
 				// On conflict (device_id + name), update value_json and last_collected_at
 				// Preserve existing ValueType if Inform doesn't carry it
-				if err := global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
-					Columns: []clause.Column{{Name: "device_id"}, {Name: "name"}},
-					DoUpdates: clause.Assignments(map[string]interface{}{
-						"value_type":        gorm.Expr("COALESCE(NULLIF(VALUES(value_type),''), value_type)"),
-						"value_json":        gorm.Expr("VALUES(value_json)"),
-						"last_collected_at": gorm.Expr("VALUES(last_collected_at)"),
-						"updated_at":        gorm.Expr("NOW()"),
-					}),
+				if err := db.WithContext(ctx).Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "device_id"}, {Name: "name"}},
+					DoUpdates: clause.AssignmentColumns([]string{"value_type", "value_json", "last_collected_at", "updated_at"}),
 				}).CreateInBatches(values, 100).Error; err != nil {
 					global.GVA_LOG.Error("failed to batch upsert data model values", zap.Error(err))
 					return "", err
 				}
+			}
+			if _, err := r.profileRepository().Collect(ctx, dbDevice.ID, info.Params); err != nil && global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to collect connection profile from Inform", zap.Uint("deviceID", dbDevice.ID), zap.Error(err))
 			}
 		}
 	}

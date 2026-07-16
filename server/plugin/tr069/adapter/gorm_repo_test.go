@@ -26,6 +26,49 @@ func newGormCommandRepoTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestGormDeviceRepoInformDoesNotClearConnectionRequestURL(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(new(model.Device), new(model.DataModelValue), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate device repo models: %v", err)
+	}
+	cipher, err := NewCredentialCipher(testCredentialConfig(0x61))
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	profiles := NewConnectionProfileRepository(db, cipher)
+	repo := NewGormDeviceRepo(db, profiles)
+
+	first := &tr069core.InformSummary{Params: map[string]string{
+		"Device.DeviceInfo.SerialNumber":               "INFORM-PRESERVE",
+		"Device.ManagementServer.ConnectionRequestURL": "http://127.0.0.1:8400",
+	}}
+	if _, err := repo.UpsertFromInform(context.Background(), first, "192.0.2.10"); err != nil {
+		t.Fatalf("first Inform: %v", err)
+	}
+	second := &tr069core.InformSummary{Params: map[string]string{
+		"Device.DeviceInfo.SerialNumber":    "INFORM-PRESERVE",
+		"Device.DeviceInfo.SoftwareVersion": "2.0.0",
+	}}
+	if _, err := repo.UpsertFromInform(context.Background(), second, "192.0.2.11"); err != nil {
+		t.Fatalf("second Inform: %v", err)
+	}
+
+	var device model.Device
+	if err := db.First(&device, "serial_number = ?", "INFORM-PRESERVE").Error; err != nil {
+		t.Fatalf("load device: %v", err)
+	}
+	if device.ConnectionReqURL != "http://127.0.0.1:8400" {
+		t.Fatalf("device connection request URL=%q", device.ConnectionReqURL)
+	}
+	profile := loadConnectionProfile(t, db, device.ID)
+	if profile.DiscoveredURL != device.ConnectionReqURL {
+		t.Fatalf("profile URL=%q, device URL=%q", profile.DiscoveredURL, device.ConnectionReqURL)
+	}
+}
+
 func TestGormCommandRepoMarkSendingTransitionsAndAppendsEventTransactionally(t *testing.T) {
 	db := newGormCommandRepoTestDB(t)
 	previousRuntime := config.CurrentRuntime()

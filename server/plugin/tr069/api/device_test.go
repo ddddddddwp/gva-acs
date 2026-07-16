@@ -1,18 +1,94 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/ddddddddwp/gva-acs/server/global"
+	tr069Config "github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	deviceResponse "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/response"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
+
+func TestConnectionProfileAPIStoresManualOverrideWithoutExposingPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(new(model.Device), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	device := model.Device{OUI: "001122", SerialNumber: "PROFILE-API"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+
+	previousDB := global.GVA_DB
+	previousRuntime := tr069Config.CurrentRuntime()
+	global.GVA_DB = db
+	tr069Config.StoreRuntime(tr069Config.TR069Config{ConnectionRequest: tr069Config.ConnectionRequestConfig{
+		CredentialKeyVersion:    "v1",
+		CredentialEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x71}, 32)),
+	}})
+	t.Cleanup(func() {
+		global.GVA_DB = previousDB
+		tr069Config.StoreRuntime(previousRuntime.Settings)
+	})
+
+	engine := gin.New()
+	api := new(DeviceApi)
+	engine.PUT("/tr069/device/:deviceId/connection-profile", api.UpdateConnectionProfile)
+	engine.GET("/tr069/device/:deviceId/connection-profile", api.GetConnectionProfile)
+	payload := []byte(`{"overrideUrl":"http://127.0.0.1:8400","username":"manual-user","password":"manual-secret"}`)
+	profilePath := "/tr069/device/" + strconv.FormatUint(uint64(device.ID), 10) + "/connection-profile"
+	update := httptest.NewRequest(http.MethodPut, profilePath, bytes.NewReader(payload))
+	update.Header.Set("Content-Type", "application/json")
+	updateRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(updateRecorder, update)
+	if updateRecorder.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+	for _, forbidden := range []string{"manual-secret", "passwordCiphertext", "credentialKeyVersion"} {
+		if strings.Contains(updateRecorder.Body.String(), forbidden) {
+			t.Fatalf("update response leaked %q: %s", forbidden, updateRecorder.Body.String())
+		}
+	}
+
+	var profile model.ConnectionProfile
+	if err := db.First(&profile, "device_id = ?", device.ID).Error; err != nil {
+		t.Fatalf("load profile: %v", err)
+	}
+	if profile.OverrideURL != "http://127.0.0.1:8400" || profile.Username != "manual-user" || profile.CredentialSource != model.ConnectionCredentialSourceManual {
+		t.Fatalf("profile=%#v", profile)
+	}
+	if len(profile.PasswordCiphertext) == 0 || bytes.Contains(profile.PasswordCiphertext, []byte("manual-secret")) {
+		t.Fatal("manual password was not encrypted")
+	}
+
+	getRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, profilePath, nil))
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getRecorder.Code, getRecorder.Body.String())
+	}
+	for _, forbidden := range []string{"manual-secret", "passwordCiphertext", "credentialKeyVersion"} {
+		if strings.Contains(getRecorder.Body.String(), forbidden) {
+			t.Fatalf("get response leaked %q: %s", forbidden, getRecorder.Body.String())
+		}
+	}
+}
 
 func TestDeviceResponseExposesRPCMethods(t *testing.T) {
 	field, ok := reflect.TypeOf(deviceResponse.DeviceResponse{}).FieldByName("RPCMethods")

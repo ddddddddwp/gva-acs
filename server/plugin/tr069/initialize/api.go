@@ -13,6 +13,8 @@ func Api(ctx context.Context) {
 		{Path: "/tr069/device/list", Description: "获取设备列表", ApiGroup: "TR069", Method: "GET"},
 		{Path: "/tr069/device", Description: "创建设备", ApiGroup: "TR069", Method: "POST"},
 		{Path: "/tr069/device/:deviceId", Description: "删除设备", ApiGroup: "TR069", Method: "DELETE"},
+		{Path: "/tr069/device/:deviceId/connection-profile", Description: "获取设备 Connection Profile", ApiGroup: "TR069", Method: "GET"},
+		{Path: "/tr069/device/:deviceId/connection-profile", Description: "更新设备 Connection Profile", ApiGroup: "TR069", Method: "PUT"},
 
 		// FAP APIs
 		{Path: "/tr069/fap/:deviceId", Description: "获取FAP信息", ApiGroup: "TR069", Method: "GET"},
