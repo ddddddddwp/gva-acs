@@ -349,7 +349,7 @@ func TestCommandStoreAppendEventAndSaveXMLPreservePayloads(t *testing.T) {
 		t.Fatalf("append event: %v", err)
 	}
 
-	xmlPayload := []byte("<cwmp:Download><Password>secret</Password></cwmp:Download>\x00")
+	xmlPayload := []byte("<Download><Password>secret</Password></Download>")
 	if err := store.SaveXML(context.Background(), &model.CommandXML{
 		CommandID: command.CommandID,
 		Direction: "outbound",
@@ -376,6 +376,51 @@ func TestCommandStoreAppendEventAndSaveXMLPreservePayloads(t *testing.T) {
 	}
 	if string(gotXML.Payload) != string(xmlPayload) {
 		t.Fatalf("XML payload changed: got %q want %q", gotXML.Payload, xmlPayload)
+	}
+}
+
+func TestCommandStoreSaveXMLSanitizesCopyBeforePersistence(t *testing.T) {
+	db := newCommandStoreTestDB(t)
+	store := NewCommandStore(db)
+	payload := []byte(`<Envelope><ParameterValueStruct><Name>Device.ManagementServer.ConnectionRequestPassword</Name><Value>database-secret</Value></ParameterValueStruct><Password>download-secret</Password></Envelope>`)
+	original := append([]byte(nil), payload...)
+	record := &model.CommandXML{CommandID: "cmd-redact", Payload: payload, CreatedAt: time.Now()}
+
+	if err := store.SaveXML(context.Background(), record); err != nil {
+		t.Fatalf("save XML: %v", err)
+	}
+	if string(record.Payload) != string(original) {
+		t.Fatalf("caller payload mutated: got %q want %q", record.Payload, original)
+	}
+	var persisted model.CommandXML
+	if err := db.First(&persisted, "command_id = ?", record.CommandID).Error; err != nil {
+		t.Fatalf("load XML: %v", err)
+	}
+	if strings.Contains(string(persisted.Payload), "database-secret") || !strings.Contains(string(persisted.Payload), "******") {
+		t.Fatalf("persisted XML was not sanitized: %s", persisted.Payload)
+	}
+	if !strings.Contains(string(persisted.Payload), "download-secret") {
+		t.Fatalf("unrelated password changed: %s", persisted.Payload)
+	}
+}
+
+func TestCommandStoreSaveXMLRejectsMalformedPayloadWithoutCreatingRow(t *testing.T) {
+	db := newCommandStoreTestDB(t)
+	store := NewCommandStore(db)
+	record := &model.CommandXML{
+		CommandID: "cmd-malformed",
+		Payload:   []byte(`<Envelope><ParameterValueStruct><Name>Device.ManagementServer.ConnectionRequestPassword</Name><Value>database-secret</Envelope>`),
+	}
+
+	if err := store.SaveXML(context.Background(), record); !errors.Is(err, ErrInvalidCommandXML) {
+		t.Fatalf("save error = %v, want ErrInvalidCommandXML", err)
+	}
+	var count int64
+	if err := db.Model(new(model.CommandXML)).Where("command_id = ?", record.CommandID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("persisted rows = %d, want 0", count)
 	}
 }
 

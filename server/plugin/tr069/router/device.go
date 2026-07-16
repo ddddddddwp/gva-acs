@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/ddddddddwp/gva-acs/server/middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/api"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/redact"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,7 +18,7 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 		deviceRouter.POST("", deviceApi.CreateDevice)
 		deviceRouter.DELETE(":deviceId", deviceApi.DeleteDevice)
 		deviceRouter.GET(":deviceId/connection-profile", deviceApi.GetConnectionProfile)
-		deviceRouter.PUT(":deviceId/connection-profile", middleware.OperationRecord(), deviceApi.UpdateConnectionProfile)
+		deviceRouter.PUT(":deviceId/connection-profile", middleware.OperationRecordWithBodySanitizer(redact.ConnectionProfileJSON), deviceApi.UpdateConnectionProfile)
 	}
 
 	// FAP (Base Station) Specific Management
@@ -35,7 +36,7 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 		debugRouter.GET("trace/:requestId", debugApi.GetTrace)
 	}
 
-	commandRouter := Router.Group("command").Use(middleware.OperationRecord())
+	commandRouter := Router.Group("command").Use(middleware.OperationRecordWithBodySanitizer(redact.CommandJSON))
 	commandApi := new(api.CommandApi)
 	{
 		commandRouter.POST(":deviceId/getRPCMethods", commandApi.SyncRPCMethods)

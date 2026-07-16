@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/redact"
 )
 
 type CommandRecordSummary struct {
@@ -30,12 +31,12 @@ type CommandRecordSummary struct {
 
 func NewCommandRecordSummary(command model.Command) CommandRecordSummary {
 	return CommandRecordSummary{
-		CommandID: command.CommandID, DeviceID: command.DeviceID, DeviceKey: command.DeviceKey,
-		Operation: command.Operation, RetryOf: command.RetryOf, CommandKey: command.CommandKey,
-		Status: command.Status, RequestID: command.RequestID, PhaseDeadlineAt: command.PhaseDeadlineAt,
+		CommandID: redact.CommandText(command.CommandID), DeviceID: command.DeviceID, DeviceKey: redact.CommandText(command.DeviceKey),
+		Operation: redact.CommandText(command.Operation), RetryOf: redact.CommandText(command.RetryOf), CommandKey: sanitizedCommandKey(command.CommandKey),
+		Status: redact.CommandText(command.Status), RequestID: redact.CommandText(command.RequestID), PhaseDeadlineAt: command.PhaseDeadlineAt,
 		QueuedAt: command.QueuedAt, WaitingAt: command.WaitingAt, BuildingAt: command.BuildingAt,
-		SentAt: command.SentAt, FinishedAt: command.FinishedAt, FailureStage: command.FailureStage,
-		FaultCode: command.FaultCode, FaultString: command.FaultString,
+		SentAt: command.SentAt, FinishedAt: command.FinishedAt, FailureStage: redact.CommandText(command.FailureStage),
+		FaultCode: command.FaultCode, FaultString: redact.CommandText(command.FaultString),
 		CreatedAt: command.CreatedAt, UpdatedAt: command.UpdatedAt,
 	}
 }
@@ -57,13 +58,67 @@ type CommandRecordDetail struct {
 }
 
 func CommandRecordDetailFrom(command model.Command, events []model.CommandEvent, xmlRecords []model.CommandXML) CommandRecordDetail {
+	sanitizeCommandStrings(&command)
+	command.ParamsJSON = sanitizedCommandJSON(command.ParamsJSON)
+	command.ResultJSON = sanitizedCommandJSON(command.ResultJSON)
+	sanitizedEvents := append([]model.CommandEvent(nil), events...)
+	for index := range sanitizedEvents {
+		sanitizeCommandEventStrings(&sanitizedEvents[index])
+		sanitizedEvents[index].PayloadJSON = sanitizedCommandJSON(sanitizedEvents[index].PayloadJSON)
+	}
 	xml := make([]CommandXMLResponse, 0, len(xmlRecords))
 	for _, record := range xmlRecords {
+		sanitized, err := redact.CWMPXML(append([]byte(nil), record.Payload...))
+		if err != nil {
+			sanitized = nil
+		}
 		xml = append(xml, CommandXMLResponse{
-			ID: record.ID, Direction: record.Direction, Method: record.Method,
-			CWMPID: record.CWMPID, RequestID: record.RequestID,
-			XML: string(record.Payload), CreatedAt: record.CreatedAt,
+			ID: record.ID, Direction: redact.CommandText(record.Direction), Method: redact.CommandText(record.Method),
+			CWMPID: redact.CommandText(record.CWMPID), RequestID: redact.CommandText(record.RequestID),
+			XML: string(sanitized), CreatedAt: record.CreatedAt,
 		})
 	}
-	return CommandRecordDetail{Command: command, Events: events, XML: xml}
+	return CommandRecordDetail{Command: command, Events: sanitizedEvents, XML: xml}
+}
+
+func sanitizeCommandStrings(command *model.Command) {
+	command.CommandID = redact.CommandText(command.CommandID)
+	command.DeviceKey = redact.CommandText(command.DeviceKey)
+	command.Operation = redact.CommandText(command.Operation)
+	command.Origin = redact.CommandText(command.Origin)
+	command.RetryOf = redact.CommandText(command.RetryOf)
+	command.DedupKey = redact.CommandText(command.DedupKey)
+	command.CommandKey = sanitizedCommandKey(command.CommandKey)
+	command.Status = redact.CommandText(command.Status)
+	command.RequestID = redact.CommandText(command.RequestID)
+	command.FailureStage = redact.CommandText(command.FailureStage)
+	command.FaultString = redact.CommandText(command.FaultString)
+}
+
+func sanitizeCommandEventStrings(event *model.CommandEvent) {
+	event.CommandID = redact.CommandText(event.CommandID)
+	event.EventType = redact.CommandText(event.EventType)
+	event.FromStatus = redact.CommandText(event.FromStatus)
+	event.ToStatus = redact.CommandText(event.ToStatus)
+	event.Stage = redact.CommandText(event.Stage)
+	event.Message = redact.CommandText(event.Message)
+}
+
+func sanitizedCommandKey(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	sanitized := redact.CommandText(*value)
+	return &sanitized
+}
+
+func sanitizedCommandJSON(value model.LongTextJSON) model.LongTextJSON {
+	if len(value) == 0 {
+		return nil
+	}
+	sanitized, err := redact.CommandJSON(append([]byte(nil), value...))
+	if err != nil {
+		return nil
+	}
+	return model.LongTextJSON(sanitized)
 }

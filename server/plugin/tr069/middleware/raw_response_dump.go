@@ -35,7 +35,8 @@ func RawResponseDump(_ RawResponseDumpConfig) gin.HandlerFunc {
 		c.Next()
 		elapsed := time.Since(start)
 
-		respDump := dumpResponse(c.Writer.Status(), c.Writer.Header(), capture.body.Bytes(), requestID, elapsed, maxBytes)
+		logBody := sanitizedCWMPLogCopy(capture.body.Bytes())
+		respDump := dumpResponse(c.Writer.Status(), c.Writer.Header(), logBody, requestID, elapsed, maxBytes)
 		if settings.DumpRaw {
 			_, _ = fmt.Fprintln(os.Stdout, respDump)
 		}
@@ -46,7 +47,7 @@ func RawResponseDump(_ RawResponseDumpConfig) gin.HandlerFunc {
 			trace.Default.Add(requestID, trace.Entry{
 				At:      time.Now(),
 				Stage:   "raw.response",
-				Message: truncateBytes(capture.body.Bytes(), maxBytes),
+				Message: truncateBytes(logBody, maxBytes),
 				Fields: map[string]string{
 					"status": fmt.Sprintf("%d", c.Writer.Status()),
 				},

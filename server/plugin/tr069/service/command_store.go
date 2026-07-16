@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/redact"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -16,6 +17,7 @@ var (
 	ErrCommandTransitionConflict = errors.New("command transition conflict")
 	ErrInvalidCommandTransition  = errors.New("invalid command transition")
 	ErrInvalidCommandJSON        = errors.New("invalid command JSON")
+	ErrInvalidCommandXML         = errors.New("invalid command XML")
 	ErrInvalidCommandStatus      = errors.New("invalid command status")
 )
 
@@ -207,7 +209,13 @@ func (s *CommandStore) SaveXML(ctx context.Context, record *model.CommandXML) er
 	if record == nil {
 		return errors.New("command XML is required")
 	}
-	return s.db.WithContext(ctx).Create(record).Error
+	sanitized, err := redact.CWMPXML(append([]byte(nil), record.Payload...))
+	if err != nil {
+		return ErrInvalidCommandXML
+	}
+	copyRecord := *record
+	copyRecord.Payload = sanitized
+	return s.db.WithContext(ctx).Create(&copyRecord).Error
 }
 
 func (s *CommandStore) HeadForDevice(ctx context.Context, deviceID uint) (model.Command, error) {

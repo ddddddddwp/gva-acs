@@ -12,6 +12,7 @@ import (
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/infolog"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/redact"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -75,7 +76,8 @@ func RawDump(_ RawDumpConfig) gin.HandlerFunc {
 			}
 		}
 
-		reqDump := dumpRequest(c.Request, reqBody, requestID, settings.DumpRedactAuth, settings.DumpRedactCookie, maxBytes)
+		logBody := sanitizedCWMPLogCopy(reqBody)
+		reqDump := dumpRequest(c.Request, logBody, requestID, settings.DumpRedactAuth, settings.DumpRedactCookie, maxBytes)
 		if settings.DumpRaw {
 			_, _ = fmt.Fprintln(os.Stdout, reqDump)
 		}
@@ -90,12 +92,20 @@ func RawDump(_ RawDumpConfig) gin.HandlerFunc {
 			trace.Default.Add(requestID, trace.Entry{
 				At:      time.Now(),
 				Stage:   "raw.request",
-				Message: truncateBytes(reqBody, maxBytes),
+				Message: truncateBytes(logBody, maxBytes),
 			})
 		}
 
 		c.Next()
 	}
+}
+
+func sanitizedCWMPLogCopy(body []byte) []byte {
+	sanitized, err := redact.CWMPXML(append([]byte(nil), body...))
+	if err != nil {
+		return []byte("<REDACTED: malformed XML>")
+	}
+	return sanitized
 }
 
 func rawDumpEnabled(settings config.TR069Config) bool {

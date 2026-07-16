@@ -65,7 +65,7 @@ func TestCommandRecordAPIListHidesDetailPayloadAndDetailReturnsExactXML(t *testi
 	if err := json.Unmarshal(detailRecorder.Body.Bytes(), &detailResponse); err != nil {
 		t.Fatalf("decode detail response: %v", err)
 	}
-	if detailResponse.Code != 0 || len(detailResponse.Data.Events) < 2 || len(detailResponse.Data.XML) != 2 {
+	if detailResponse.Code != 0 || len(detailResponse.Data.Events) < 3 || len(detailResponse.Data.XML) != 3 {
 		t.Fatalf("detail response = %#v, want command events and XML", detailResponse)
 	}
 	if got := detailResponse.Data.XML[0].XML; got != `<cwmp:GetParameterValues id="42"/>` {
@@ -73,6 +73,28 @@ func TestCommandRecordAPIListHidesDetailPayloadAndDetailReturnsExactXML(t *testi
 	}
 	if got := detailResponse.Data.XML[1].XML; got != `<cwmp:GetParameterValuesResponse id="42"/>` {
 		t.Fatalf("inbound XML = %q, want exact UTF-8 payload", got)
+	}
+	detailBody := detailRecorder.Body.String()
+	for _, secret := range []string{
+		"__GVA_TR069_CONNECTION_REQUEST_PASSWORD__",
+		"ciphertext-v1:legacy-result",
+		"ciphertext-v1:legacy-event",
+		"base64-legacy-ciphertext",
+		"legacy-xml-secret",
+	} {
+		if strings.Contains(detailBody, secret) {
+			t.Fatalf("detail response leaked protected value %q: %s", secret, detailBody)
+		}
+	}
+	if !strings.Contains(detailBody, "******") {
+		t.Fatalf("detail response did not contain redaction marker: %s", detailBody)
+	}
+	if !strings.Contains(detailBody, "top-secret") {
+		t.Fatalf("unrelated password was changed: %s", detailBody)
+	}
+	if strings.Contains(listRecorder.Body.String(), "__GVA_TR069_CONNECTION_REQUEST_PASSWORD__") ||
+		strings.Contains(listRecorder.Body.String(), "ciphertext-v1:") {
+		t.Fatalf("list response leaked protected command text: %s", listRecorder.Body.String())
 	}
 }
 
@@ -178,14 +200,14 @@ func seedCommandRecordAPI(t *testing.T) (*gorm.DB, model.Device, model.Command) 
 		DeviceID:     device.ID,
 		DeviceKey:    "001122-RECORD-API",
 		Operation:    "GetParameterValues",
-		ParamsJSON:   model.LongTextJSON(`{"paths":["Device."],"password":"top-secret"}`),
-		ResultJSON:   model.LongTextJSON(`{"fault":"sample"}`),
+		ParamsJSON:   model.LongTextJSON(`{"paths":["Device."],"parameters":[{"name":"Device.ManagementServer.ConnectionRequestPassword","value":"__GVA_TR069_CONNECTION_REQUEST_PASSWORD__"},{"name":"Download.Password","value":"top-secret"}]}`),
+		ResultJSON:   model.LongTextJSON(`{"parameters":[{"name":"Device.ManagementServer.ConnectionRequestPassword","value":"ciphertext-v1:legacy-result"}],"fault":"sample"}`),
 		Status:       model.CommandStatusFailed,
 		QueuedAt:     now.Add(-time.Minute),
 		FinishedAt:   &finishedAt,
 		FailureStage: "cwmp.fault",
 		FaultCode:    9002,
-		FaultString:  "Internal error",
+		FaultString:  "__GVA_TR069_CONNECTION_REQUEST_PASSWORD__",
 		CreatedAt:    now.Add(-time.Minute),
 		UpdatedAt:    now,
 	}
@@ -194,7 +216,8 @@ func seedCommandRecordAPI(t *testing.T) (*gorm.DB, model.Device, model.Command) 
 	}
 	events := []model.CommandEvent{
 		{CommandID: command.CommandID, EventType: model.CommandEventCreated, ToStatus: model.CommandStatusWaitingDevice, CreatedAt: now.Add(-time.Minute)},
-		{CommandID: command.CommandID, EventType: "COMMAND_FAILED", FromStatus: model.CommandStatusSent, ToStatus: model.CommandStatusFailed, Stage: "cwmp.fault", Message: "Internal error", CreatedAt: now},
+		{CommandID: command.CommandID, EventType: "COMMAND_FAILED", FromStatus: model.CommandStatusSent, ToStatus: model.CommandStatusFailed, Stage: "cwmp.fault", Message: "ciphertext-v1:legacy-event", PayloadJSON: model.LongTextJSON(`"__GVA_TR069_CONNECTION_REQUEST_PASSWORD__"`), CreatedAt: now},
+		{CommandID: command.CommandID, EventType: "LEGACY_PAYLOAD", Stage: "legacy", Message: "unrelated event", PayloadJSON: model.LongTextJSON(`{"password_ciphertext":"base64-legacy-ciphertext","password":"download-secret"}`), CreatedAt: now},
 	}
 	if err := db.Create(&events).Error; err != nil {
 		t.Fatalf("create events: %v", err)
@@ -202,6 +225,7 @@ func seedCommandRecordAPI(t *testing.T) (*gorm.DB, model.Device, model.Command) 
 	xml := []model.CommandXML{
 		{CommandID: command.CommandID, Direction: "outbound", Method: command.Operation, CWMPID: "42", Payload: []byte(`<cwmp:GetParameterValues id="42"/>`), CreatedAt: now.Add(-time.Second)},
 		{CommandID: command.CommandID, Direction: "inbound", Method: command.Operation + "Response", CWMPID: "42", Payload: []byte(`<cwmp:GetParameterValuesResponse id="42"/>`), CreatedAt: now},
+		{CommandID: command.CommandID, Direction: "outbound", Method: "SetParameterValues", CWMPID: "43", Payload: []byte(`<Envelope><ParameterValueStruct><Name>Device.ManagementServer.ConnectionRequestPassword</Name><Value>legacy-xml-secret</Value></ParameterValueStruct></Envelope>`), CreatedAt: now},
 	}
 	if err := db.Create(&xml).Error; err != nil {
 		t.Fatalf("create XML records: %v", err)

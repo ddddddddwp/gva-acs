@@ -1,13 +1,16 @@
 package initialize
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	gormmiddleware "github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware/gorm_middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/redact"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -26,6 +29,7 @@ func Gorm(ctx context.Context) {
 		new(model.Tr069Alarm),
 		new(model.SupportTr069Alarm),
 		new(model.ConnectionProfile),
+		new(tr069MigrationMarker),
 	)
 	if err != nil {
 		global.GVA_LOG.Error("TR069 Plugin AutoMigrate Failed", zap.Error(err))
@@ -33,6 +37,9 @@ func Gorm(ctx context.Context) {
 	}
 	if err := migrateConnectionProfiles(ctx, global.GVA_DB); err != nil {
 		global.GVA_LOG.Error("TR069 ConnectionProfile Migration Failed", zap.Error(err))
+	}
+	if err := sanitizeStoredCommandXML(ctx, global.GVA_DB); err != nil {
+		global.GVA_LOG.Error("TR069 Command XML Sanitization Failed", zap.Error(err))
 	}
 
 	if global.GVA_DB != nil {
@@ -43,6 +50,85 @@ func Gorm(ctx context.Context) {
 		))); err != nil {
 			global.GVA_LOG.Error("TR069 DataModelValue IngestFilter Init Failed", zap.Error(err))
 		}
+	}
+}
+
+const (
+	commandXMLRedactionMigration = "connection_request_password_xml_redaction_v1"
+	commandXMLSanitizeBatchSize  = 100
+)
+
+type tr069MigrationMarker struct {
+	Name        string    `gorm:"primaryKey;size:128"`
+	CompletedAt time.Time `gorm:"not null"`
+}
+
+func (tr069MigrationMarker) TableName() string { return "tr069_migration_markers" }
+
+func sanitizeStoredCommandXML(ctx context.Context, db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	if err := db.WithContext(ctx).AutoMigrate(new(tr069MigrationMarker)); err != nil {
+		return err
+	}
+	const parameterName = "Device.ManagementServer.ConnectionRequestPassword"
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var completed int64
+		if err := tx.Model(new(tr069MigrationMarker)).Where("name = ?", commandXMLRedactionMigration).Count(&completed).Error; err != nil {
+			return err
+		}
+		if completed > 0 {
+			return nil
+		}
+
+		var records []model.CommandXML
+		candidates, err := commandXMLRedactionCandidates(tx, parameterName)
+		if err != nil {
+			return err
+		}
+		if err := candidates.Order("id ASC").FindInBatches(&records, commandXMLSanitizeBatchSize, func(_ *gorm.DB, _ int) error {
+			for _, record := range records {
+				if !bytes.Contains(record.Payload, []byte(parameterName)) {
+					continue
+				}
+				sanitized, err := redact.CWMPXML(record.Payload)
+				if err != nil {
+					if err := tx.Delete(new(model.CommandXML), record.ID).Error; err != nil {
+						return err
+					}
+					continue
+				}
+				if bytes.Equal(sanitized, record.Payload) {
+					continue
+				}
+				if err := tx.Model(new(model.CommandXML)).Where("id = ?", record.ID).Update("payload", sanitized).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&tr069MigrationMarker{Name: commandXMLRedactionMigration, CompletedAt: time.Now()}).Error
+	})
+}
+
+func commandXMLRedactionCandidates(tx *gorm.DB, parameterName string) (*gorm.DB, error) {
+	query := tx.Model(new(model.CommandXML)).Select("id", "payload")
+	switch tx.Dialector.Name() {
+	case "sqlite":
+		return query.Where("instr(CAST(payload AS TEXT), ?) > 0", parameterName), nil
+	case "mysql":
+		return query.Where("LOCATE(?, CONVERT(payload USING utf8mb4)) > 0", parameterName), nil
+	case "postgres":
+		return query.Where("POSITION(? IN convert_from(payload, 'UTF8')) > 0", parameterName), nil
+	case "sqlserver":
+		return query.Where("CHARINDEX(?, CONVERT(varchar(max), payload)) > 0", parameterName), nil
+	case "oracle":
+		return query.Where("DBMS_LOB.INSTR(payload, UTL_RAW.CAST_TO_RAW(?)) > 0", parameterName), nil
+	default:
+		return nil, fmt.Errorf("unsupported command XML migration dialect %q", tx.Dialector.Name())
 	}
 }
 
