@@ -89,7 +89,9 @@ func (r *ConnectionProfileRepository) Collect(ctx context.Context, deviceID uint
 			updates["discovered_url"] = urlValue
 			profile.DiscoveredURL = urlValue
 		}
-		if profile.CredentialSource != model.ConnectionCredentialSourceManual {
+		credentialsMutable := profile.ProvisionState != model.ConnectionProfileStateProvisioning &&
+			profile.ProvisionState != model.ConnectionProfileStateFailed
+		if profile.CredentialSource != model.ConnectionCredentialSourceManual && credentialsMutable {
 			if usernameValue != "" && usernameValue != profile.Username {
 				updates["username"] = usernameValue
 				profile.Username = usernameValue

@@ -312,3 +312,58 @@ func TestProvisionerRunRecoversDiscoveredButDoesNotRetryFailed(t *testing.T) {
 		t.Fatalf("failed device commands = %d, want 0", failedCommands)
 	}
 }
+
+func TestProvisionerRunReconcilesProvisioningProfileWhoseCommandIsTerminal(t *testing.T) {
+	provisioner, repository, db := newProvisionerTest(t, func(context.Context, string) error { return nil })
+	device := createProvisioningCandidate(t, repository, db, "PROVISION-TERMINAL-RECOVERY")
+	result, err := provisioner.Ensure(context.Background(), device.ID)
+	if err != nil {
+		t.Fatalf("Ensure(): %v", err)
+	}
+	command := loadProvisioningCommand(t, db, result.CommandID)
+	finishedAt := time.Now()
+	if _, err := service.NewCommandStore(db).Transition(context.Background(), service.CommandTransition{
+		CommandID:       command.CommandID,
+		FromStatuses:    []string{command.Status},
+		ToStatus:        model.CommandStatusFailed,
+		ExpectedVersion: command.Version,
+		EventType:       "TEST_CRASH_WINDOW",
+		Stage:           "redis.enqueue",
+		Message:         "simulated terminal command before profile compensation",
+		Updates: map[string]any{
+			"failure_stage":     "redis.enqueue",
+			"fault_string":      "simulated terminal command before profile compensation",
+			"finished_at":       finishedAt,
+			"phase_deadline_at": nil,
+		},
+	}); err != nil {
+		t.Fatalf("terminate command without profile update: %v", err)
+	}
+	if got := loadConnectionProfile(t, db, device.ID).ProvisionState; got != model.ConnectionProfileStateProvisioning {
+		t.Fatalf("precondition profile state = %s", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		provisioner.Run(ctx)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if loadConnectionProfile(t, db, device.ID).ProvisionState == model.ConnectionProfileStateFailed {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after reconciliation")
+	}
+	profile := loadConnectionProfile(t, db, device.ID)
+	if profile.ProvisionState != model.ConnectionProfileStateFailed || profile.ProvisionCommandID != command.CommandID || !strings.Contains(profile.LastError, "simulated terminal") {
+		t.Fatalf("reconciled profile = %#v", profile)
+	}
+}

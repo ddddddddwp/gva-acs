@@ -186,6 +186,52 @@ func TestConnectionProfileResolveRejectsCredentialsUntilProfileIsReady(t *testin
 	}
 }
 
+func TestConnectionProfileCollectDoesNotAdvanceOrOverwriteProvisioningAndFailedCredentials(t *testing.T) {
+	repo, db := newConnectionProfileRepositoryTest(t)
+	device := createConnectionProfileDevice(t, db, "PROFILE-STATE-GUARD")
+	if _, err := repo.Collect(context.Background(), device.ID, map[string]string{
+		connectionRequestURLName: "http://127.0.0.1:8400",
+	}); err != nil {
+		t.Fatalf("collect URL: %v", err)
+	}
+	if err := repo.StoreCredential(context.Background(), db, device.ID, "generated-user", "generated-secret", model.ConnectionCredentialSourceAuto); err != nil {
+		t.Fatalf("store generated credential: %v", err)
+	}
+
+	for _, state := range []string{model.ConnectionProfileStateProvisioning, model.ConnectionProfileStateFailed} {
+		t.Run(state, func(t *testing.T) {
+			if err := db.Model(new(model.ConnectionProfile)).Where("device_id = ?", device.ID).Updates(map[string]any{
+				"provision_state":      state,
+				"provision_command_id": "system-spv",
+			}).Error; err != nil {
+				t.Fatalf("set guarded state: %v", err)
+			}
+			before := loadConnectionProfile(t, db, device.ID)
+			result, err := repo.Collect(context.Background(), device.ID, map[string]string{
+				connectionRequestURLName:      "http://127.0.0.1:8500",
+				connectionRequestUsernameName: "device-old-user",
+				connectionRequestPasswordName: "device-old-secret",
+			})
+			if err != nil {
+				t.Fatalf("collect guarded credentials: %v", err)
+			}
+			after := loadConnectionProfile(t, db, device.ID)
+			if after.ProvisionState != state || result.Profile.ProvisionState != state {
+				t.Fatalf("provision state advanced: result=%q stored=%q", result.Profile.ProvisionState, after.ProvisionState)
+			}
+			if after.Username != before.Username || string(after.PasswordCiphertext) != string(before.PasswordCiphertext) || after.CredentialKeyVersion != before.CredentialKeyVersion {
+				t.Fatalf("guarded credentials changed: before=%#v after=%#v", before, after)
+			}
+			if after.DiscoveredURL != "http://127.0.0.1:8500" {
+				t.Fatalf("discovered URL was not refreshed: %q", after.DiscoveredURL)
+			}
+			if result.NeedsProvisioning {
+				t.Fatal("guarded state requested duplicate automatic provisioning")
+			}
+		})
+	}
+}
+
 func containsAny(value string, candidates ...string) bool {
 	for _, candidate := range candidates {
 		if candidate != "" && strings.Contains(value, candidate) {

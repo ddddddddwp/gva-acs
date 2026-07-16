@@ -70,6 +70,15 @@ func (p *ConnectionCredentialProvisioner) Run(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	reconciliationIDs, err := p.repository.ListProvisioningReconciliations(ctx)
+	if err == nil {
+		for _, deviceID := range reconciliationIDs {
+			if ctx.Err() != nil {
+				return
+			}
+			_, _ = p.Ensure(ctx, deviceID)
+		}
+	}
 	deviceIDs, err := p.repository.ListProvisioningCandidates(ctx)
 	if err == nil {
 		for _, deviceID := range deviceIDs {
@@ -87,6 +96,21 @@ func (p *ConnectionCredentialProvisioner) Run(ctx context.Context) {
 			_, _ = p.Ensure(ctx, deviceID)
 		}
 	}
+}
+
+func (r *ConnectionProfileRepository) ListProvisioningReconciliations(ctx context.Context) ([]uint, error) {
+	if r == nil || r.database() == nil {
+		return nil, errors.New("connection profile repository database is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var deviceIDs []uint
+	err := r.database().WithContext(ctx).Model(new(model.ConnectionProfile)).
+		Where("provision_state = ? AND provision_command_id <> ?", model.ConnectionProfileStateProvisioning, "").
+		Order("device_id ASC").
+		Pluck("device_id", &deviceIDs).Error
+	return deviceIDs, err
 }
 
 func (p *ConnectionCredentialProvisioner) Ensure(ctx context.Context, deviceID uint) (service.SubmitResult, error) {
