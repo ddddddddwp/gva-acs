@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/ddddddddwp/gva-acs/server/middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/api"
 	"github.com/gin-gonic/gin"
 )
@@ -32,12 +33,21 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 		debugRouter.GET("trace/:requestId", debugApi.GetTrace)
 	}
 
-	commandRouter := Router.Group("command")
+	commandRouter := Router.Group("command").Use(middleware.OperationRecord())
 	commandApi := new(api.CommandApi)
 	{
 		commandRouter.POST(":deviceId/getRPCMethods", commandApi.SyncRPCMethods)
 		commandRouter.POST(":deviceId/getParameterValues", commandApi.GetParameterValues)
+		commandRouter.POST(":deviceId/getParameterNames", commandApi.GetParameterNames)
+		commandRouter.POST(":deviceId/getParameterAttributes", commandApi.GetParameterAttributes)
 		commandRouter.POST(":deviceId/setParameterValues", commandApi.SetParameterValues)
+		commandRouter.POST(":deviceId/setParameterAttributes", commandApi.SetParameterAttributes)
+		commandRouter.POST(":deviceId/addObject", commandApi.AddObject)
+		commandRouter.POST(":deviceId/deleteObject", commandApi.DeleteObject)
+		commandRouter.POST(":deviceId/download", commandApi.Download)
+		commandRouter.POST(":deviceId/upload", commandApi.Upload)
+		commandRouter.POST(":deviceId/reboot", commandApi.Reboot)
+		commandRouter.POST(":deviceId/factoryReset", commandApi.FactoryReset)
 	}
 
 	dmRouter := Router.Group("datamodel")

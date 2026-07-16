@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	"github.com/ddddddddwp/gva-acs/server/middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
@@ -55,6 +56,7 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 	}
 
 	r := group.Group("tr069")
+	r.Use(middleware.JWTAuth()).Use(middleware.CasbinHandler())
 	deviceRouter := new(router.DeviceRouter)
 	deviceRouter.InitDeviceRouter(r)
 	alarmRouter := new(router.AlarmRouter)

@@ -1,16 +1,19 @@
 import service from '@/utils/request'
 import { deviceParameterSyncPayload } from '../utils/device-actions'
 
+const postCommand = (deviceId, operation, data) => service({
+  url: `/tr069/command/${deviceId}/${operation}`,
+  method: 'post',
+  ...(data === undefined ? {} : { data })
+})
+
 /**
  * 获取设备支持的RPC方法列表
  * @param {number} deviceId 设备ID
  * @returns {Promise} RPC方法列表
  */
 export const getRPCMethods = (deviceId) => {
-  return service({
-    url: `/tr069/command/${deviceId}/getRPCMethods`,
-    method: 'post'
-  })
+  return postCommand(deviceId, 'getRPCMethods')
 }
 
 /**
@@ -21,12 +24,12 @@ export const getRPCMethods = (deviceId) => {
  * @returns {Promise} 参数值结果
  */
 export const getParameterValues = (deviceId, data) => {
-  return service({
-    url: `/tr069/command/${deviceId}/getParameterValues`,
-    method: 'post',
-    data
-  })
+  return postCommand(deviceId, 'getParameterValues', data)
 }
+
+export const getParameterNames = (deviceId, data) => postCommand(deviceId, 'getParameterNames', data)
+
+export const getParameterAttributes = (deviceId, data) => postCommand(deviceId, 'getParameterAttributes', data)
 
 /**
  * 设置设备参数值 (SetParameterValues)
@@ -37,12 +40,22 @@ export const getParameterValues = (deviceId, data) => {
  * @returns {Promise} 设置结果
  */
 export const setParameterValues = (deviceId, data) => {
-  return service({
-    url: `/tr069/command/${deviceId}/setParameterValues`,
-    method: 'post',
-    data
-  })
+  return postCommand(deviceId, 'setParameterValues', data)
 }
+
+export const setParameterAttributes = (deviceId, data) => postCommand(deviceId, 'setParameterAttributes', data)
+
+export const addObject = (deviceId, data) => postCommand(deviceId, 'addObject', data)
+
+export const deleteObject = (deviceId, data) => postCommand(deviceId, 'deleteObject', data)
+
+export const downloadFile = (deviceId, data) => postCommand(deviceId, 'download', data)
+
+export const uploadFile = (deviceId, data) => postCommand(deviceId, 'upload', data)
+
+export const rebootDevice = (deviceId, data) => postCommand(deviceId, 'reboot', data)
+
+export const factoryResetDevice = (deviceId) => postCommand(deviceId, 'factoryReset')
 
 /**
  * 全量数据模型同步

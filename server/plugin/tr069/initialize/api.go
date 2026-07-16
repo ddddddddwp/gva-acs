@@ -23,9 +23,18 @@ func Api(ctx context.Context) {
 		{Path: "/tr069/debug/trace/:requestId", Description: "获取调试追踪", ApiGroup: "TR069", Method: "GET"},
 
 		// Command APIs
-		{Path: "/tr069/command/:deviceId/getRPCMethods", Description: "同步RPC方法", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/getRPCMethods", Description: "查询设备能力", ApiGroup: "TR069", Method: "POST"},
 		{Path: "/tr069/command/:deviceId/getParameterValues", Description: "获取参数值", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/getParameterNames", Description: "获取参数名称", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/getParameterAttributes", Description: "获取参数属性", ApiGroup: "TR069", Method: "POST"},
 		{Path: "/tr069/command/:deviceId/setParameterValues", Description: "设置参数值", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/setParameterAttributes", Description: "设置参数属性", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/addObject", Description: "添加CWMP对象", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/deleteObject", Description: "删除CWMP对象", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/download", Description: "下发文件下载", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/upload", Description: "下发文件上传", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/reboot", Description: "重启设备", ApiGroup: "TR069", Method: "POST"},
+		{Path: "/tr069/command/:deviceId/factoryReset", Description: "恢复出厂设置", ApiGroup: "TR069", Method: "POST"},
 
 		// DataModel APIs
 		{Path: "/tr069/datamodel/:deviceId/sync", Description: "全量同步数据模型", ApiGroup: "TR069", Method: "POST"},

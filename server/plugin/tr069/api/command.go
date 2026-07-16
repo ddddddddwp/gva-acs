@@ -34,6 +34,29 @@ func commandSubmitMessage(result service.SubmitResult) string {
 	return "任务已创建并进入持久化队列"
 }
 
+func submitCommand(c *gin.Context, operation string, request any) {
+	deviceID, err := strconv.ParseUint(c.Param("deviceId"), 10, 64)
+	if err != nil || deviceID == 0 {
+		response.FailWithMessage("设备ID错误", c)
+		return
+	}
+	result, err := commandService.Submit(c.Request.Context(), uint(deviceID), operation, request)
+	if err != nil {
+		response.FailWithMessage(commandFailureMessage(err), c)
+		return
+	}
+	response.OkWithDetailed(result, commandSubmitMessage(result), c)
+}
+
+func bindAndSubmitCommand[T any](c *gin.Context, operation string) {
+	var in T
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.FailWithMessage("参数错误", c)
+		return
+	}
+	submitCommand(c, operation, in)
+}
+
 // SyncRPCMethods
 // @Tags TR069
 // @Summary 下发 GetRPCMethods
@@ -44,13 +67,7 @@ func commandSubmitMessage(result service.SubmitResult) string {
 // @Success 200 {object} response.Response{data=map[string]string,msg=string} "下发成功"
 // @Router /tr069/command/{deviceId}/getRPCMethods [post]
 func (a *CommandApi) SyncRPCMethods(c *gin.Context) {
-	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
-	result, err := commandService.Submit(c.Request.Context(), uint(deviceId), "GetRPCMethods", nil)
-	if err != nil {
-		response.FailWithMessage(commandFailureMessage(err), c)
-		return
-	}
-	response.OkWithDetailed(result, commandSubmitMessage(result), c)
+	submitCommand(c, "GetRPCMethods", nil)
 }
 
 // GetParameterValues
@@ -64,18 +81,17 @@ func (a *CommandApi) SyncRPCMethods(c *gin.Context) {
 // @Success 200 {object} response.Response{data=map[string]string,msg=string} "下发成功"
 // @Router /tr069/command/{deviceId}/getParameterValues [post]
 func (a *CommandApi) GetParameterValues(c *gin.Context) {
-	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
-	var in req.GetParameterValuesRequest
-	if err := c.ShouldBindJSON(&in); err != nil {
-		response.FailWithMessage("参数错误", c)
-		return
-	}
-	result, err := commandService.Submit(c.Request.Context(), uint(deviceId), "GetParameterValues", in)
-	if err != nil {
-		response.FailWithMessage(commandFailureMessage(err), c)
-		return
-	}
-	response.OkWithDetailed(result, commandSubmitMessage(result), c)
+	bindAndSubmitCommand[req.GetParameterValuesRequest](c, "GetParameterValues")
+}
+
+// GetParameterNames 下发 GetParameterNames。
+func (a *CommandApi) GetParameterNames(c *gin.Context) {
+	bindAndSubmitCommand[req.GetParameterNamesRequest](c, "GetParameterNames")
+}
+
+// GetParameterAttributes 下发 GetParameterAttributes。
+func (a *CommandApi) GetParameterAttributes(c *gin.Context) {
+	bindAndSubmitCommand[req.GetParameterAttributesRequest](c, "GetParameterAttributes")
 }
 
 // SetParameterValues
@@ -89,16 +105,40 @@ func (a *CommandApi) GetParameterValues(c *gin.Context) {
 // @Success 200 {object} response.Response{data=map[string]string,msg=string} "下发成功"
 // @Router /tr069/command/{deviceId}/setParameterValues [post]
 func (a *CommandApi) SetParameterValues(c *gin.Context) {
-	deviceId, _ := strconv.Atoi(c.Param("deviceId"))
-	var in req.SetParameterValuesRequest
-	if err := c.ShouldBindJSON(&in); err != nil {
-		response.FailWithMessage("参数错误", c)
-		return
-	}
-	result, err := commandService.Submit(c.Request.Context(), uint(deviceId), "SetParameterValues", in)
-	if err != nil {
-		response.FailWithMessage(commandFailureMessage(err), c)
-		return
-	}
-	response.OkWithDetailed(result, commandSubmitMessage(result), c)
+	bindAndSubmitCommand[req.SetParameterValuesRequest](c, "SetParameterValues")
+}
+
+// SetParameterAttributes 下发 SetParameterAttributes。
+func (a *CommandApi) SetParameterAttributes(c *gin.Context) {
+	bindAndSubmitCommand[req.SetParameterAttributesRequest](c, "SetParameterAttributes")
+}
+
+// AddObject 下发 AddObject。
+func (a *CommandApi) AddObject(c *gin.Context) {
+	bindAndSubmitCommand[req.ObjectRequest](c, "AddObject")
+}
+
+// DeleteObject 下发 CWMP DeleteObject；它不会删除 GVA 中的设备记录。
+func (a *CommandApi) DeleteObject(c *gin.Context) {
+	bindAndSubmitCommand[req.ObjectRequest](c, "DeleteObject")
+}
+
+// Download 下发 Download。
+func (a *CommandApi) Download(c *gin.Context) {
+	bindAndSubmitCommand[req.DownloadRequest](c, "Download")
+}
+
+// Upload 下发 Upload。
+func (a *CommandApi) Upload(c *gin.Context) {
+	bindAndSubmitCommand[req.UploadRequest](c, "Upload")
+}
+
+// Reboot 下发 Reboot。
+func (a *CommandApi) Reboot(c *gin.Context) {
+	bindAndSubmitCommand[req.RebootRequest](c, "Reboot")
+}
+
+// FactoryReset 下发 FactoryReset。
+func (a *CommandApi) FactoryReset(c *gin.Context) {
+	submitCommand(c, "FactoryReset", nil)
 }

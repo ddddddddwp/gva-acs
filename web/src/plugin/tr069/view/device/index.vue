@@ -47,9 +47,16 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="gpv" :disabled="!canIssueDeviceCommand(scope.row)">获取参数</el-dropdown-item>
-                  <el-dropdown-item command="spv" :disabled="!canIssueDeviceCommand(scope.row)">配置参数</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>删除设备</el-dropdown-item>
+                  <template v-for="group in RPC_ACTION_GROUPS" :key="group.label">
+                    <el-dropdown-item disabled class="rpc-group-title">{{ group.label }}</el-dropdown-item>
+                    <el-dropdown-item
+                      v-for="action in group.actions"
+                      :key="action.key"
+                      :command="action.key"
+                      :disabled="!canIssueRPCAction(scope.row, action)"
+                    >{{ action.label }}</el-dropdown-item>
+                  </template>
+                  <el-dropdown-item command="deleteDevice" divided class="delete-device-action">删除设备</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -92,60 +99,11 @@
       </template>
     </el-dialog>
 
-    <el-dialog title="GetParameterValues" v-model="gpvDialogVisible" width="720px" append-to-body>
-      <el-form :model="gpvForm" label-width="140px">
-        <el-form-item label="参数路径(一行一个)">
-          <el-input v-model="gpvForm.pathsText" type="textarea" :rows="10" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="gpvDialogVisible = false">取 消</el-button>
-          <el-button type="primary" @click="submitGPV" :loading="gpvSubmitting" :disabled="!canIssueDeviceCommand(currentRow)">确 定</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <el-dialog title="SetParameterValues" v-model="spvDialogVisible" width="820px" append-to-body>
-      <el-form :model="spvForm" label-width="140px">
-        <el-form-item label="ParameterKey">
-          <el-input v-model="spvForm.parameterKey" />
-        </el-form-item>
-        <el-form-item label="参数列表">
-          <el-table :data="spvForm.parameters" size="small">
-            <el-table-column label="Name" min-width="360">
-              <template #default="scope">
-                <el-input v-model="scope.row.name" />
-              </template>
-            </el-table-column>
-            <el-table-column label="Type" min-width="160">
-              <template #default="scope">
-                <el-input v-model="scope.row.type" />
-              </template>
-            </el-table-column>
-            <el-table-column label="Value" min-width="220">
-              <template #default="scope">
-                <el-input v-model="scope.row.value" />
-              </template>
-            </el-table-column>
-            <el-table-column label="" width="80">
-              <template #default="scope">
-                <el-button type="text" size="small" @click="removeSPVRow(scope.$index)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div class="mt-3">
-            <el-button type="primary" size="small" @click="addSPVRow">新增一行</el-button>
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="spvDialogVisible = false">取 消</el-button>
-          <el-button type="primary" @click="submitSPV" :loading="spvSubmitting" :disabled="!canIssueDeviceCommand(currentRow)">确 定</el-button>
-        </div>
-      </template>
-    </el-dialog>
+    <rpc-command-dialog
+      v-model="rpcDialogVisible"
+      :row="currentRow"
+      :action="currentRPCAction"
+    />
 
     <data-model-viewer
       v-model="dmDrawerVisible"
@@ -158,9 +116,15 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getDeviceList, createDevice, deleteDevice } from '@/plugin/tr069/api/device'
-import { fullDataModelSync, getParameterValues, setParameterValues } from '@/plugin/tr069/api/command'
-import { canIssueDeviceCommand } from '@/plugin/tr069/utils/device-actions'
+import { fullDataModelSync } from '@/plugin/tr069/api/command'
+import {
+  RPC_ACTION_GROUPS,
+  canIssueDeviceCommand,
+  canIssueRPCAction,
+  findRPCAction
+} from '@/plugin/tr069/utils/device-actions'
 import DataModelViewer from './components/data-model-viewer.vue'
+import RpcCommandDialog from './components/rpc-command-dialog.vue'
 
 // 响应式数据
 const loading = ref(false)
@@ -177,15 +141,8 @@ const formData = reactive({
 })
 const addFormRef = ref(null)
 const currentRow = ref({})
-const gpvDialogVisible = ref(false)
-const gpvSubmitting = ref(false)
-const gpvForm = reactive({ pathsText: '' })
-const spvDialogVisible = ref(false)
-const spvSubmitting = ref(false)
-const spvForm = reactive({
-  parameterKey: '',
-  parameters: [{ name: '', type: 'xsd:string', value: '' }]
-})
+const currentRPCAction = ref()
+const rpcDialogVisible = ref(false)
 const syncingDeviceIds = ref(new Set())
 const dmDrawerVisible = ref(false)
 
@@ -269,81 +226,6 @@ const deleteRow = async (row) => {
   }
 }
 
-const selectCommandDevice = (row) => {
-  currentRow.value = row
-}
-
-const openGPVDialog = (row) => {
-  selectCommandDevice(row)
-  gpvForm.pathsText = 'Device.DeviceInfo.SerialNumber'
-  gpvDialogVisible.value = true
-}
-
-const submitGPV = async () => {
-  if (!currentRow.value.ID) return
-  const paths = (gpvForm.pathsText || '')
-    .split('\n')
-    .map(s => s.trim())
-    .filter(Boolean)
-  if (paths.length === 0) {
-    ElMessage.warning('请填写参数路径')
-    return
-  }
-  gpvSubmitting.value = true
-  try {
-    const res = await getParameterValues(currentRow.value.ID, { paths })
-    if (res.code === 0) {
-      ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
-      gpvDialogVisible.value = false
-    } else {
-      ElMessage.error(res.msg || '下发失败')
-    }
-  } finally {
-    gpvSubmitting.value = false
-  }
-}
-
-const openSPVDialog = (row) => {
-  selectCommandDevice(row)
-  spvForm.parameterKey = ''
-  spvForm.parameters = [{ name: '', type: 'xsd:string', value: '' }]
-  spvDialogVisible.value = true
-}
-
-const addSPVRow = () => {
-  spvForm.parameters = [...spvForm.parameters, { name: '', type: 'xsd:string', value: '' }]
-}
-
-const removeSPVRow = (idx) => {
-  spvForm.parameters = spvForm.parameters.filter((_, i) => i !== idx)
-}
-
-const submitSPV = async () => {
-  if (!currentRow.value.ID) return
-  const payload = {
-    parameterKey: spvForm.parameterKey,
-    parameters: (spvForm.parameters || [])
-      .map(p => ({ ...p, name: (p.name || '').trim(), type: (p.type || '').trim() }))
-      .filter(p => p.name)
-  }
-  if (payload.parameters.length === 0) {
-    ElMessage.warning('请至少填写一条参数')
-    return
-  }
-  spvSubmitting.value = true
-  try {
-    const res = await setParameterValues(currentRow.value.ID, payload)
-    if (res.code === 0) {
-      ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
-      spvDialogVisible.value = false
-    } else {
-      ElMessage.error(res.msg || '下发失败')
-    }
-  } finally {
-    spvSubmitting.value = false
-  }
-}
-
 const syncParameters = async (row) => {
   if (!canIssueDeviceCommand(row) || syncingDeviceIds.value.has(row.ID)) return
   syncingDeviceIds.value = new Set(syncingDeviceIds.value).add(row.ID)
@@ -362,9 +244,15 @@ const syncParameters = async (row) => {
 }
 
 const handleMoreCommand = (command, row) => {
-  if (command === 'gpv') openGPVDialog(row)
-  if (command === 'spv') openSPVDialog(row)
-  if (command === 'delete') deleteRow(row)
+  if (command === 'deleteDevice') {
+    deleteRow(row)
+    return
+  }
+  const action = findRPCAction(command)
+  if (!action || !canIssueRPCAction(row, action)) return
+  currentRow.value = row
+  currentRPCAction.value = action
+  rpcDialogVisible.value = true
 }
 
 const openDataModelFromRow = (row) => {
@@ -391,5 +279,15 @@ onMounted(() => {
 }
 .btn-list {
   margin-bottom: 10px;
+}
+:deep(.rpc-group-title) {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  cursor: default;
+  opacity: 1;
+}
+:deep(.delete-device-action) {
+  color: var(--el-color-danger);
 }
 </style>
