@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   RPC_ACTION_GROUPS,
+  RPC_ACTION_MENUS,
   canIssueDeviceCommand,
   canIssueRPCAction,
   deviceParameterSyncPayload,
@@ -20,13 +21,18 @@ test('quick parameter sync always requests the shallow Device root', () => {
   assert.deepEqual(deviceParameterSyncPayload(), { paths: ['Device.'] })
 })
 
-test('device actions expose all 12 RPC operations in four user-facing groups', () => {
+test('device actions expose four semantic groups through two menus', () => {
   assert.deepEqual(RPC_ACTION_GROUPS.map(group => group.label), ['查询', '配置', '文件', '维护'])
+  assert.deepEqual(RPC_ACTION_MENUS.map(menu => menu.label), ['查询与配置', '文件与维护'])
+  assert.deepEqual(
+    RPC_ACTION_MENUS.map(menu => menu.groups.map(group => group.label)),
+    [['查询', '配置'], ['文件', '维护']]
+  )
   const actions = RPC_ACTION_GROUPS.flatMap(group => group.actions)
   assert.equal(actions.length, 12)
   assert.deepEqual(actions.map(action => action.label), [
     '查询设备能力', '获取参数', '获取参数名称', '获取参数属性',
-    '配置参数', '配置参数属性', '添加对象', '删除对象',
+    '配置参数', '配置参数属性', '添加对象', '删除对象实例',
     '下载文件', '上传文件', '重启设备', '恢复出厂设置'
   ])
   assert.equal(new Set(actions.map(action => action.key)).size, 12)

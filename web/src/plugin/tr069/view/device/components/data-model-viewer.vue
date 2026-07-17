@@ -18,8 +18,24 @@
           </el-tag>
         </div>
         <div class="flex gap-2">
-          <el-button type="primary" plain size="small" :icon="Refresh" @click="refreshStructure" :loading="loadingStructure">
-            刷新结构
+          <el-button
+            type="primary"
+            plain
+            size="small"
+            :icon="Refresh"
+            :loading="loadingStructure"
+            @click="refreshStructure"
+          >
+            刷新本地数据
+          </el-button>
+          <el-button
+            type="primary"
+            size="small"
+            :disabled="!deviceRow.online"
+            :loading="syncingParameters"
+            @click="syncDeviceParameters"
+          >
+            同步设备参数
           </el-button>
         </div>
       </div>
@@ -142,6 +158,7 @@
 import { ref, watch, computed } from 'vue'
 import { Search, Refresh, RefreshRight, CopyDocument, Loading } from '@element-plus/icons-vue'
 import { getDataModelStructure, getDataModelList } from '@/plugin/tr069/api/datamodel'
+import { fullDataModelSync } from '@/plugin/tr069/api/command'
 import { formatTimeToStr } from '@/utils/date'
 import { ElMessage } from 'element-plus'
 import { useClipboard } from '@vueuse/core'
@@ -172,6 +189,7 @@ const tableData = ref([])
 const currentPath = ref('')
 const loadingStructure = ref(false)
 const loadingValues = ref(false)
+const syncingParameters = ref(false)
 
 const defaultProps = {
   children: 'children',
@@ -224,6 +242,23 @@ const refreshStructure = async () => {
     console.error(error)
   } finally {
     loadingStructure.value = false
+  }
+}
+
+const syncDeviceParameters = async () => {
+  if (!props.row.ID || !deviceRow.value.online || syncingParameters.value) return
+  syncingParameters.value = true
+  try {
+    const res = await fullDataModelSync(props.row.ID)
+    if (res.code === 0) {
+      ElMessage.success(`参数同步已下发，commandId=${res.data?.commandId || '-'}`)
+    } else {
+      ElMessage.error(res.msg || '参数同步下发失败')
+    }
+  } catch {
+    ElMessage.error('参数同步下发失败')
+  } finally {
+    syncingParameters.value = false
   }
 }
 

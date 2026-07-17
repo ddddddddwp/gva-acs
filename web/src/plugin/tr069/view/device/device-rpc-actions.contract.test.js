@@ -5,13 +5,19 @@ import { readFile } from 'node:fs/promises'
 const devicePageURL = new URL('./index.vue', import.meta.url)
 const commandAPIURL = new URL('../../api/command.js', import.meta.url)
 
-test('device list renders grouped RPC actions and keeps device deletion separate', async () => {
+test('device list renders four aligned top-level actions and two grouped RPC menus', async () => {
   const source = await readFile(devicePageURL, 'utf8')
 
-  assert.match(source, /RPC_ACTION_GROUPS/)
-  assert.match(source, /group\.actions/)
-  assert.match(source, /command="deleteDevice"/)
-  assert.doesNotMatch(source, /command="deleteObject"[^>]*>删除设备/)
+  assert.match(source, /class="device-row-actions"/)
+  assert.match(source, />参数<\/el-button>/)
+  assert.match(source, /RPC_ACTION_MENUS/)
+  assert.match(source, /v-for="menu in RPC_ACTION_MENUS"/)
+  assert.match(source, /\{\{ menu\.label \}\}/)
+  assert.match(source, /menu\.groups/)
+  assert.match(source, /groupIndex > 0/)
+  assert.match(source, /type="danger"[\s\S]*@click="deleteRow\(scope\.row\)"[\s\S]*>删除<\/el-button>/)
+  assert.doesNotMatch(source, /command="deleteDevice"/)
+  assert.doesNotMatch(source, /syncParameters\(scope\.row\)/)
 })
 
 test('frontend exposes one fixed API function for every RPC operation', async () => {

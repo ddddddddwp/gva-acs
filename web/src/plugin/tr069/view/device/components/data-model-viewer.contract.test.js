@@ -4,10 +4,16 @@ import { readFile } from 'node:fs/promises'
 
 const source = await readFile(new URL('./data-model-viewer.vue', import.meta.url), 'utf8')
 
-test('parameter tree is query-only', () => {
-  assert.doesNotMatch(source, /fullDataModelSync/)
-  assert.doesNotMatch(source, /openFullSync/)
-  assert.doesNotMatch(source, /全量同步/)
+test('parameter drawer separates local refresh from device synchronization', () => {
+  assert.match(source, /刷新本地数据/)
+  assert.match(source, /同步设备参数/)
+  assert.match(source, /import \{ fullDataModelSync \} from '@\/plugin\/tr069\/api\/command'/)
+  assert.match(source, /const syncingParameters = ref\(false\)/)
+  assert.match(source, /:disabled="!deviceRow\.online"/)
+  assert.match(source, /:loading="syncingParameters"/)
+  assert.match(source, /if \(!props\.row\.ID \|\| !deviceRow\.value\.online \|\| syncingParameters\.value\) return/)
+  assert.match(source, /await fullDataModelSync\(props\.row\.ID\)/)
+  assert.match(source, /commandId=/)
 })
 
 test('parameter tree uses the device online boolean', () => {

@@ -31,35 +31,45 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right" align="center">
+        <el-table-column label="操作" width="360" fixed="right" align="center">
           <template #default="scope">
-            <el-button
-              type="primary"
-              link
-              :disabled="!canIssueDeviceCommand(scope.row)"
-              :loading="syncingDeviceIds.has(scope.row.ID)"
-              @click="syncParameters(scope.row)"
-            >同步参数</el-button>
-            <el-button type="primary" link :icon="Connection" @click="openDataModelFromRow(scope.row)">参数</el-button>
-            <el-dropdown trigger="click" @command="command => handleMoreCommand(command, scope.row)">
-              <el-button type="primary" link>
-                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <template v-for="group in RPC_ACTION_GROUPS" :key="group.label">
-                    <el-dropdown-item disabled class="rpc-group-title">{{ group.label }}</el-dropdown-item>
-                    <el-dropdown-item
-                      v-for="action in group.actions"
-                      :key="action.key"
-                      :command="action.key"
-                      :disabled="!canIssueRPCAction(scope.row, action)"
-                    >{{ action.label }}</el-dropdown-item>
-                  </template>
-                  <el-dropdown-item command="deleteDevice" divided class="delete-device-action">删除设备</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <div class="device-row-actions">
+              <el-button type="primary" link :icon="Connection" @click="openDataModelFromRow(scope.row)">参数</el-button>
+
+              <el-dropdown
+                v-for="menu in RPC_ACTION_MENUS"
+                :key="menu.key"
+                trigger="click"
+                @command="command => handleMoreCommand(command, scope.row)"
+              >
+                <el-button type="primary" link>
+                  {{ menu.label }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <template v-for="(group, groupIndex) in menu.groups" :key="group.label">
+                      <el-dropdown-item
+                        disabled
+                        :divided="groupIndex > 0"
+                        class="rpc-group-title"
+                      >
+                        {{ group.label }}
+                      </el-dropdown-item>
+                      <el-dropdown-item
+                        v-for="action in group.actions"
+                        :key="action.key"
+                        :command="action.key"
+                        :disabled="!canIssueRPCAction(scope.row, action)"
+                      >
+                        {{ action.label }}
+                      </el-dropdown-item>
+                    </template>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+
+              <el-button type="danger" link @click="deleteRow(scope.row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -116,10 +126,8 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getDeviceList, createDevice, deleteDevice } from '@/plugin/tr069/api/device'
-import { fullDataModelSync } from '@/plugin/tr069/api/command'
 import {
-  RPC_ACTION_GROUPS,
-  canIssueDeviceCommand,
+  RPC_ACTION_MENUS,
   canIssueRPCAction,
   findRPCAction
 } from '@/plugin/tr069/utils/device-actions'
@@ -143,7 +151,6 @@ const addFormRef = ref(null)
 const currentRow = ref({})
 const currentRPCAction = ref()
 const rpcDialogVisible = ref(false)
-const syncingDeviceIds = ref(new Set())
 const dmDrawerVisible = ref(false)
 
 // 表单校验规则
@@ -226,28 +233,7 @@ const deleteRow = async (row) => {
   }
 }
 
-const syncParameters = async (row) => {
-  if (!canIssueDeviceCommand(row) || syncingDeviceIds.value.has(row.ID)) return
-  syncingDeviceIds.value = new Set(syncingDeviceIds.value).add(row.ID)
-  try {
-    const res = await fullDataModelSync(row.ID)
-    if (res.code === 0) {
-      ElMessage.success(`参数同步已下发，commandId=${res.data?.commandId || '-'}`)
-    } else {
-      ElMessage.error(res.msg || '下发失败')
-    }
-  } finally {
-    const next = new Set(syncingDeviceIds.value)
-    next.delete(row.ID)
-    syncingDeviceIds.value = next
-  }
-}
-
 const handleMoreCommand = (command, row) => {
-  if (command === 'deleteDevice') {
-    deleteRow(row)
-    return
-  }
   const action = findRPCAction(command)
   if (!action || !canIssueRPCAction(row, action)) return
   currentRow.value = row
@@ -267,14 +253,21 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.device-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.device-row-actions :deep(.el-button) {
+  margin-left: 0;
+}
 :deep(.rpc-group-title) {
   font-size: 12px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
   cursor: default;
   opacity: 1;
-}
-:deep(.delete-device-action) {
-  color: var(--el-color-danger);
 }
 </style>

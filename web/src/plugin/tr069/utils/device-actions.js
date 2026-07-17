@@ -18,7 +18,7 @@ export const RPC_ACTION_GROUPS = [
       { key: 'setParameterValues', label: '配置参数', method: 'SetParameterValues', confirm: 'normal' },
       { key: 'setParameterAttributes', label: '配置参数属性', method: 'SetParameterAttributes', confirm: 'normal' },
       { key: 'addObject', label: '添加对象', method: 'AddObject', confirm: 'normal' },
-      { key: 'deleteObject', label: '删除对象', method: 'DeleteObject', confirm: 'danger' }
+      { key: 'deleteObject', label: '删除对象实例', method: 'DeleteObject', confirm: 'danger' }
     ]
   },
   {
@@ -34,6 +34,19 @@ export const RPC_ACTION_GROUPS = [
       { key: 'reboot', label: '重启设备', method: 'Reboot', confirm: 'danger' },
       { key: 'factoryReset', label: '恢复出厂设置', method: 'FactoryReset', confirm: 'danger' }
     ]
+  }
+]
+
+export const RPC_ACTION_MENUS = [
+  {
+    key: 'query-config',
+    label: '查询与配置',
+    groups: RPC_ACTION_GROUPS.slice(0, 2)
+  },
+  {
+    key: 'file-maintenance',
+    label: '文件与维护',
+    groups: RPC_ACTION_GROUPS.slice(2, 4)
   }
 ]
 
