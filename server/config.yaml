@@ -304,6 +304,7 @@ tr069:
     commandQueueImmediateTTL: 1800
     commandQueueWaitTimeout: 180
     rpcResponseTimeout: 90
+    rebootConfirmTimeout: 300
     transferCompleteTimeout: 43200
     rpcXMLRetentionDays: 30
     connectionRequest:

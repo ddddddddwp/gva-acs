@@ -182,6 +182,74 @@ func TestGormCommandRepoMarkSendingRollsBackWhenEventInsertFails(t *testing.T) {
 	}
 }
 
+func TestGormCommandRepoRebootResponseWaitsForBootInform(t *testing.T) {
+	db := newGormCommandRepoTestDB(t)
+	previous := config.CurrentRuntime()
+	settings := previous.Settings
+	settings.RebootConfirmTimeout = 41
+	config.StoreRuntime(settings)
+	t.Cleanup(func() { config.StoreRuntime(previous.Settings) })
+
+	acknowledgedAt := time.Date(2026, 7, 18, 11, 0, 0, 0, time.UTC)
+	command := model.Command{
+		CommandID: "reboot-ack", DeviceID: 70, DeviceKey: "001122-REBOOT-ACK",
+		Operation: "Reboot", ParamsJSON: model.LongTextJSON(`{}`),
+		Status: model.CommandStatusSent, QueuedAt: acknowledgedAt.Add(-time.Minute),
+		CreatedAt: acknowledgedAt.Add(-time.Minute),
+	}
+	if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+		t.Fatalf("seed Reboot: %v", err)
+	}
+	if err := newGormCommandRepo(db).MarkSuccess(context.Background(), command.CommandID, acknowledgedAt); err != nil {
+		t.Fatalf("MarkSuccess(Reboot): %v", err)
+	}
+	var got model.Command
+	if err := db.First(&got, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("load Reboot: %v", err)
+	}
+	if got.Status != model.CommandStatusWaitingReboot || got.FinishedAt != nil {
+		t.Fatalf("Reboot response finalized command: %#v", got)
+	}
+	wantDeadline := acknowledgedAt.Add(41 * time.Second)
+	if got.PhaseDeadlineAt == nil || !got.PhaseDeadlineAt.Equal(wantDeadline) {
+		t.Fatalf("deadline = %v, want %v", got.PhaseDeadlineAt, wantDeadline)
+	}
+	var event model.CommandEvent
+	if err := db.Where("command_id = ? AND event_type = ?", command.CommandID, "REBOOT_ACKNOWLEDGED").First(&event).Error; err != nil {
+		t.Fatalf("load acknowledgement event: %v", err)
+	}
+	if event.Stage != "reboot.acknowledged" ||
+		event.FromStatus != model.CommandStatusSent ||
+		event.ToStatus != model.CommandStatusWaitingReboot {
+		t.Fatalf("acknowledgement event = %#v", event)
+	}
+}
+
+func TestGormCommandRepoMarkFailAcceptsWaitingReboot(t *testing.T) {
+	db := newGormCommandRepoTestDB(t)
+	failedAt := time.Date(2026, 7, 18, 11, 5, 0, 0, time.UTC)
+	deadline := failedAt.Add(time.Minute)
+	command := model.Command{
+		CommandID: "reboot-fail", DeviceID: 71, DeviceKey: "001122-REBOOT-FAIL",
+		Operation: "Reboot", ParamsJSON: model.LongTextJSON(`{}`),
+		Status: model.CommandStatusWaitingReboot, QueuedAt: failedAt.Add(-time.Minute),
+		PhaseDeadlineAt: &deadline, CreatedAt: failedAt.Add(-time.Minute),
+	}
+	if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+		t.Fatalf("seed WAITING_REBOOT: %v", err)
+	}
+	if err := newGormCommandRepo(db).MarkFail(context.Background(), command.CommandID, 9002, "reboot failed", failedAt); err != nil {
+		t.Fatalf("MarkFail(WAITING_REBOOT): %v", err)
+	}
+	var got model.Command
+	if err := db.First(&got, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("load failed Reboot: %v", err)
+	}
+	if got.Status != model.CommandStatusFailed || got.FinishedAt == nil || !got.FinishedAt.Equal(failedAt) || got.PhaseDeadlineAt != nil {
+		t.Fatalf("failed Reboot = %#v", got)
+	}
+}
+
 func TestGormCommandRepoTerminalCallbacksUseStoreAndNeverRecreateMissingCommands(t *testing.T) {
 	db := newGormCommandRepoTestDB(t)
 	repo := newGormCommandRepo(db)

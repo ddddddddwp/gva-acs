@@ -116,6 +116,7 @@ func logRuntimeConfig(next config.TR069Config) {
 		zap.Int("commandQueueImmediateTTL", next.CommandQueueImmediateTTL),
 		zap.Int("commandQueueWaitTimeout", next.CommandQueueWaitTimeout),
 		zap.Int("rpcResponseTimeout", next.RPCResponseTimeout),
+		zap.Int("rebootConfirmTimeout", next.RebootConfirmTimeout),
 		zap.Int("transferCompleteTimeout", next.TransferCompleteTimeout),
 		zap.Int("rpcXMLRetentionDays", next.RPCXMLRetentionDays),
 		zap.Bool("connectionRequestAutoProvisionCredentials", next.ConnectionRequest.AutoProvisionCredentials),

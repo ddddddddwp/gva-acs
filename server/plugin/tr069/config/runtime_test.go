@@ -28,6 +28,19 @@ func TestNormalizeRuntimeConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestRebootConfirmTimeoutDefaultsAndPublishesDuration(t *testing.T) {
+	normalized := NormalizeRuntimeConfig(TR069Config{})
+	if normalized.RebootConfirmTimeout != 300 {
+		t.Fatalf("default reboot confirmation timeout = %d", normalized.RebootConfirmTimeout)
+	}
+	previous := CurrentRuntime()
+	t.Cleanup(func() { StoreRuntime(previous.Settings) })
+	stored := StoreRuntime(TR069Config{RebootConfirmTimeout: 17})
+	if stored.RebootConfirmTimeout != 17*time.Second {
+		t.Fatalf("runtime reboot confirmation timeout = %s", stored.RebootConfirmTimeout)
+	}
+}
+
 func TestStoreRuntimePublishesImmutableSnapshotWithDurations(t *testing.T) {
 	in := TR069Config{
 		CommandQueueWaitTimeout: 7,

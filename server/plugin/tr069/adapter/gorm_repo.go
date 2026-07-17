@@ -428,6 +428,22 @@ func (r *GormCommandRepo) MarkSuccess(ctx context.Context, commandID string, fin
 		if err := tx.WithContext(ctx).First(&current, "command_id = ?", commandID).Error; err != nil {
 			return err
 		}
+		if current.Operation == "Reboot" && current.Status == model.CommandStatusSent {
+			deadline := finishedAt.Add(config.CurrentRuntime().RebootConfirmTimeout)
+			_, err := service.NewCommandStore(tx).Transition(ctx, service.CommandTransition{
+				CommandID:       current.CommandID,
+				FromStatuses:    []string{model.CommandStatusSent},
+				ToStatus:        model.CommandStatusWaitingReboot,
+				ExpectedVersion: current.Version,
+				EventType:       "REBOOT_ACKNOWLEDGED",
+				Stage:           "reboot.acknowledged",
+				Updates: map[string]any{
+					"phase_deadline_at": deadline,
+					"finished_at":       nil,
+				},
+			})
+			return err
+		}
 		if _, err := service.NewCommandStore(tx).Transition(ctx, service.CommandTransition{
 			CommandID:       commandID,
 			FromStatuses:    []string{model.CommandStatusSent, model.CommandStatusWaitingTransfer},
@@ -477,6 +493,7 @@ func (r *GormCommandRepo) markFailAtStage(ctx context.Context, commandID string,
 				model.CommandStatusBuilding,
 				model.CommandStatusSent,
 				model.CommandStatusWaitingTransfer,
+				model.CommandStatusWaitingReboot,
 			},
 			ToStatus:        model.CommandStatusFailed,
 			ExpectedVersion: current.Version,

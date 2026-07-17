@@ -26,6 +26,7 @@ func TestReloadConfigPublishesRuntimeWithoutMutatingLegacyConfig(t *testing.T) {
 	global.GVA_VP.Set("tr069.commandQueueWaitTimeout", 21)
 	global.GVA_VP.Set("tr069.rpcResponseTimeout", 34)
 	global.GVA_VP.Set("tr069.transferCompleteTimeout", 55)
+	global.GVA_VP.Set("tr069.rebootConfirmTimeout", 67)
 	global.GVA_VP.Set("tr069.rpcXMLRetentionDays", 8)
 
 	ReloadConfig()
@@ -40,6 +41,9 @@ func TestReloadConfigPublishesRuntimeWithoutMutatingLegacyConfig(t *testing.T) {
 	}
 	if got.TransferCompleteTimeout != 55*time.Second {
 		t.Fatalf("transfer duration=%s", got.TransferCompleteTimeout)
+	}
+	if got.RebootConfirmTimeout != 67*time.Second {
+		t.Fatalf("reboot confirmation duration=%s", got.RebootConfirmTimeout)
 	}
 	if got.RPCXMLRetention != 8*24*time.Hour {
 		t.Fatalf("retention duration=%s", got.RPCXMLRetention)

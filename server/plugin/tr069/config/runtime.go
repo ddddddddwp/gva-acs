@@ -13,6 +13,7 @@ const (
 	defaultCommandQueueImmediateTTL         = 1800
 	defaultCommandQueueWaitTimeout          = 180
 	defaultRPCResponseTimeout               = 90
+	defaultRebootConfirmTimeout             = 300
 	defaultTransferCompleteTimeout          = 43200
 	defaultRPCXMLRetentionDays              = 30
 	defaultConnectionRequestTimeout         = 10
@@ -24,6 +25,7 @@ type Runtime struct {
 	Settings                 TR069Config
 	CommandQueueWaitTimeout  time.Duration
 	RPCResponseTimeout       time.Duration
+	RebootConfirmTimeout     time.Duration
 	TransferCompleteTimeout  time.Duration
 	RPCXMLRetention          time.Duration
 	ConnectionRequestTimeout time.Duration
@@ -57,6 +59,9 @@ func NormalizeRuntimeConfig(in TR069Config) TR069Config {
 	if in.RPCResponseTimeout <= 0 {
 		in.RPCResponseTimeout = defaultRPCResponseTimeout
 	}
+	if in.RebootConfirmTimeout <= 0 {
+		in.RebootConfirmTimeout = defaultRebootConfirmTimeout
+	}
 	if in.TransferCompleteTimeout <= 0 {
 		in.TransferCompleteTimeout = defaultTransferCompleteTimeout
 	}
@@ -85,6 +90,7 @@ func buildRuntime(in TR069Config) Runtime {
 		Settings:                 normalized,
 		CommandQueueWaitTimeout:  time.Duration(normalized.CommandQueueWaitTimeout) * time.Second,
 		RPCResponseTimeout:       time.Duration(normalized.RPCResponseTimeout) * time.Second,
+		RebootConfirmTimeout:     time.Duration(normalized.RebootConfirmTimeout) * time.Second,
 		TransferCompleteTimeout:  time.Duration(normalized.TransferCompleteTimeout) * time.Second,
 		RPCXMLRetention:          time.Duration(normalized.RPCXMLRetentionDays) * 24 * time.Hour,
 		ConnectionRequestTimeout: time.Duration(normalized.ConnectionRequest.RequestTimeout) * time.Second,

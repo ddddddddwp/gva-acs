@@ -58,6 +58,9 @@ type TR069Config struct {
 	// RPCResponseTimeout: RPC 发送后等待响应的超时时间（秒），默认 90 秒
 	RPCResponseTimeout int `mapstructure:"rpcResponseTimeout" json:"rpcResponseTimeout" yaml:"rpcResponseTimeout"`
 
+	// RebootConfirmTimeout: Reboot 响应后等待设备启动 Inform 的超时时间（秒），默认 300 秒
+	RebootConfirmTimeout int `mapstructure:"rebootConfirmTimeout" json:"rebootConfirmTimeout" yaml:"rebootConfirmTimeout"`
+
 	// TransferCompleteTimeout: 下载或上传后等待 TransferComplete 的超时时间（秒），默认 43200 秒
 	TransferCompleteTimeout int `mapstructure:"transferCompleteTimeout" json:"transferCompleteTimeout" yaml:"transferCompleteTimeout"`
 

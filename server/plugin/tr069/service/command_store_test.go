@@ -120,6 +120,7 @@ func TestCommandTransitionMapAndTerminalHelpers(t *testing.T) {
 		model.CommandStatusBuilding,
 		model.CommandStatusSent,
 		model.CommandStatusWaitingTransfer,
+		model.CommandStatusWaitingReboot,
 		model.CommandStatusCompleted,
 		model.CommandStatusFailed,
 		model.CommandStatusTimeout,
@@ -141,8 +142,12 @@ func TestCommandTransitionMapAndTerminalHelpers(t *testing.T) {
 		{model.CommandStatusBuilding, model.CommandStatusWaitingDevice},
 		{model.CommandStatusBuilding, model.CommandStatusSent},
 		{model.CommandStatusSent, model.CommandStatusWaitingTransfer},
+		{model.CommandStatusSent, model.CommandStatusWaitingReboot},
 		{model.CommandStatusSent, model.CommandStatusCompleted},
 		{model.CommandStatusWaitingTransfer, model.CommandStatusCompleted},
+		{model.CommandStatusWaitingReboot, model.CommandStatusCompleted},
+		{model.CommandStatusWaitingReboot, model.CommandStatusFailed},
+		{model.CommandStatusWaitingReboot, model.CommandStatusTimeout},
 	}
 	for _, transition := range allowed {
 		if !model.CanTransitionCommand(transition[0], transition[1]) {
@@ -153,6 +158,9 @@ func TestCommandTransitionMapAndTerminalHelpers(t *testing.T) {
 	for _, from := range accepted {
 		if from != model.CommandStatusSent && model.CanTransitionCommand(from, model.CommandStatusWaitingTransfer) {
 			t.Errorf("WAITING_TRANSFER must not follow %s", from)
+		}
+		if from != model.CommandStatusSent && model.CanTransitionCommand(from, model.CommandStatusWaitingReboot) {
+			t.Errorf("WAITING_REBOOT must not follow %s", from)
 		}
 	}
 	for _, terminal := range []string{model.CommandStatusCompleted, model.CommandStatusFailed, model.CommandStatusTimeout} {
@@ -517,6 +525,27 @@ func TestCommandStoreHeadForDeviceReturnsEarliestNonTerminalCommand(t *testing.T
 	}
 	if head.CommandID != "expected-head" {
 		t.Fatalf("head command = %q, want expected-head", head.CommandID)
+	}
+}
+
+func TestCommandStoreWaitingRebootBlocksFIFO(t *testing.T) {
+	db := newCommandStoreTestDB(t)
+	store := NewCommandStore(db)
+	base := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	commands := []model.Command{
+		{CommandID: "waiting-reboot-head", DeviceID: 23, Status: model.CommandStatusWaitingReboot, CreatedAt: base},
+		{CommandID: "queued-behind-reboot", DeviceID: 23, Status: model.CommandStatusQueued, CreatedAt: base.Add(time.Second)},
+	}
+	if err := db.Create(&commands).Error; err != nil {
+		t.Fatalf("seed commands: %v", err)
+	}
+
+	head, err := store.HeadForDevice(context.Background(), 23)
+	if err != nil {
+		t.Fatalf("head for device: %v", err)
+	}
+	if head.CommandID != "waiting-reboot-head" {
+		t.Fatalf("head command = %q, want waiting-reboot-head", head.CommandID)
 	}
 }
 
