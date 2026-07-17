@@ -163,7 +163,7 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if spec, ok := RPCSpecs[operation]; ok && spec.Transfer {
+	if spec, ok := RPCSpecs[operation]; ok && spec.ServerCommandKey {
 		commandKey := "rpc-" + uuid.NewString()
 		command.CommandKey = &commandKey
 	}

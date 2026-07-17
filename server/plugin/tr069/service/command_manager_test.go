@@ -315,6 +315,56 @@ func TestCommandManagerTransfersReceiveUniqueSystemCommandKeys(t *testing.T) {
 	}
 }
 
+func TestCommandManagerRebootCreatesUniqueServerKeysAndRetryGetsNewKey(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "REBOOT-KEY", now)
+	setCommandManagerCapabilities(t, db, device.ID, `["Reboot"]`)
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }))
+
+	first, err := manager.Submit(context.Background(), device.ID, "Reboot", nil)
+	if err != nil {
+		t.Fatalf("first Reboot: %v", err)
+	}
+	second, err := manager.Submit(context.Background(), device.ID, "Reboot", nil)
+	if err != nil {
+		t.Fatalf("second Reboot: %v", err)
+	}
+	var commands []model.Command
+	if err := db.Where("command_id IN ?", []string{first.CommandID, second.CommandID}).Find(&commands).Error; err != nil {
+		t.Fatalf("load Reboot commands: %v", err)
+	}
+	if len(commands) != 2 || commands[0].CommandKey == nil || commands[1].CommandKey == nil ||
+		*commands[0].CommandKey == *commands[1].CommandKey {
+		t.Fatalf("Reboot keys are not unique: %#v", commands)
+	}
+	for _, command := range commands {
+		if !strings.HasPrefix(*command.CommandKey, "rpc-") || string(command.ParamsJSON) != `{}` {
+			t.Fatalf("Reboot persistence = key:%v params:%s", command.CommandKey, command.ParamsJSON)
+		}
+	}
+
+	original := commands[0]
+	finishedAt := now.Add(time.Second)
+	if err := db.Model(&model.Command{}).Where("command_id = ?", original.CommandID).Updates(map[string]any{
+		"status": model.CommandStatusTimeout, "finished_at": finishedAt,
+	}).Error; err != nil {
+		t.Fatalf("mark original retryable: %v", err)
+	}
+	retried, err := manager.Retry(context.Background(), original.CommandID)
+	if err != nil {
+		t.Fatalf("retry Reboot: %v", err)
+	}
+	var retry model.Command
+	if err := db.First(&retry, "command_id = ?", retried.CommandID).Error; err != nil {
+		t.Fatalf("load retry: %v", err)
+	}
+	if retry.CommandKey == nil || *retry.CommandKey == *original.CommandKey {
+		t.Fatalf("retry key = %v, original = %v", retry.CommandKey, original.CommandKey)
+	}
+}
+
 func TestCommandManagerRetryCopiesTypedParamsAndPreservesOriginal(t *testing.T) {
 	db := newCommandManagerTestDB(t)
 	now := time.Date(2026, 7, 16, 14, 0, 0, 0, time.UTC)

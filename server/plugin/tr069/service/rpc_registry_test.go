@@ -106,7 +106,7 @@ func TestRPCRequestPersistenceRoundTripUsesTypedNormalization(t *testing.T) {
 		{method: "DeleteObject", request: req.ObjectRequest{ObjectName: "Device.WiFi.SSID.7.", ParameterKey: "delete-1"}},
 		{method: "Download", request: req.DownloadRequest{FileType: "1 Firmware Upgrade Image", URL: "https://acs.example.test/fw.bin", FileSize: 1024, TargetFileName: "fw.bin"}},
 		{method: "Upload", request: req.UploadRequest{FileType: "1 Vendor Configuration File", URL: "https://acs.example.test/config.xml"}},
-		{method: "Reboot", request: req.RebootRequest{CommandKey: "reboot-1"}},
+		{method: "Reboot", request: emptyRPCRequest{}},
 	}
 
 	for _, tc := range tests {
@@ -213,12 +213,12 @@ func TestRPCRequestValidation(t *testing.T) {
 		{name: "Upload missing file type", method: "Upload", request: req.UploadRequest{URL: validUpload.URL}, wantErr: true},
 		{name: "Upload invalid URL", method: "Upload", request: req.UploadRequest{FileType: validUpload.FileType, URL: "not a URL"}, wantErr: true},
 		{name: "Upload negative delay", method: "Upload", request: req.UploadRequest{FileType: validUpload.FileType, URL: validUpload.URL, DelaySeconds: -1}, wantErr: true},
-		{name: "Reboot optional body", method: "Reboot", request: req.RebootRequest{}},
+		{name: "Reboot has no body", method: "Reboot"},
 		{name: "FactoryReset has no body", method: "FactoryReset"},
 		{name: "unknown method", method: "VendorMethod", wantErr: true},
-		{name: "wrong request type", method: "GetParameterValues", request: req.RebootRequest{}, wantErr: true},
+		{name: "wrong request type", method: "GetParameterValues", request: req.ObjectRequest{}, wantErr: true},
 		{name: "Reboot rejects wrong request type", method: "Reboot", request: req.ObjectRequest{}, wantErr: true},
-		{name: "GetRPCMethods rejects a request body", method: "GetRPCMethods", request: req.RebootRequest{}, wantErr: true},
+		{name: "GetRPCMethods rejects a request body", method: "GetRPCMethods", request: req.ObjectRequest{}, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -228,6 +228,27 @@ func TestRPCRequestValidation(t *testing.T) {
 				t.Fatalf("ValidateRPCRequest(%q, %#v) error = %v, wantErr %t", tt.method, tt.request, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestRebootUsesEmptyRequestAndServerCommandKeyMetadata(t *testing.T) {
+	spec := RPCSpecs["Reboot"]
+	if !spec.ServerCommandKey {
+		t.Fatal("Reboot must use a server-generated CommandKey")
+	}
+	persisted, err := EncodeRPCRequest("Reboot", nil)
+	if err != nil {
+		t.Fatalf("EncodeRPCRequest(Reboot): %v", err)
+	}
+	if string(persisted) != `{}` {
+		t.Fatalf("persisted Reboot request = %s, want {}", persisted)
+	}
+	params, err := DecodeRPCParams("Reboot", persisted)
+	if err != nil {
+		t.Fatalf("DecodeRPCParams(Reboot): %v", err)
+	}
+	if len(params) != 0 {
+		t.Fatalf("Reboot user params = %#v, want empty", params)
 	}
 }
 

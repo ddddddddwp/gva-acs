@@ -143,7 +143,7 @@ func (a *CommandApi) Upload(c *gin.Context) {
 
 // Reboot 下发 Reboot。
 func (a *CommandApi) Reboot(c *gin.Context) {
-	bindAndSubmitCommand[req.RebootRequest](c, "Reboot")
+	submitCommand(c, "Reboot", nil)
 }
 
 // FactoryReset 下发 FactoryReset。

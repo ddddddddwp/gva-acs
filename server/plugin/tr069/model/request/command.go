@@ -60,7 +60,3 @@ type UploadRequest struct {
 	Password     string `json:"password"`
 	DelaySeconds int    `json:"delaySeconds"`
 }
-
-type RebootRequest struct {
-	CommandKey string `json:"commandKey"`
-}

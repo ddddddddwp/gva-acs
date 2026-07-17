@@ -186,7 +186,8 @@ func (s *RedisCommandSource) Pull(ctx context.Context, deviceKey string) (*core.
 			return nil, nil, nil, errors.Join(err, nack(ctx, "hydrate protected command params"))
 		}
 	}
-	if spec, ok := service.RPCSpecs[building.Operation]; ok && spec.Transfer && building.CommandKey != nil {
+	if spec, ok := service.RPCSpecs[building.Operation]; ok &&
+		spec.ServerCommandKey && building.CommandKey != nil {
 		params["commandKey"] = *building.CommandKey
 	}
 

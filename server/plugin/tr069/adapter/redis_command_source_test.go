@@ -532,3 +532,46 @@ func TestRedisCommandSourceInjectsTransferCommandKeyAtDispatch(t *testing.T) {
 		t.Fatalf("ack: %v", err)
 	}
 }
+
+func TestRedisCommandSourceInjectsServerCommandKeyAtDispatch(t *testing.T) {
+	tests := []struct {
+		operation string
+		request   any
+	}{
+		{"Download", req.DownloadRequest{FileType: "1 Firmware Upgrade Image", URL: "https://example.test/fw.bin"}},
+		{"Reboot", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.operation, func(t *testing.T) {
+			db := newRedisCommandSourceTestDB(t)
+			paramsJSON, err := service.EncodeRPCRequest(tt.operation, tt.request)
+			if err != nil {
+				t.Fatalf("encode %s: %v", tt.operation, err)
+			}
+			now := time.Now()
+			key := "rpc-server-owned-" + strings.ToLower(tt.operation)
+			command := model.Command{
+				CommandID: "dispatch-" + tt.operation, DeviceID: 1,
+				DeviceKey: "001122-" + strings.ToUpper(tt.operation),
+				Operation: tt.operation, ParamsJSON: paramsJSON, CommandKey: &key,
+				Status: model.CommandStatusWaitingDevice, QueuedAt: now,
+				WaitingAt: &now, CreatedAt: now,
+			}
+			if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+				t.Fatalf("seed command: %v", err)
+			}
+			source := newRedisCommandSource(db, newCommandSourceLocker(),
+				RedisCommandSourceConfig{InstanceID: "server-key-test"})
+			pulled, ack, _, err := source.Pull(context.Background(), command.DeviceKey)
+			if err != nil {
+				t.Fatalf("Pull: %v", err)
+			}
+			if pulled == nil || pulled.Params["commandKey"] != key {
+				t.Fatalf("dispatched params = %#v, want commandKey %q", pulled, key)
+			}
+			if err := ack(context.Background()); err != nil {
+				t.Fatalf("ack: %v", err)
+			}
+		})
+	}
+}
