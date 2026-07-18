@@ -124,15 +124,6 @@
         </template>
       </template>
 
-      <template v-else-if="action.key === 'reboot'">
-        <el-alert
-          title="GVA 将自动生成本次重启的唯一标识；设备受理后，还需等待启动 Inform 才会显示完成。"
-          type="warning"
-          :closable="false"
-          show-icon
-        />
-      </template>
-
       <template v-else-if="action.key === 'factoryReset'">
         <el-alert title="恢复出厂设置会清除设备配置，提交后需要等待设备重新连接。" type="error" :closable="false" show-icon />
       </template>

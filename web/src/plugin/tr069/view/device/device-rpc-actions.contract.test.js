@@ -37,6 +37,7 @@ test('reboot form keeps CommandKey server-owned', async () => {
   const dialog = await readFile(new URL('./components/rpc-command-dialog.vue', import.meta.url), 'utf8')
   const api = await readFile(commandAPIURL, 'utf8')
 
+  assert.doesNotMatch(dialog, /GVA 将自动生成本次重启的唯一标识/)
   assert.doesNotMatch(dialog, /v-model="form\.commandKey"/)
   assert.doesNotMatch(dialog, /return\s*\{\s*commandKey:/)
   assert.match(dialog, /case 'reboot':\s*return undefined/)
