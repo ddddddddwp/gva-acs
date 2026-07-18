@@ -18,6 +18,48 @@ type captureIngest struct {
 	cmds []*core.Command
 }
 
+type transferLifecycleSpy struct {
+	uploadCommandID string
+	uploadStatus    int
+	commandKey      string
+	faultCode       int
+	faultString     string
+}
+
+func (s *transferLifecycleSpy) OnUploadResponse(_ context.Context, commandID string, status int, _ time.Time) error {
+	s.uploadCommandID = commandID
+	s.uploadStatus = status
+	return nil
+}
+
+func (s *transferLifecycleSpy) OnTransferComplete(_ context.Context, commandKey string, faultCode int, faultString string, _ time.Time) error {
+	s.commandKey = commandKey
+	s.faultCode = faultCode
+	s.faultString = faultString
+	return nil
+}
+
+func TestDataModelHookForwardsUploadResponseAndTransferComplete(t *testing.T) {
+	inflight := NewMemoryInflightRepo(10 * time.Minute)
+	ctx := context.Background()
+	if err := inflight.Save(ctx, core.InflightRequest{DeviceKey: "8CE468-BS-HOOK", CommandID: "upload-command", CwmpID: "cwmp-upload", RequestName: tr069.MethodUpload}); err != nil {
+		t.Fatalf("save inflight: %v", err)
+	}
+	spy := new(transferLifecycleSpy)
+	hook := NewDataModelHook(nil, inflight, nil, WithDataModelHookTransferLifecycle(spy), WithDataModelHookNow(func() time.Time {
+		return time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC)
+	}))
+	session := &core.Session{DeviceKey: "8CE468-BS-HOOK"}
+	handled, err := hook.OnResponse(ctx, session, &tr069.Message{Method: tr069.MethodUploadResponse, ID: "cwmp-upload", Status: 1})
+	if err != nil || !handled || spy.uploadCommandID != "upload-command" || spy.uploadStatus != 1 {
+		t.Fatalf("handled=%v spy=%#v err=%v", handled, spy, err)
+	}
+	handled, err = hook.OnTransferComplete(ctx, session, &tr069.Message{Method: tr069.MethodTransferComplete, CommandKey: "command-key", TransferFaultCode: 9010, TransferFaultString: "transfer failed"})
+	if err != nil || !handled || spy.commandKey != "command-key" || spy.faultCode != 9010 || spy.faultString != "transfer failed" {
+		t.Fatalf("transfer handled=%v spy=%#v err=%v", handled, spy, err)
+	}
+}
+
 func (i *captureIngest) Enqueue(ctx context.Context, cmd *core.Command) error {
 	_ = ctx
 	if cmd != nil {

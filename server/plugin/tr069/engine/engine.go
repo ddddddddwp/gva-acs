@@ -43,6 +43,7 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 	var provisioner *adapter.ConnectionCredentialProvisioner
 	var rebootConfirmer *service.RebootConfirmationService
 	var rebootScanner *service.RebootTimeoutScanner
+	var transferLifecycle *service.TransferLifecycle
 	if adapter.DBAvailable() {
 		profileRepository = adapter.NewConnectionProfileRepository(nil, adapter.NewRuntimeCredentialCipher())
 		payloadCodec = adapter.NewCompositeCommandPayloadCodec(
@@ -60,6 +61,7 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 		provisioner = adapter.NewConnectionCredentialProvisioner(manager, profileRepository)
 		rebootConfirmer = service.NewRebootConfirmationService(global.GVA_DB)
 		rebootScanner = service.NewRebootTimeoutScanner(global.GVA_DB)
+		transferLifecycle = service.NewTransferLifecycle(global.GVA_DB)
 	}
 
 	eventSink := deps.EventSink
@@ -172,6 +174,9 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 		}
 		if provisioner != nil {
 			hookOptions = append(hookOptions, adapter.WithDataModelHookProvisioner(provisioner))
+		}
+		if transferLifecycle != nil {
+			hookOptions = append(hookOptions, adapter.WithDataModelHookTransferLifecycle(transferLifecycle))
 		}
 		hook = adapter.NewDataModelHook(base, inflight, ingest, hookOptions...)
 	}

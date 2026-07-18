@@ -52,12 +52,17 @@ type TransferReceiver struct {
 	transfers *TransferStore
 	objects   ArtifactStore
 	admission *TransferAdmissionController
+	lifecycle *TransferLifecycle
 	now       func() time.Time
 	buffers   sync.Pool
 }
 
 func NewTransferReceiver(transfers *TransferStore, objects ArtifactStore) *TransferReceiver {
-	receiver := &TransferReceiver{transfers: transfers, objects: objects, admission: NewTransferAdmissionController(), now: time.Now}
+	var lifecycle *TransferLifecycle
+	if transfers != nil {
+		lifecycle = NewTransferLifecycle(transfers.db)
+	}
+	receiver := &TransferReceiver{transfers: transfers, objects: objects, admission: NewTransferAdmissionController(), lifecycle: lifecycle, now: time.Now}
 	receiver.buffers.New = func() any { return make([]byte, 64*1024) }
 	return receiver
 }
@@ -139,16 +144,10 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 	if err != nil {
 		return model.Artifact{}, err
 	}
-	updates := map[string]any{"file_received_at": receivedAt}
-	target := model.TransferStatusWaitingTransfer
-	if task.Source == model.TransferSourcePeriodic {
-		target = model.TransferStatusCompleted
-		updates["completed_at"] = receivedAt
+	if r.lifecycle == nil {
+		return model.Artifact{}, errors.New("transfer lifecycle is required")
 	}
-	if _, err := r.transfers.TransitionTask(receiveCtx, TransferTransition{
-		TaskID: task.TaskID, FromStatuses: []string{model.TransferStatusReceiving}, ToStatus: target,
-		ExpectedVersion: task.Version, EventCode: "FILE_STORED", Phase: "storage.commit", Updates: updates,
-	}); err != nil {
+	if err := r.lifecycle.OnArtifactAvailable(receiveCtx, task.TaskID, artifact.ArtifactID, receivedAt); err != nil {
 		return model.Artifact{}, err
 	}
 	return artifact, nil
