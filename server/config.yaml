@@ -317,3 +317,52 @@ tr069:
         allowedCIDRs:
             - 127.0.0.0/8
             - 172.16.0.0/12
+    fileIngress:
+        enabled: false
+        publicBaseURL: http://host.docker.internal:7458
+        trustedProxies: []
+        identityBindingTTL: 1800
+        authentication:
+            username: ""
+            password: ""
+            schemes:
+                - digest
+                - basic
+            realm: GVA-TR069-LOG
+            nonceTTL: 300
+        channels:
+            log:
+                enabled: true
+                path: /acs/log
+                maxFileSize: 67108864
+                maxConcurrent: 4
+                maxConcurrentPerDevice: 1
+                uploadTimeout: 600
+                retentionDays: 30
+                storagePrefix: log
+            pm:
+                enabled: false
+                path: /acs/pm
+                maxFileSize: 67108864
+                maxConcurrent: 2
+                maxConcurrentPerDevice: 1
+                uploadTimeout: 600
+                retentionDays: 30
+                storagePrefix: pm
+            mr:
+                enabled: false
+                path: /acs/mr
+                maxFileSize: 67108864
+                maxConcurrent: 2
+                maxConcurrentPerDevice: 1
+                uploadTimeout: 600
+                retentionDays: 30
+                storagePrefix: mr
+        artifactStore:
+            driver: minio
+            endpoint: 127.0.0.1:19000
+            bucket: gva-tr069-artifacts
+            accessKey: ""
+            secretKey: ""
+            useSSL: false
+            prefix: artifacts

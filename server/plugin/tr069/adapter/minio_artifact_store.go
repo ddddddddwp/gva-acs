@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"path"
 	"strings"
@@ -57,7 +58,38 @@ func NewMinioArtifactStoreClient(endpoint, accessKey, secretKey, bucket string, 
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := ensureMinioBucket(ctx, client, bucket); err != nil {
+		return nil, fmt.Errorf("initialize MinIO bucket %q: %w", bucket, err)
+	}
 	return NewMinioArtifactStore(&minioSDKObjectClient{client: client}, bucket)
+}
+
+type minioBucketAdmin interface {
+	BucketExists(context.Context, string) (bool, error)
+	MakeBucket(context.Context, string, minio.MakeBucketOptions) error
+}
+
+func ensureMinioBucket(ctx context.Context, client minioBucketAdmin, bucket string) error {
+	bucket = strings.TrimSpace(bucket)
+	if client == nil || bucket == "" {
+		return errors.New("MinIO bucket administrator and bucket are required")
+	}
+	exists, err := client.BucketExists(ctx, bucket)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
+		if minio.ToErrorResponse(err).Code == "BucketAlreadyOwnedByYou" {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *MinioArtifactStore) Begin(ctx context.Context, spec service.ObjectSpec) (service.ArtifactWriter, error) {
