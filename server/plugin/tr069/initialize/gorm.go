@@ -36,6 +36,9 @@ func Gorm(ctx context.Context) error {
 		new(model.Tr069Alarm),
 		new(model.SupportTr069Alarm),
 		new(model.ConnectionProfile),
+		new(model.TransferTask),
+		new(model.Artifact),
+		new(model.TransferEvent),
 		new(tr069MigrationMarker),
 	)
 	if err != nil {
