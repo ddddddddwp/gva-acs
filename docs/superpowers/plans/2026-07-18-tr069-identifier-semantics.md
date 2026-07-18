@@ -46,7 +46,7 @@ base-ref: 632b2566b528fb2beb52a3d205e973cefbedc220
 - Produces: `core.Request.TraceID string`、`observability.Attributes.TraceID string`、`core.CommandContext.CWMPID string`。
 - Produces: `CommandRepo.MarkSending(ctx context.Context, commandID, cwmpID string, sentAt time.Time) error`。
 
-- [ ] **Step 1: 写 Trace ID 入口和可观测传播失败测试**
+- [x] **Step 1: 写 Trace ID 入口和可观测传播失败测试**
 
 ```go
 func TestEngineHandlerMapsRequestHeaderToTraceID(t *testing.T) {
@@ -63,13 +63,13 @@ func TestEngineHandlerMapsRequestHeaderToTraceID(t *testing.T) {
 
 同时把 observability 测试结构体字面量改为 `Attributes{TraceID: "trace-1"}`，断言 merge/override 后 `TraceID` 保持正确。
 
-- [ ] **Step 2: 运行定向测试并确认 RED**
+- [x] **Step 2: 运行定向测试并确认 RED**
 
 Run: `cd server/plugin/tr069/lib/tr069-core-only && go test ./adapters/http ./observability ./internal/builder ./parser`
 
 Expected: FAIL，至少包含 `Request.TraceID undefined` 或 `Attributes.TraceID undefined`。
 
-- [ ] **Step 3: 完成直接字段切换和入口映射**
+- [x] **Step 3: 完成直接字段切换和入口映射**
 
 ```go
 type Request struct {
@@ -93,7 +93,7 @@ type CommandContext struct {
 
 将 `Attributes.RequestID` 改为 `TraceID`，merge/override 只处理 `TraceID`；HTTP helper 改为 `traceID(r)`，保留读取外部 `X-Request-ID`。将 memory repo 的 `sendingRecord.requestID` 改为 `cwmpID`，并同步所有测试变量名。
 
-- [ ] **Step 4: 运行定向测试和旧字段契约检查**
+- [x] **Step 4: 运行定向测试和旧字段契约检查**
 
 Run: `cd server/plugin/tr069/lib/tr069-core-only && go test ./adapters/http ./observability ./internal/builder ./parser ./pkg/core/defaults`
 
@@ -103,7 +103,7 @@ Run: `cd server/plugin/tr069/lib/tr069-core-only && ! rg -n 'RequestID|Request\{
 
 Expected: exit 0；允许 `X-Request-ID` HTTP 头字面量，不允许旧公开字段或变量语义。
 
-- [ ] **Step 5: 提交 core 类型切换**
+- [x] **Step 5: 提交 core 类型切换**
 
 ```bash
 cd server/plugin/tr069/lib/tr069-core-only
@@ -127,7 +127,7 @@ git commit -m "refactor: clarify trace and cwmp identifiers"
 - Consumes: `Request.TraceID` 和 observability context。
 - Produces: 独立 `Session.ID`；日志键 `traceId` 与 `sessionId`。
 
-- [ ] **Step 1: 写同一会话多请求失败测试**
+- [x] **Step 1: 写同一会话多请求失败测试**
 
 ```go
 func TestSessionIDDoesNotReuseHTTPTraceID(t *testing.T) {
@@ -148,13 +148,13 @@ func TestSessionIDDoesNotReuseHTTPTraceID(t *testing.T) {
 
 测试 helper 使用现有 `SessionHeaderName`/`SessionCookieName` 和内存 SessionStore，避免依赖真实网络。
 
-- [ ] **Step 2: 运行定向测试并确认 RED**
+- [x] **Step 2: 运行定向测试并确认 RED**
 
 Run: `cd server/plugin/tr069/lib/tr069-core-only && go test ./pkg/core -run 'TestSessionIDDoesNotReuseHTTPTraceID|Test.*Cookie' -count=1`
 
 Expected: FAIL，旧实现的 `Session.ID` 等于首个请求 Trace ID。
 
-- [ ] **Step 3: 独立生成 Session ID 并修正日志字段**
+- [x] **Step 3: 独立生成 Session ID 并修正日志字段**
 
 ```go
 if session == nil {
@@ -167,13 +167,13 @@ if session.ID == "" {
 
 在 `telemetry.go` 增加 `LogFieldSessionID = "sessionId"`。`Machine.Process` 从 observability context 读取 Trace ID，并分别记录 `LogFieldTraceID` 与 `LogFieldSessionID`，禁止把 `session.ID` 写入 Trace 字段。
 
-- [ ] **Step 4: 运行 core 全量测试**
+- [x] **Step 4: 运行 core 全量测试**
 
 Run: `cd server/plugin/tr069/lib/tr069-core-only && go test ./...`
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交 core 会话修正**
+- [x] **Step 5: 提交 core 会话修正**
 
 ```bash
 cd server/plugin/tr069/lib/tr069-core-only
@@ -204,7 +204,7 @@ git commit -m "refactor: separate cwmp sessions from http traces"
 - Produces: `cutoverCommandIdentifierSchema(db *gorm.DB) error`，目标结构可重复检查。
 - Consumes: core `MarkSending(..., cwmpID, ...)` 与 wire event `CWMPID`。
 
-- [ ] **Step 1: 写数据库结构、仓储和 DTO 失败测试**
+- [x] **Step 1: 写数据库结构、仓储和 DTO 失败测试**
 
 ```go
 func TestCutoverCommandIdentifierSchemaRenamesAndPreservesValue(t *testing.T) {
@@ -224,13 +224,13 @@ func TestCutoverCommandIdentifierSchemaRenamesAndPreservesValue(t *testing.T) {
 
 另加测试覆盖目标结构重复执行、双列并存返回错误、`MarkSending` 写 `cwmp_id`、XML DTO JSON 不含 `requestId`。
 
-- [ ] **Step 2: 运行定向测试并确认 RED**
+- [x] **Step 2: 运行定向测试并确认 RED**
 
 Run: `cd server && go test ./plugin/tr069/initialize ./plugin/tr069/adapter ./plugin/tr069/service ./plugin/tr069/api -run 'Identifier|MarkSending|CommandXML|CommandRecord' -count=1`
 
 Expected: FAIL，原因是 cutover 函数或 `CWMPID` 字段不存在，或 DTO 仍含 `requestId`。
 
-- [ ] **Step 3: 实现目标结构切换与模型改名**
+- [x] **Step 3: 实现目标结构切换与模型改名**
 
 ```go
 func cutoverCommandIdentifierSchema(db *gorm.DB) error {
@@ -250,7 +250,7 @@ func cutoverCommandIdentifierSchema(db *gorm.DB) error {
 
 在 AutoMigrate 前调用该函数；新库不存在目标表时允许直接 AutoMigrate。将命令模型字段改为 `CWMPID string 'json:"cwmpId" gorm:"column:cwmp_id;size:64;index"'`，XML 模型和响应 DTO 删除 `RequestID`。
 
-- [ ] **Step 4: 切换仓储与双向 XML 关联**
+- [x] **Step 4: 切换仓储与双向 XML 关联**
 
 将 `MarkSending` updates key 改为 `cwmp_id`；`SaveXML` 在 wire event 没有 Command ID 时使用：
 
@@ -266,7 +266,7 @@ if copyRecord.CommandID == "" && copyRecord.CWMPID != "" {
 
 XML sink 只复制 `CommandID`、`CWMPID`、方向、方法、payload 和时间，不保存 Trace ID。
 
-- [ ] **Step 5: 运行 GVA 插件测试并提交**
+- [x] **Step 5: 运行 GVA 插件测试并提交**
 
 Run: `cd server && go test ./plugin/tr069/...`
 
@@ -291,7 +291,7 @@ git commit -m "refactor: persist cwmp identifiers explicitly"
 - Produces: `commandKeyFromCommandID(commandID string) (string, error)`。
 - Consumes: RPC registry 的 `ServerCommandKey bool`。
 
-- [ ] **Step 1: 写 32 字符派生、方法范围和重试失败测试**
+- [x] **Step 1: 写 32 字符派生、方法范围和重试失败测试**
 
 ```go
 func TestCommandKeyFromCommandID(t *testing.T) {
@@ -303,13 +303,13 @@ func TestCommandKeyFromCommandID(t *testing.T) {
 
 表驱动提交测试断言 Reboot/Download/Upload 的 `commandKey == strings.ReplaceAll(commandID, "-", "")`，GetParameterValues 的 CommandKey 为 nil；重试断言新旧 Command ID/CommandKey 不同且 `RetryOf` 指向原命令。
 
-- [ ] **Step 2: 运行定向测试并确认 RED**
+- [x] **Step 2: 运行定向测试并确认 RED**
 
 Run: `cd server && go test ./plugin/tr069/service -run 'CommandKey|Retry' -count=1`
 
 Expected: FAIL，旧值以 `rpc-` 开头且长度为 40。
 
-- [ ] **Step 3: 从唯一 Command ID 派生 CommandKey**
+- [x] **Step 3: 从唯一 Command ID 派生 CommandKey**
 
 ```go
 func commandKeyFromCommandID(commandID string) (string, error) {
@@ -321,7 +321,7 @@ func commandKeyFromCommandID(commandID string) (string, error) {
 
 创建命令时先保存 `commandID := uuid.NewString()`；仅 `definition.ServerCommandKey` 为 true 时调用 helper，禁止生成第二个 UUID。历史记录读取和异步匹配逻辑不重新计算 CommandKey。
 
-- [ ] **Step 4: 验证同步/异步关联并提交**
+- [x] **Step 4: 验证同步/异步关联并提交**
 
 Run: `cd server && go test ./plugin/tr069/service ./plugin/tr069/adapter -run 'CommandKey|Retry|Reboot|Transfer' -count=1`
 
@@ -353,7 +353,7 @@ git commit -m "fix: derive protocol-safe command keys"
 - Produces: `trace.WithTraceID(ctx, traceID)`、`trace.TraceID(ctx)`、`middleware.EnsureTraceID()`。
 - Consumes: 外部 HTTP 头 `X-Request-ID`；core `Request.TraceID`。
 
-- [ ] **Step 1: 写头映射和持久化隔离失败测试**
+- [x] **Step 1: 写头映射和持久化隔离失败测试**
 
 ```go
 func TestEnsureTraceIDMapsExternalRequestHeader(t *testing.T) {
@@ -369,13 +369,13 @@ func TestEnsureTraceIDMapsExternalRequestHeader(t *testing.T) {
 
 handler 测试捕获 core Request 并断言 `TraceID`；DTO/模型测试断言 Trace ID 不进入命令或 XML JSON。
 
-- [ ] **Step 2: 运行定向测试并确认 RED**
+- [x] **Step 2: 运行定向测试并确认 RED**
 
 Run: `cd server && go test ./plugin/tr069/trace ./plugin/tr069/middleware ./plugin/tr069/handler -count=1`
 
 Expected: FAIL，新 API/键尚不存在。
 
-- [ ] **Step 3: 完成 GVA 内部 Trace 改名**
+- [x] **Step 3: 完成 GVA 内部 Trace 改名**
 
 将 context key、map 名、日志字段和调试路由统一为 `traceId`；中间件继续读取/回写 `X-Request-ID`。`handler/cwmp.go` 构造：
 
@@ -389,7 +389,7 @@ request := &core.Request{
 }
 ```
 
-- [ ] **Step 4: 运行插件测试并提交**
+- [x] **Step 4: 运行插件测试并提交**
 
 Run: `cd server && go test ./plugin/tr069/...`
 
@@ -418,7 +418,7 @@ git commit -m "refactor: name http correlation as trace id"
 - Consumes: API 内部 `commandId`、用户可见 `cwmpId`、可选 `commandKey`。
 - Produces: `cwmpIDDisplay(command)` 和 `showsCommandKey(operation)` 等纯展示 helper。
 
-- [ ] **Step 1: 写模板契约和展示 helper 失败测试**
+- [x] **Step 1: 写模板契约和展示 helper 失败测试**
 
 ```js
 test('RPC command UI hides internal identifiers', () => {
@@ -432,13 +432,13 @@ test('RPC command UI hides internal identifiers', () => {
 
 纯函数测试覆盖：排队/等待设备返回“尚未生成”；构造失败且无 CWMP ID 返回“未生成（构造失败）”；仅三种异步命令展示 CommandKey。
 
-- [ ] **Step 2: 运行 contract 测试并确认 RED**
+- [x] **Step 2: 运行 contract 测试并确认 RED**
 
 Run: `cd web && node --test src/plugin/tr069/view/command-record/*.test.js src/plugin/tr069/view/device/components/*.contract.test.js`
 
 Expected: FAIL，当前模板仍展示 Command ID/Request ID 或成功提示含 `commandId=`。
 
-- [ ] **Step 3: 更新列表、详情、XML 和成功提示**
+- [x] **Step 3: 更新列表、详情、XML 和成功提示**
 
 列表删除 Command ID 搜索框与列，但保留 `row-key="commandId"` 和详情 API 参数。详情使用：
 
@@ -451,7 +451,7 @@ Expected: FAIL，当前模板仍展示 Command ID/Request ID 或成功提示含 
 
 XML 元数据删除 Request ID；重试、RPC 提交和参数同步成功文案不拼接 Command ID。样式只使用 Element Plus CSS 变量，保持明暗主题。
 
-- [ ] **Step 4: 运行前端测试与构建并提交**
+- [x] **Step 4: 运行前端测试与构建并提交**
 
 Run: `cd web && node --test src/plugin/tr069/view/command-record/*.test.js src/plugin/tr069/view/device/components/*.contract.test.js`
 
@@ -478,7 +478,7 @@ git commit -m "refactor: simplify rpc identifier display"
 - Consumes: Task 1-6 的 core 与 GVA 提交。
 - Produces: 目标 MySQL schema、运行中的 GVA 前后端/ACS 和全部已勾选 OpenSpec tasks。
 
-- [ ] **Step 1: 运行两个仓库和前端完整验证**
+- [x] **Step 1: 运行两个仓库和前端完整验证**
 
 Run: `cd server/plugin/tr069/lib/tr069-core-only && go test ./...`
 
@@ -492,13 +492,13 @@ Run: `cd web && node --test src/plugin/tr069/view/command-record/*.test.js src/p
 
 Expected: PASS，构建 exit 0。
 
-- [ ] **Step 2: 执行旧字段和 UI 字面契约检查**
+- [x] **Step 2: 执行旧字段和 UI 字面契约检查**
 
 Run: `! rg -n 'json:"requestId"|gorm:"[^\"]*request_id|label="Request ID"|label="Command ID"|commandId=' server/plugin/tr069 web/src/plugin/tr069/view`
 
 Expected: exit 0；数据库切换代码中的 SQL/列名检查和外部 `X-Request-ID` 不属于该匹配范围。
 
-- [ ] **Step 3: 停止 GVA 并启动新版本执行 schema cutover**
+- [x] **Step 3: 停止 GVA 并启动新版本执行 schema cutover**
 
 先停止当前 GVA 后端与前端进程，保持 MySQL/Redis 运行。启动新后端，让初始化逻辑完成 `request_id -> cwmp_id` 列重命名和 XML 旧列删除；若启动失败，不恢复旧二进制，先修复目标结构再重试新版本。
 
@@ -506,11 +506,11 @@ Run: `mysql -N -e "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABL
 
 Expected: 第一条查询只返回 `cwmp_id`，第二条无输出。连接参数使用项目当前 MySQL 配置注入，不在命令或日志中打印密码。
 
-- [ ] **Step 4: 重启前后端并验证运行链路**
+- [x] **Step 4: 重启前后端并验证运行链路**
 
 确认监听：后端 `18888`、前端 `18080`、ACS `7458`。打开 RPC 命令页面并提交一条安全查询 RPC，确认命令详情显示 CWMP ID、双向 XML 分别显示报文实际 CWMP ID，页面不显示 Command ID/Request ID。
 
-- [ ] **Step 5: 勾选 OpenSpec 任务并提交主仓库收口**
+- [x] **Step 5: 勾选 OpenSpec 任务并提交主仓库收口**
 
 逐项核对测试证据后把 `openspec/changes/unify-tr069-identifier-semantics/tasks.md` 的 20 项改为 `[x]`。
 
