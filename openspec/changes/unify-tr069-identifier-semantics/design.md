@@ -39,6 +39,8 @@ core 的 HTTP Request ID 同时被用作可观测属性和 Session ID 初始值�
 
 命令尚未发送时 CWMP ID 为空；UI 根据状态显示“尚未生成”或“未生成（构造失败）”。XML 记录保存每条报文实际携带的 CWMP ID，因此 TransferComplete、Inform 等设备主动报文可以拥有不同于原命令请求的 CWMP ID。
 
+设备主动异步报文不得依赖原请求 CWMP ID 反查命令：TransferComplete 优先通过 CommandKey 关联 Download/Upload，携带 CommandKey 的 Inform 同样通过 CommandKey 关联；未携带 CommandKey 的 Reboot 启动 Inform 则通过设备标识、启动事件和等待重启状态关联。完成关联后，XML 仍保存设备报文自身的 CWMP ID。
+
 ### 3. CommandKey 由 Command ID 确定性派生
 
 仅 Reboot、Download、Upload 在创建命令时生成 CommandKey。算法为：解析规范 UUID Command ID，将规范字符串中的四个连字符删除，得到 32 个小写十六进制字符。
@@ -52,7 +54,7 @@ CommandKey:  62a53a00786f4a45b31fb23f7d23bb6e
 
 ### 4. Trace ID 与 Session ID 完全分离
 
-Trace ID 表示一次 HTTP 请求，只存在于请求上下文和结构化日志。GVA 与 core 内部统一使用 `TraceID/traceId`。外部仍接受常见的 `X-Request-ID`，入口将其映射为 Trace ID；缺失时生成 UUID。
+Trace ID 表示一次 HTTP 请求，只存在于请求上下文和结构化日志。GVA 与 core 内部统一使用 `TraceID/traceId`，并在每个 HTTP 请求入口生成 UUID。ACS 不读取也不回写外部链路标识头，避免非标准响应头触发 CPE 厂商协议栈兼容问题。
 
 Session ID 表示一次 CWMP 会话，独立创建和持久化。core 不再用 HTTP Trace ID 初始化 Session ID，也不再把 Session ID 写入 `trace_id` 日志字段。结构化日志可以同时记录 `traceId`、`sessionId`、`cwmpId`、`commandId`，但 RPC 命令详情不显示 Trace ID。
 

@@ -43,7 +43,7 @@ API 提交 RPC
 ### 2.2 HTTP Trace 与 CWMP Session
 
 ```text
-X-Request-ID（存在）或入口生成 UUID
+每个 HTTP 请求入口生成 UUID
   -> Request.TraceID
   -> observability.Attributes.TraceID
   -> 当前 HTTP 请求上下文与结构化日志
@@ -54,7 +54,7 @@ X-TR069-Session / tr069_session cookie / 新建 token
   -> 同一 CWMP 会话的多个 HTTP POST 复用
 ```
 
-外部 HTTP 头仍使用行业通用名称 `X-Request-ID`，但进入应用后统一称为 Trace ID。Trace ID 不参与会话查找，不写入 Session ID、命令记录或 XML 记录。
+Trace ID 完全由 ACS 内部生成，不读取外部链路标识头，也不写入 HTTP 响应。Trace ID 不参与会话查找，不写入 Session ID、命令记录或 XML 记录。
 
 ## 3. tr069-core-only 破坏性切换
 
@@ -97,7 +97,7 @@ Go 接口的方法类型不因形参名变化而改变，但实现、测试变�
 修改 `adapters/http/engine_handler.go`：
 
 - `requestID` helper 改名为 `traceID`。
-- 优先读取 `X-Request-ID`；缺失时生成 UUID 风格 Trace ID。
+- 每次请求生成新的 UUID 风格 Trace ID，不接受外部请求头覆盖。
 - 构造 `core.Request{TraceID: ...}`，并把 Trace ID 注入 observability context。
 
 修改 `pkg/core/engine_impl.go`：
@@ -151,7 +151,7 @@ func commandKeyFromCommandID(commandID string) (string, error)
 
 - `WithRequestID/RequestID/EnsureRequestID` 改为 `WithTraceID/TraceID/EnsureTraceID`。
 - Gin context 内部键和结构化日志字段使用 `traceId`。
-- 外部头继续读取/回写 `X-Request-ID`，不破坏代理和现有观测工具。
+- Trace ID 仅保留在内部上下文和日志中，不读取请求头，也不写入响应头。
 - 调试路由参数由 `:requestId` 改为 `:traceId`。
 - GVA 构造 core 请求时只设置 `core.Request.TraceID`。
 
@@ -257,4 +257,3 @@ Element Plus 主题变量继续用于抽屉、描述表、XML 和 JSON 区域，
 - 不保留数据库旧列、双写逻辑或旧程序回滚桥。
 - 不批量改写历史 CommandKey。
 - 不修改现有 RPC 状态机、队列、超时或权限模型。
-

@@ -21,7 +21,7 @@
 
 ## 4. GVA Trace 与用户界面
 
-- [x] 4.1 为 GVA HTTP Trace 中间件编写测试，将外部 `X-Request-ID` 映射为内部 `TraceID/traceId`
+- [x] 4.1 为 GVA HTTP Trace 中间件编写测试，确认每次请求独立生成内部 `TraceID/traceId` 且不读取或回写外部链路头
 - [x] 4.2 将 GVA Trace 上下文、调试路由和结构化日志字段改为 Trace ID，并确保 Trace ID 不进入命令/XML DTO
 - [x] 4.3 编写前端契约测试，要求列表、详情、XML 和成功提示均不渲染 Command ID 或 Request ID
 - [x] 4.4 更新 RPC 命令 UI：展示 CWMP ID，按状态显示未生成文案，仅对 Reboot、Download、Upload 展示 CommandKey
@@ -32,3 +32,10 @@
 - [x] 5.2 运行 GVA TR-069 插件全量 Go 测试、数据库结构切换测试和前端 contract tests
 - [x] 5.3 构建 GVA 前端与后端，确认 API JSON 中用户可见字段只使用 `cwmpId` 和 `traceId`
 - [x] 5.4 停止 GVA、执行数据库一次性结构切换，再重启前后端并验证命令详情、XML 详情及服务健康状态
+
+## 6. 审查修复
+
+- [x] 6.1 为使用新 CWMP ID 的 Reboot Inform 和 TransferComplete 补充失败测试，并通过 CommandKey 或设备启动事件关联原命令，同时保留报文实际 CWMP ID
+- [x] 6.2 为 core HTTP 适配器补充边界测试，确认 Trace ID 仅在内部生成且不通过 HTTP 响应暴露
+- [x] 6.3 为 core 命令发送上下文补充失败测试，并将实际 SOAP CWMP ID 写入 `CommandContext.CWMPID`
+- [x] 6.4 运行 tr069-core、GVA TR-069 插件全量测试及相关构建，并使用 BS 验证 ACS 响应不再包含额外链路头

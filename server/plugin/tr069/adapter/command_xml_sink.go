@@ -40,7 +40,7 @@ func (s *CommandXMLSink) Emit(ctx context.Context, event observability.Event) {
 	if s.retention != nil {
 		retention = s.retention()
 	}
-	err := s.store.SaveXML(ctx, &model.CommandXML{
+	err := s.store.SaveXMLWithCorrelation(ctx, &model.CommandXML{
 		CommandID: event.CommandID,
 		Direction: string(event.Direction),
 		Method:    event.Method,
@@ -48,6 +48,11 @@ func (s *CommandXMLSink) Emit(ctx context.Context, event observability.Event) {
 		Payload:   append([]byte(nil), event.Payload...),
 		ExpiresAt: now.Add(retention),
 		CreatedAt: now,
+	}, service.CommandXMLCorrelation{
+		CommandKey: event.CommandKey,
+		DeviceKey:  event.DeviceKey,
+		Method:     event.Method,
+		EventCodes: append([]string(nil), event.EventCodes...),
 	})
 	if errors.Is(err, service.ErrUncorrelatedCommandXML) {
 		return

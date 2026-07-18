@@ -29,8 +29,8 @@ type RawDumpConfig struct {
 const defaultDumpMaxBytes = 64 * 1024
 
 // EnsureTraceID 是 TR069 调试辅助中间件：
-// - 优先使用请求头 X-Request-ID
-// - 否则自动生成 UUID，并写入 gin.Context(key="traceId")
+// - 为每个请求生成内部 UUID，并写入 gin.Context(key="traceId")
+// - 不接受外部链路标识覆盖，也不向 CPE 返回内部 Trace ID
 // 删除/禁用：从 TR069 server 的 middleware 链中移除此中间件即可。
 func EnsureTraceID() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -40,11 +40,7 @@ func EnsureTraceID() gin.HandlerFunc {
 				return
 			}
 		}
-		traceID := c.GetHeader("X-Request-ID")
-		if traceID == "" {
-			traceID = uuid.NewString()
-		}
-		c.Set("traceId", traceID)
+		c.Set("traceId", uuid.NewString())
 		c.Next()
 	}
 }

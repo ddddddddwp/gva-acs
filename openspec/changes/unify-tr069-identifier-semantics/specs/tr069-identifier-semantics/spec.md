@@ -69,15 +69,15 @@
 ### Requirement: Trace ID 必须只追踪单次 HTTP 请求
 GVA 与 core SHALL 使用 `TraceID/traceId` 表示单次 HTTP 请求链路，Trace ID SHALL 只存在于请求上下文和日志，不得写入命令详情或 XML 记录。
 
-#### Scenario: 请求携带外部链路头
-- **WHEN** HTTP 请求携带 `X-Request-ID`
-- **THEN** 入口将该值映射为内部 Trace ID
+#### Scenario: 请求进入 ACS
+- **WHEN** 任意 HTTP 请求进入 GVA 或 core ACS 入口
+- **THEN** 入口生成新的 UUID Trace ID，不从外部请求头读取链路标识
+- **AND** 该值只覆盖当前 HTTP 请求链路
 - **AND** core 可观测事件和 GVA 结构化日志使用 `traceId` 字段
 
-#### Scenario: 请求未携带链路头
-- **WHEN** HTTP 请求没有 `X-Request-ID`
-- **THEN** 入口生成新的 UUID Trace ID
-- **AND** 该值只覆盖当前 HTTP 请求链路
+#### Scenario: ACS 返回协议响应
+- **WHEN** ACS 向 CPE 返回 HTTP 响应
+- **THEN** 响应不携带内部 Trace ID 或额外链路标识头
 
 #### Scenario: 用户查看 RPC 详情
 - **WHEN** 用户查看命令概览或 XML 详情

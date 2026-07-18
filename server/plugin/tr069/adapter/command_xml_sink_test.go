@@ -111,6 +111,93 @@ func TestCommandXMLSinkCorrelatesBidirectionalWireEventsByCWMPID(t *testing.T) {
 	}
 }
 
+func TestCommandXMLSinkCorrelatesAsyncInboundXMLWithoutReusingRequestCWMPID(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(new(model.Command), new(model.CommandXML)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	rebootKey := "reboot-command-key"
+	transferKey := "transfer-command-key"
+	commands := []model.Command{
+		{
+			CommandID: "cmd-reboot-async", DeviceID: 18, DeviceKey: "001122-REBOOT",
+			Operation: "Reboot", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusWaitingReboot,
+			CommandKey: &rebootKey, CWMPID: "acs-reboot-cwmp", QueuedAt: now.Add(-time.Minute), CreatedAt: now.Add(-time.Minute),
+		},
+		{
+			CommandID: "cmd-transfer-async", DeviceID: 19, DeviceKey: "001122-TRANSFER",
+			Operation: "Download", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusWaitingTransfer,
+			CommandKey: &transferKey, CWMPID: "acs-transfer-cwmp", QueuedAt: now, CreatedAt: now,
+		},
+	}
+	if err := db.Create(&commands).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	sink := NewCommandXMLSink(service.NewCommandStore(db), func() time.Duration { return time.Hour })
+	sink.Emit(context.Background(), observability.Event{
+		Level: observability.LevelInfo, Stage: "wire.xml", Direction: observability.DirectionInbound,
+		Attributes: observability.Attributes{CWMPID: "device-reboot-cwmp", Method: "Inform", DeviceKey: commands[0].DeviceKey},
+		EventCodes: []string{"1 BOOT"},
+		Payload:    []byte(`<Envelope><ID>device-reboot-cwmp</ID><Inform><EventCode>1 BOOT</EventCode></Inform></Envelope>`),
+	})
+	sink.Emit(context.Background(), observability.Event{
+		Level: observability.LevelInfo, Stage: "wire.xml", Direction: observability.DirectionInbound,
+		Attributes: observability.Attributes{CWMPID: "device-transfer-cwmp", Method: "TransferComplete", DeviceKey: commands[1].DeviceKey},
+		CommandKey: transferKey,
+		Payload:    []byte(`<Envelope><ID>device-transfer-cwmp</ID><TransferComplete><CommandKey>transfer-command-key</CommandKey></TransferComplete></Envelope>`),
+	})
+
+	var records []model.CommandXML
+	if err := db.Order("id ASC").Find(&records).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("stored rows = %d, want Reboot Inform and TransferComplete XML", len(records))
+	}
+	if records[0].CommandID != commands[0].CommandID || records[0].CWMPID != "device-reboot-cwmp" {
+		t.Fatalf("Reboot Inform record = %#v", records[0])
+	}
+	if records[1].CommandID != commands[1].CommandID || records[1].CWMPID != "device-transfer-cwmp" {
+		t.Fatalf("TransferComplete record = %#v", records[1])
+	}
+}
+
+func TestCommandXMLSinkDoesNotAttachUnrelatedInformToWaitingReboot(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(new(model.Command), new(model.CommandXML)); err != nil {
+		t.Fatal(err)
+	}
+	command := model.Command{
+		CommandID: "cmd-waiting-reboot", DeviceID: 20, DeviceKey: "001122-PERIODIC",
+		Operation: "Reboot", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusWaitingReboot,
+		CWMPID: "acs-reboot-cwmp", QueuedAt: time.Now(), CreatedAt: time.Now(),
+	}
+	if err := db.Create(&command).Error; err != nil {
+		t.Fatal(err)
+	}
+	sink := NewCommandXMLSink(service.NewCommandStore(db), func() time.Duration { return time.Hour })
+	sink.Emit(context.Background(), observability.Event{
+		Level: observability.LevelInfo, Stage: "wire.xml", Direction: observability.DirectionInbound,
+		Attributes: observability.Attributes{CWMPID: "periodic-cwmp", Method: "Inform", DeviceKey: command.DeviceKey},
+		EventCodes: []string{"2 PERIODIC"}, Payload: []byte(`<Envelope><Inform/></Envelope>`),
+	})
+	var count int64
+	if err := db.Model(new(model.CommandXML)).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("stored rows = %d, want unrelated Inform ignored", count)
+	}
+}
+
 func TestCommandXMLSinkFiltersIncompleteOrNonWireEvents(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

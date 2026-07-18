@@ -19,7 +19,7 @@ base-ref: 632b2566b528fb2beb52a3d205e973cefbedc220
 - `tr069-core-only` 是独立 Git 仓库，core 任务在其 `dev` 分支独立提交，主仓库不提交该目录内容。
 - 不保留 `Request.ID`、`Attributes.RequestID`、`CommandContext.RequestID` 或数据库旧列兼容逻辑。
 - `Command ID` 继续作为 GVA 内部主键，但普通 UI 不展示、复制或在成功提示中输出。
-- `CWMP ID` 只表示 SOAP `<cwmp:ID>`；Trace ID 只用于单次 HTTP 日志链路；Session ID 独立于 Trace ID。
+- `CWMP ID` 只表示 SOAP `<cwmp:ID>`；Trace ID 由 ACS 为每次 HTTP 请求独立生成且只用于内部日志链路；Session ID 独立于 Trace ID。
 - 只有 Reboot、Download、Upload 生成 CommandKey，值为 Command ID 去除连字符后的 32 位小写十六进制字符串。
 - 不改写历史 CommandKey，不改变现有 RPC 状态机、FIFO、超时和权限模型。
 - 每个任务先验证 RED，再完成 GREEN；每个仓库的提交只包含对应任务文件。
@@ -49,14 +49,13 @@ base-ref: 632b2566b528fb2beb52a3d205e973cefbedc220
 - [x] **Step 1: 写 Trace ID 入口和可观测传播失败测试**
 
 ```go
-func TestEngineHandlerMapsRequestHeaderToTraceID(t *testing.T) {
+func TestEngineHandlerGeneratesInternalTraceID(t *testing.T) {
 	engine := &captureEngine{}
 	h := NewEngineHandler(engine)
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
-	req.Header.Set("X-Request-ID", "trace-http-1")
 	h.ServeHTTP(httptest.NewRecorder(), req)
-	if engine.request == nil || engine.request.TraceID != "trace-http-1" {
-		t.Fatalf("TraceID = %#v, want trace-http-1", engine.request)
+	if engine.request == nil || len(engine.request.TraceID) != 36 {
+		t.Fatalf("TraceID = %#v, want generated UUID", engine.request)
 	}
 }
 ```
@@ -91,7 +90,7 @@ type CommandContext struct {
 }
 ```
 
-将 `Attributes.RequestID` 改为 `TraceID`，merge/override 只处理 `TraceID`；HTTP helper 改为 `traceID(r)`，保留读取外部 `X-Request-ID`。将 memory repo 的 `sendingRecord.requestID` 改为 `cwmpID`，并同步所有测试变量名。
+将 `Attributes.RequestID` 改为 `TraceID`，merge/override 只处理 `TraceID`；HTTP helper 改为每次生成内部 Trace ID，不读取外部链路头。将 memory repo 的 `sendingRecord.requestID` 改为 `cwmpID`，并同步所有测试变量名。
 
 - [x] **Step 4: 运行定向测试和旧字段契约检查**
 
@@ -101,7 +100,7 @@ Expected: PASS。
 
 Run: `cd server/plugin/tr069/lib/tr069-core-only && ! rg -n 'RequestID|Request\{[[:space:]]*ID:|\.ID[[:space:]]*=[[:space:]]*requestID' pkg observability adapters internal parser`
 
-Expected: exit 0；允许 `X-Request-ID` HTTP 头字面量，不允许旧公开字段或变量语义。
+Expected: exit 0；不允许外部链路头字面量、旧公开字段或变量语义。
 
 - [x] **Step 5: 提交 core 类型切换**
 
@@ -351,19 +350,18 @@ git commit -m "fix: derive protocol-safe command keys"
 
 **Interfaces:**
 - Produces: `trace.WithTraceID(ctx, traceID)`、`trace.TraceID(ctx)`、`middleware.EnsureTraceID()`。
-- Consumes: 外部 HTTP 头 `X-Request-ID`；core `Request.TraceID`。
+- Consumes: core `Request.TraceID`；不依赖外部链路标识头。
 
 - [x] **Step 1: 写头映射和持久化隔离失败测试**
 
 ```go
-func TestEnsureTraceIDMapsExternalRequestHeader(t *testing.T) {
+func TestEnsureTraceIDGeneratesInternalUUID(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/acs", nil)
-	r.Header.Set("X-Request-ID", "trace-gva-1")
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = r
 	EnsureTraceID()(c)
-	if got := c.GetString("traceId"); got != "trace-gva-1" { t.Fatalf("got %q", got) }
+	if got := c.GetString("traceId"); len(got) != 36 { t.Fatalf("got %q", got) }
 }
 ```
 
@@ -377,7 +375,7 @@ Expected: FAIL，新 API/键尚不存在。
 
 - [x] **Step 3: 完成 GVA 内部 Trace 改名**
 
-将 context key、map 名、日志字段和调试路由统一为 `traceId`；中间件继续读取/回写 `X-Request-ID`。`handler/cwmp.go` 构造：
+将 context key、map 名、日志字段和调试路由统一为 `traceId`；中间件只生成内部 UUID，不读取或回写外部链路头。`handler/cwmp.go` 构造：
 
 ```go
 request := &core.Request{
@@ -496,7 +494,7 @@ Expected: PASS，构建 exit 0。
 
 Run: `! rg -n 'json:"requestId"|gorm:"[^\"]*request_id|label="Request ID"|label="Command ID"|commandId=' server/plugin/tr069 web/src/plugin/tr069/view`
 
-Expected: exit 0；数据库切换代码中的 SQL/列名检查和外部 `X-Request-ID` 不属于该匹配范围。
+Expected: exit 0；数据库切换代码中的 SQL/列名检查不属于该匹配范围。
 
 - [x] **Step 3: 停止 GVA 并启动新版本执行 schema cutover**
 
@@ -530,3 +528,34 @@ git commit -m "docs: complete tr069 identifier semantics change"
 | 4.1-4.2 | Task 5 |
 | 4.3-4.4 | Task 6 |
 | 5.1-5.4 | Task 7，分别复用 Task 1-6 的定向证据 |
+
+### Task 8: 删除 ACS 外部链路头并验证 CPE 兼容性
+
+**OpenSpec tasks:** 4.1、6.2、6.4（厂商协议栈兼容性修正）
+
+**Files:**
+- Modify: `server/plugin/tr069/middleware/trace_id_test.go`
+- Modify: `server/plugin/tr069/middleware/raw_dump.go`
+- Modify: `server/plugin/tr069/handler/cwmp.go`
+- Modify: `server/plugin/tr069/lib/tr069-core-only/adapters/http/engine_handler_trace_test.go`
+- Modify: `server/plugin/tr069/lib/tr069-core-only/adapters/http/engine_handler.go`
+
+- [x] **Step 1: 先写边界失败测试**
+
+GVA 与 core 测试都向请求注入任意外部链路头，断言内部 Trace ID 是新生成 UUID、不会复用外部值，并断言响应不返回内部 Trace ID。
+
+- [x] **Step 2: 运行定向测试并确认 RED**
+
+Run: `cd server && go test ./plugin/tr069/middleware -run TestEnsureTraceID -count=1`
+
+Run: `cd server/plugin/tr069/lib/tr069-core-only && go test ./adapters/http -run TraceID -count=1`
+
+Expected: FAIL，旧实现仍读取或回写外部链路头。
+
+- [x] **Step 3: 最小实现内部 Trace ID**
+
+两个 HTTP 入口都直接生成 UUID。GVA handler 的安全回退同样只生成 UUID；任何路径都不从请求头取值，也不把 Trace ID 写到响应头。
+
+- [x] **Step 4: 全量测试、构建与 BS 实际验证**
+
+Run core 和 GVA TR-069 全量测试及后端构建，重启 GVA 前后端后触发 BS Inform。新交互必须正常收到 ACS 响应，且 BS 新日志中不再出现未知链路头错误。

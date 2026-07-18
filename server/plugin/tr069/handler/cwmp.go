@@ -26,10 +26,7 @@ func CWMPHandler(c *gin.Context) {
 	traceIDValue, _ := c.Get("traceId")
 	traceID, _ := traceIDValue.(string)
 	if traceID == "" {
-		traceID = c.GetHeader("X-Request-ID")
-		if traceID == "" {
-			traceID = uuid.NewString()
-		}
+		traceID = uuid.NewString()
 		c.Set("traceId", traceID)
 	}
 

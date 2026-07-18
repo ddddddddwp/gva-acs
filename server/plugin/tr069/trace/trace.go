@@ -14,7 +14,7 @@ type Entry struct {
 }
 
 // Store 是 TR069 调试用 Trace 存储（内存环形队列风格）：
-// - key = traceId（来自 X-Request-ID 或自动生成的 UUID）
+// - key = traceId（由 ACS 为每个 HTTP 请求生成的内部 UUID）
 // - value = 按时间顺序追加的阶段记录（解析、入库、下发等）
 // 删除/禁用：不影响核心业务，移除 trace.Add/trace.WithTraceID 调用以及 /tr069/debug/trace 接口即可。
 type Store struct {

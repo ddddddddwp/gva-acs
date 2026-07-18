@@ -51,7 +51,7 @@ func StartTR069Server() {
 func SetupEngine() *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
-	// TR069 调试辅助：确保每个请求都有 traceId（Header: X-Request-ID，缺省则自动生成）。
+	// TR069 调试辅助：为每个请求生成仅用于内部日志链路的 traceId。
 	// 删除/禁用：移除这一行即可，不影响核心 TR069 处理逻辑。
 	engine.Use(middleware.EnsureTraceID())
 	// 原始报文中间件始终安装；每个请求从原子运行时快照决定是否捕获。
