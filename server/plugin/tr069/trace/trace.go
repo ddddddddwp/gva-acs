@@ -14,12 +14,12 @@ type Entry struct {
 }
 
 // Store 是 TR069 调试用 Trace 存储（内存环形队列风格）：
-// - key = requestId（来自 X-Request-Id 或自动生成的 UUID）
+// - key = traceId（来自 X-Request-ID 或自动生成的 UUID）
 // - value = 按时间顺序追加的阶段记录（解析、入库、下发等）
-// 删除/禁用：不影响核心业务，移除 trace.Add/trace.WithRequestID 调用以及 /tr069/debug/trace 接口即可。
+// 删除/禁用：不影响核心业务，移除 trace.Add/trace.WithTraceID 调用以及 /tr069/debug/trace 接口即可。
 type Store struct {
 	mu         sync.Mutex
-	byRequest  map[string][]Entry
+	byTrace    map[string][]Entry
 	maxEntries int
 	maxAge     time.Duration
 }
@@ -32,14 +32,14 @@ func NewStore(maxEntries int, maxAge time.Duration) *Store {
 		maxAge = 30 * time.Minute
 	}
 	return &Store{
-		byRequest:  map[string][]Entry{},
+		byTrace:    map[string][]Entry{},
 		maxEntries: maxEntries,
 		maxAge:     maxAge,
 	}
 }
 
-func (s *Store) Add(requestID string, e Entry) {
-	if s == nil || requestID == "" {
+func (s *Store) Add(traceID string, e Entry) {
+	if s == nil || traceID == "" {
 		return
 	}
 	s.mu.Lock()
@@ -51,9 +51,9 @@ func (s *Store) Add(requestID string, e Entry) {
 		e.At = now
 	}
 
-	for id, entries := range s.byRequest {
+	for id, entries := range s.byTrace {
 		if len(entries) == 0 {
-			delete(s.byRequest, id)
+			delete(s.byTrace, id)
 			continue
 		}
 		last := entries[len(entries)-1].At
@@ -61,25 +61,25 @@ func (s *Store) Add(requestID string, e Entry) {
 			last = now
 		}
 		if now.Sub(last) > s.maxAge {
-			delete(s.byRequest, id)
+			delete(s.byTrace, id)
 		}
 	}
 
-	entries := append(s.byRequest[requestID], e)
+	entries := append(s.byTrace[traceID], e)
 	if len(entries) > s.maxEntries {
 		entries = entries[len(entries)-s.maxEntries:]
 	}
-	s.byRequest[requestID] = entries
+	s.byTrace[traceID] = entries
 }
 
-func (s *Store) Get(requestID string) []Entry {
-	if s == nil || requestID == "" {
+func (s *Store) Get(traceID string) []Entry {
+	if s == nil || traceID == "" {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entries := s.byRequest[requestID]
+	entries := s.byTrace[traceID]
 	if len(entries) == 0 {
 		return nil
 	}
@@ -90,29 +90,29 @@ func (s *Store) Get(requestID string) []Entry {
 
 var Default = NewStore(200, 30*time.Minute)
 
-type requestIDKey struct{}
+type traceIDKey struct{}
 
-func WithRequestID(ctx context.Context, requestID string) context.Context {
+func WithTraceID(ctx context.Context, traceID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if requestID == "" {
+	if traceID == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, requestIDKey{}, requestID)
+	return context.WithValue(ctx, traceIDKey{}, traceID)
 }
 
-func RequestID(ctx context.Context) string {
+func TraceID(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	v := ctx.Value(requestIDKey{})
+	v := ctx.Value(traceIDKey{})
 	id, _ := v.(string)
 	return id
 }
 
 func Add(ctx context.Context, stage, message string, fields map[string]string) {
-	id := RequestID(ctx)
+	id := TraceID(ctx)
 	if id == "" {
 		return
 	}
@@ -124,6 +124,6 @@ func Add(ctx context.Context, stage, message string, fields map[string]string) {
 	})
 }
 
-func Get(ctx context.Context, requestID string) []Entry {
-	return Default.Get(requestID)
+func Get(ctx context.Context, traceID string) []Entry {
+	return Default.Get(traceID)
 }

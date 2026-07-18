@@ -28,7 +28,7 @@ func TestRawRequestDumpSanitizesLogWithoutMutatingHandlerBody(t *testing.T) {
 
 	body := `<Envelope><ParameterValueStruct><Name>Device.ManagementServer.ConnectionRequestPassword</Name><Value>request-secret</Value></ParameterValueStruct><Password>download-secret</Password></Envelope>`
 	router := gin.New()
-	router.Use(EnsureRequestID())
+	router.Use(EnsureTraceID())
 	router.Use(RawDump(RawDumpConfig{}))
 	router.POST("/", func(c *gin.Context) {
 		got, err := io.ReadAll(c.Request.Body)

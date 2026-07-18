@@ -27,7 +27,7 @@ func TestRawResponseDump_WritesInfoLog(t *testing.T) {
 	})
 
 	r := gin.New()
-	r.Use(EnsureRequestID())
+	r.Use(EnsureTraceID())
 	r.Use(RawResponseDump(RawResponseDumpConfig{MaxBytes: 64 * 1024, DumpToConsole: false}))
 	r.POST("/", func(c *gin.Context) {
 		c.Data(http.StatusOK, "text/xml", []byte("<soap>ok</soap>"))
@@ -66,7 +66,7 @@ func TestRawResponseDumpSanitizesLogWithoutMutatingResponse(t *testing.T) {
 
 	body := []byte(`<Envelope><ParameterValueStruct><Name>Device.ManagementServer.ConnectionRequestPassword</Name><Value>response-secret</Value></ParameterValueStruct><Password>download-secret</Password></Envelope>`)
 	r := gin.New()
-	r.Use(EnsureRequestID())
+	r.Use(EnsureTraceID())
 	r.Use(RawResponseDump(RawResponseDumpConfig{}))
 	r.POST("/", func(c *gin.Context) {
 		c.Data(http.StatusOK, "text/xml", body)

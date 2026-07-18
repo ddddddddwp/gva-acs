@@ -22,7 +22,7 @@ func Api(ctx context.Context) {
 		{Path: "/tr069/fap/:deviceId", Description: "配置FAP", ApiGroup: "TR069", Method: "PUT"},
 
 		// Debug APIs
-		{Path: "/tr069/debug/trace/:requestId", Description: "获取调试追踪", ApiGroup: "TR069", Method: "GET"},
+		{Path: "/tr069/debug/trace/:traceId", Description: "获取调试追踪", ApiGroup: "TR069", Method: "GET"},
 
 		// Command APIs
 		{Path: "/tr069/command/:deviceId/getRPCMethods", Description: "查询设备能力", ApiGroup: "TR069", Method: "POST"},

@@ -25,8 +25,8 @@ func RawResponseDump(_ RawResponseDumpConfig) gin.HandlerFunc {
 			return
 		}
 		maxBytes := dumpMaxBytes(settings)
-		reqID, _ := c.Get("requestId")
-		requestID, _ := reqID.(string)
+		traceIDValue, _ := c.Get("traceId")
+		traceID, _ := traceIDValue.(string)
 
 		capture := newResponseCaptureWriter(c.Writer, maxBytes)
 		c.Writer = capture
@@ -36,15 +36,15 @@ func RawResponseDump(_ RawResponseDumpConfig) gin.HandlerFunc {
 		elapsed := time.Since(start)
 
 		logBody := sanitizedCWMPLogCopy(capture.body.Bytes())
-		respDump := dumpResponse(c.Writer.Status(), c.Writer.Header(), logBody, requestID, elapsed, maxBytes)
+		respDump := dumpResponse(c.Writer.Status(), c.Writer.Header(), logBody, traceID, elapsed, maxBytes)
 		if settings.DumpRaw {
 			_, _ = fmt.Fprintln(os.Stdout, respDump)
 		}
 		if settings.InfoLogEnable {
 			writeInfoLog(respDump, settings)
 		}
-		if requestID != "" {
-			trace.Default.Add(requestID, trace.Entry{
+		if traceID != "" {
+			trace.Default.Add(traceID, trace.Entry{
 				At:      time.Now(),
 				Stage:   "raw.response",
 				Message: truncateBytes(logBody, maxBytes),

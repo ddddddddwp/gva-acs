@@ -23,14 +23,14 @@ import (
 )
 
 func CWMPHandler(c *gin.Context) {
-	reqIDVal, _ := c.Get("requestId")
-	reqID, _ := reqIDVal.(string)
-	if reqID == "" {
-		reqID = c.GetHeader("X-Request-Id")
-		if reqID == "" {
-			reqID = uuid.NewString()
+	traceIDValue, _ := c.Get("traceId")
+	traceID, _ := traceIDValue.(string)
+	if traceID == "" {
+		traceID = c.GetHeader("X-Request-ID")
+		if traceID == "" {
+			traceID = uuid.NewString()
 		}
-		c.Set("requestId", reqID)
+		c.Set("traceId", traceID)
 	}
 
 	body, err := io.ReadAll(c.Request.Body)
@@ -43,7 +43,7 @@ func CWMPHandler(c *gin.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = trace.WithRequestID(ctx, reqID)
+	ctx = trace.WithTraceID(ctx, traceID)
 	clientIP := remoteIPFromRequest(c.Request)
 
 	trace.Add(ctx, "http.recv", "request received", map[string]string{
@@ -101,7 +101,7 @@ func CWMPHandler(c *gin.Context) {
 	})
 	handleStart := time.Now()
 	resp, err := eng.Handle(ctx, &core.Request{
-		TraceID:    reqID,
+		TraceID:    traceID,
 		RemoteIP:   clientIP,
 		Headers:    headers,
 		Body:       body,
@@ -135,7 +135,7 @@ func CWMPHandler(c *gin.Context) {
 	c.Data(resp.StatusCode, "text/xml", resp.Body)
 
 	if config.CurrentRuntime().Settings.Debug {
-		gvaGlobal.GVA_LOG.Debug("TR069 Trace", zap.String("requestId", reqID), zap.Any("trace", trace.Get(ctx, reqID)))
+		gvaGlobal.GVA_LOG.Debug("TR069 Trace", zap.String("traceId", traceID), zap.Any("trace", trace.Get(ctx, traceID)))
 	}
 }
 

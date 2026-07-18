@@ -33,7 +33,7 @@ func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 	debugRouter := Router.Group("debug")
 	debugApi := new(api.DebugApi)
 	{
-		debugRouter.GET("trace/:requestId", debugApi.GetTrace)
+		debugRouter.GET("trace/:traceId", debugApi.GetTrace)
 	}
 
 	commandRouter := Router.Group("command").Use(middleware.OperationRecordWithBodySanitizer(redact.CommandJSON))
