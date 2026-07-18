@@ -1,6 +1,6 @@
 ---
 name: oamstart
-description: Use when starting, resuming, checking, or diagnosing this project's BS/OAM base-station simulation stack, including gva-acs-bs container state, Connection Request port 8400, Inform delivery to ACS port 7458, and OAM logs.
+description: Use when starting, resuming, checking, or diagnosing this project's BS/OAM base-station simulation stack, including gva-acs-bs container state, Web port 8400, Connection Request port 7547, Inform delivery to ACS port 7458, and OAM logs.
 ---
 
 # OAM Start
@@ -21,14 +21,15 @@ Use the bundled scripts as the source of truth for the project's Docker lifecycl
 |---|---|
 | Container | `gva-acs-bs` |
 | Image | `bs:5GNR_t.5.1.0.r62694M_20241219_190249` |
-| Restart policy | `unless-stopped` |
+| Restart policy | `no` (manual start only) |
 | Configuration | `/root/code/gva-acs/bs-runtime/root/hb_ping/BS_config` |
 | Logs | `/root/code/gva-acs/bs-runtime/logs` |
 | Required processes | `oamProcess`, `odsNameServer`, `upapp`, `m2m.x86.bs` |
-| Connection Request | `http://127.0.0.1:8400` |
+| Web management | `http://127.0.0.1:8400` |
+| Connection Request | `http://127.0.0.1:7547` |
 | ACS target | `host.docker.internal:7458` → `172.17.0.1:7458` |
 
-Only report the BS/OAM stack healthy when the container, restart policy, four required processes, and port 8400 pass. If `oamProcess.log` shows `Connection refused` for ACS port 7458 while those checks pass, report that BS/OAM is running and ACS is not listening yet; do not call it a BS startup failure.
+Only report the BS/OAM stack healthy when the container, restart policy, four required processes, Web port 8400, and Connection Request port 7547 pass. If `oamProcess.log` shows `Connection refused` for ACS port 7458 while those checks pass, report that BS/OAM is running and ACS is not listening yet; do not call it a BS startup failure.
 
 ## Common mistakes
 
