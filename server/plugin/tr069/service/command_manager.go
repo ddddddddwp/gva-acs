@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
@@ -152,8 +153,9 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 		return SubmitResult{}, errors.New("db not initialized")
 	}
 	now := m.now()
+	commandID := uuid.NewString()
 	command := model.Command{
-		CommandID: uuid.NewString(),
+		CommandID: commandID,
 		DeviceID:  deviceID,
 		Operation: operation,
 		Origin:    submission.origin,
@@ -164,7 +166,10 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 		UpdatedAt: now,
 	}
 	if spec, ok := RPCSpecs[operation]; ok && spec.ServerCommandKey {
-		commandKey := "rpc-" + uuid.NewString()
+		commandKey, err := commandKeyFromCommandID(commandID)
+		if err != nil {
+			return SubmitResult{}, err
+		}
 		command.CommandKey = &commandKey
 	}
 
@@ -237,6 +242,14 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 		return m.failWakeup(ctx, command, result, err)
 	}
 	return result, nil
+}
+
+func commandKeyFromCommandID(commandID string) (string, error) {
+	parsed, err := uuid.Parse(commandID)
+	if err != nil {
+		return "", fmt.Errorf("invalid command ID for CommandKey: %w", err)
+	}
+	return strings.ReplaceAll(parsed.String(), "-", ""), nil
 }
 
 func (m *CommandManager) failWakeup(ctx context.Context, command model.Command, result SubmitResult, wakeupErr error) (SubmitResult, error) {

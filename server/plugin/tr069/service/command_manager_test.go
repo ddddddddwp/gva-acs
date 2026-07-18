@@ -302,9 +302,7 @@ func TestCommandManagerTransfersReceiveUniqueSystemCommandKeys(t *testing.T) {
 	}
 	keys := make(map[string]struct{}, len(commands))
 	for _, command := range commands {
-		if command.CommandKey == nil || !strings.HasPrefix(*command.CommandKey, "rpc-") {
-			t.Fatalf("%s command key = %v, want rpc- prefix", command.Operation, command.CommandKey)
-		}
+		assertDerivedCommandKey(t, command)
 		keys[*command.CommandKey] = struct{}{}
 		if strings.Contains(string(command.ParamsJSON), "commandKey") {
 			t.Fatalf("%s persisted system CommandKey in typed params: %s", command.Operation, command.ParamsJSON)
@@ -312,6 +310,38 @@ func TestCommandManagerTransfersReceiveUniqueSystemCommandKeys(t *testing.T) {
 	}
 	if len(keys) != 2 {
 		t.Fatalf("unique system command keys = %d, want 2", len(keys))
+	}
+}
+
+func TestCommandKeyFromCommandID(t *testing.T) {
+	got, err := commandKeyFromCommandID("62a53a00-786f-4a45-b31f-b23f7d23bb6e")
+	if err != nil {
+		t.Fatalf("commandKeyFromCommandID() error: %v", err)
+	}
+	if got != "62a53a00786f4a45b31fb23f7d23bb6e" {
+		t.Fatalf("commandKeyFromCommandID() = %q", got)
+	}
+	if _, err := commandKeyFromCommandID("not-a-uuid"); err == nil {
+		t.Fatal("commandKeyFromCommandID() accepted an invalid UUID")
+	}
+}
+
+func TestCommandManagerSynchronousRPCDoesNotCreateCommandKey(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 18, 13, 45, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "SYNC-NO-KEY", now)
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil }, WithCommandManagerNow(func() time.Time { return now }))
+
+	result, err := manager.Submit(context.Background(), device.ID, "GetRPCMethods", nil)
+	if err != nil {
+		t.Fatalf("submit GetRPCMethods: %v", err)
+	}
+	var command model.Command
+	if err := db.First(&command, "command_id = ?", result.CommandID).Error; err != nil {
+		t.Fatalf("load GetRPCMethods command: %v", err)
+	}
+	if command.CommandKey != nil {
+		t.Fatalf("synchronous command key = %q, want nil", *command.CommandKey)
 	}
 }
 
@@ -340,7 +370,8 @@ func TestCommandManagerRebootCreatesUniqueServerKeysAndRetryGetsNewKey(t *testin
 		t.Fatalf("Reboot keys are not unique: %#v", commands)
 	}
 	for _, command := range commands {
-		if !strings.HasPrefix(*command.CommandKey, "rpc-") || string(command.ParamsJSON) != `{}` {
+		assertDerivedCommandKey(t, command)
+		if string(command.ParamsJSON) != `{}` {
 			t.Fatalf("Reboot persistence = key:%v params:%s", command.CommandKey, command.ParamsJSON)
 		}
 	}
@@ -362,6 +393,29 @@ func TestCommandManagerRebootCreatesUniqueServerKeysAndRetryGetsNewKey(t *testin
 	}
 	if retry.CommandKey == nil || *retry.CommandKey == *original.CommandKey {
 		t.Fatalf("retry key = %v, original = %v", retry.CommandKey, original.CommandKey)
+	}
+	assertDerivedCommandKey(t, retry)
+	if retry.RetryOf != original.CommandID {
+		t.Fatalf("retryOf = %q, want %q", retry.RetryOf, original.CommandID)
+	}
+}
+
+func assertDerivedCommandKey(t *testing.T, command model.Command) {
+	t.Helper()
+	if command.CommandKey == nil {
+		t.Fatalf("%s command key is nil", command.Operation)
+	}
+	want := strings.ReplaceAll(command.CommandID, "-", "")
+	if *command.CommandKey != want {
+		t.Fatalf("%s command key = %q, want %q", command.Operation, *command.CommandKey, want)
+	}
+	if len(*command.CommandKey) != 32 {
+		t.Fatalf("%s command key length = %d, want 32", command.Operation, len(*command.CommandKey))
+	}
+	for _, char := range *command.CommandKey {
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			t.Fatalf("%s command key contains non-lowercase-hex rune %q", command.Operation, char)
+		}
 	}
 }
 
