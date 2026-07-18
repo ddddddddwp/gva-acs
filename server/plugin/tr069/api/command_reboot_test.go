@@ -58,9 +58,10 @@ func TestRebootIgnoresClientCommandKey(t *testing.T) {
 	if err := db.First(&command, "operation = ?", "Reboot").Error; err != nil {
 		t.Fatalf("load Reboot command: %v", err)
 	}
+	wantCommandKey := strings.ReplaceAll(command.CommandID, "-", "")
 	if command.CommandKey == nil || *command.CommandKey == "client-controlled" ||
-		!strings.HasPrefix(*command.CommandKey, "rpc-") {
-		t.Fatalf("stored CommandKey = %v", command.CommandKey)
+		*command.CommandKey != wantCommandKey || len(*command.CommandKey) != 32 {
+		t.Fatalf("stored CommandKey = %v, want %q", command.CommandKey, wantCommandKey)
 	}
 	if string(command.ParamsJSON) != `{}` {
 		t.Fatalf("stored params = %s, want {}", command.ParamsJSON)
