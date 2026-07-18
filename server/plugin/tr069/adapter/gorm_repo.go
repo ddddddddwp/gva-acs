@@ -24,10 +24,15 @@ type GormDeviceRepo struct {
 	profiles        *ConnectionProfileRepository
 	provisioner     ConnectionCredentialScheduler
 	rebootConfirmer RebootInformConfirmer
+	uploadBinder    UploadIdentityBinder
 }
 
 type RebootInformConfirmer interface {
 	ConfirmFromInform(context.Context, uint, []string, time.Time) error
+}
+
+type UploadIdentityBinder interface {
+	Bind(context.Context, UploadIdentityBinding, time.Duration) error
 }
 
 func NewGormDeviceRepo(db *gorm.DB, profiles *ConnectionProfileRepository, provisioners ...ConnectionCredentialScheduler) *GormDeviceRepo {
@@ -41,6 +46,12 @@ func NewGormDeviceRepo(db *gorm.DB, profiles *ConnectionProfileRepository, provi
 func (r *GormDeviceRepo) SetRebootInformConfirmer(confirmer RebootInformConfirmer) {
 	if r != nil {
 		r.rebootConfirmer = confirmer
+	}
+}
+
+func (r *GormDeviceRepo) SetUploadIdentityBinder(binder UploadIdentityBinder) {
+	if r != nil {
+		r.uploadBinder = binder
 	}
 }
 
@@ -156,6 +167,23 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	// Let's add Unscoped to be safe and check if we need to restore it.
 
 	var persistedDeviceID uint
+	if r.uploadBinder != nil && ip != "" {
+		var persisted model.Device
+		if err := db.Unscoped().WithContext(ctx).Select("id, serial_number, oui, product_class").Where("serial_number = ?", serial).First(&persisted).Error; err != nil {
+			if global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to resolve device for upload identity binding", zap.String("serial", serial), zap.Error(err))
+			}
+		} else {
+			persistedDeviceID = persisted.ID
+			binding := UploadIdentityBinding{
+				DeviceID: persisted.ID, IP: ip, OUI: persisted.OUI,
+				ProductClass: persisted.ProductClass, SerialNumber: persisted.SerialNumber,
+			}
+			if err := r.uploadBinder.Bind(ctx, binding, config.CurrentRuntime().FileIngress.IdentityBindingTTL); err != nil && global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to bind Inform upload identity", zap.Uint("deviceID", persisted.ID), zap.String("stage", "inform.identity_bind"), zap.Error(err))
+			}
+		}
+	}
 	// 2. Sync parameters from Inform to DataModelValue
 	if info != nil && len(info.Params) > 0 {
 		var dbDevice model.Device

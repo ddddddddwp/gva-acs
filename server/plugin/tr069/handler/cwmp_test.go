@@ -9,15 +9,15 @@ func TestRemoteIPFromRequest(t *testing.T) {
 	r1, _ := http.NewRequest(http.MethodPost, "http://example.com/", nil)
 	r1.RemoteAddr = "10.0.0.9:1234"
 	r1.Header.Set("X-Forwarded-For", "203.0.113.1, 10.0.0.9")
-	if ip := remoteIPFromRequest(r1); ip != "203.0.113.1" {
-		t.Fatalf("expected xff first ip, got %q", ip)
+	if ip := remoteIPFromRequest(r1); ip != "10.0.0.9" {
+		t.Fatalf("expected untrusted xff to be ignored, got %q", ip)
 	}
 
 	r2, _ := http.NewRequest(http.MethodPost, "http://example.com/", nil)
 	r2.RemoteAddr = "10.0.0.9:1234"
 	r2.Header.Set("X-Real-Ip", "198.51.100.2")
-	if ip := remoteIPFromRequest(r2); ip != "198.51.100.2" {
-		t.Fatalf("expected x-real-ip, got %q", ip)
+	if ip := remoteIPFromRequest(r2); ip != "10.0.0.9" {
+		t.Fatalf("expected untrusted x-real-ip to be ignored, got %q", ip)
 	}
 
 	r3, _ := http.NewRequest(http.MethodPost, "http://example.com/", nil)

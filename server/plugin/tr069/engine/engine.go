@@ -88,6 +88,9 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 	if devRepo == nil {
 		gormDeviceRepo := adapter.NewGormDeviceRepo(nil, profileRepository, provisioner)
 		gormDeviceRepo.SetRebootInformConfirmer(rebootConfirmer)
+		if adapter.RedisAvailable() && config.CurrentRuntime().Settings.FileIngress.Enabled {
+			gormDeviceRepo.SetUploadIdentityBinder(adapter.NewUploadIdentityStore(global.GVA_REDIS))
+		}
 		devRepo = gormDeviceRepo
 	}
 	cmdRepo := deps.CommandRepo

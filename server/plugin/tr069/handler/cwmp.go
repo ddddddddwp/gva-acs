@@ -3,10 +3,8 @@ package handler
 import (
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	gvaGlobal "github.com/ddddddddwp/gva-acs/server/global"
@@ -143,27 +141,4 @@ func copyHeaderIfPresent(out map[string]string, r *http.Request, name string) {
 	if v := r.Header.Get(name); v != "" {
 		out[name] = v
 	}
-}
-
-func remoteIPFromRequest(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			ip := strings.TrimSpace(parts[0])
-			if ip != "" {
-				return ip
-			}
-		}
-	}
-	if xrip := strings.TrimSpace(r.Header.Get("X-Real-Ip")); xrip != "" {
-		return xrip
-	}
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err == nil && host != "" {
-		return host
-	}
-	return strings.TrimSpace(r.RemoteAddr)
 }

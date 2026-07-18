@@ -14,6 +14,58 @@ import (
 	"gorm.io/gorm"
 )
 
+type recordingUploadIdentityBinder struct {
+	bindings []UploadIdentityBinding
+	ttls     []time.Duration
+	err      error
+}
+
+func (b *recordingUploadIdentityBinder) Bind(_ context.Context, binding UploadIdentityBinding, ttl time.Duration) error {
+	b.bindings = append(b.bindings, binding)
+	b.ttls = append(b.ttls, ttl)
+	return b.err
+}
+
+func TestGormDeviceRepoBindsUploadIdentityAfterSuccessfulInform(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(new(model.Device), new(model.DataModelValue), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate device models: %v", err)
+	}
+	binder := new(recordingUploadIdentityBinder)
+	repo := NewGormDeviceRepo(db, NewConnectionProfileRepository(db, nil))
+	repo.SetUploadIdentityBinder(binder)
+	info := &tr069core.InformSummary{Params: map[string]string{"Device.DeviceInfo.SerialNumber": "INFORM-BIND"}}
+	if _, err := repo.UpsertFromInform(context.Background(), info, "192.0.2.55"); err != nil {
+		t.Fatalf("upsert Inform: %v", err)
+	}
+	if len(binder.bindings) != 1 || binder.bindings[0].DeviceID == 0 || binder.bindings[0].SerialNumber != "INFORM-BIND" || binder.bindings[0].IP != "192.0.2.55" {
+		t.Fatalf("bindings=%#v", binder.bindings)
+	}
+	if len(binder.ttls) != 1 || binder.ttls[0] <= 0 {
+		t.Fatalf("binding TTLs=%#v", binder.ttls)
+	}
+}
+
+func TestGormDeviceRepoDoesNotBindWhenInformPersistenceFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	binder := new(recordingUploadIdentityBinder)
+	repo := NewGormDeviceRepo(db, NewConnectionProfileRepository(db, nil))
+	repo.SetUploadIdentityBinder(binder)
+	info := &tr069core.InformSummary{Params: map[string]string{"Device.DeviceInfo.SerialNumber": "INFORM-FAIL"}}
+	if _, err := repo.UpsertFromInform(context.Background(), info, "192.0.2.56"); err == nil {
+		t.Fatal("Inform persistence unexpectedly succeeded without device table")
+	}
+	if len(binder.bindings) != 0 {
+		t.Fatalf("binding written after persistence failure: %#v", binder.bindings)
+	}
+}
+
 func newGormCommandRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
