@@ -181,7 +181,29 @@ func recomputeTransferStatus(task model.TransferTask, artifactAvailable bool) st
 }
 
 func updateLifecycleCommand(tx *gorm.DB, task model.TransferTask, target string, at time.Time) error {
-	if task.CommandID == nil || (target != model.TransferStatusCompleted && target != model.TransferStatusFailed && target != model.TransferStatusTimeout) {
+	if task.CommandID == nil {
+		return nil
+	}
+	if task.UploadResponseStatus != nil && *task.UploadResponseStatus == 1 &&
+		target != model.TransferStatusCompleted && target != model.TransferStatusFailed && target != model.TransferStatusTimeout {
+		result := tx.Model(new(model.Command)).
+			Where("command_id = ? AND status = ?", *task.CommandID, model.CommandStatusSent).
+			Updates(map[string]any{
+				"status": model.CommandStatusWaitingTransfer, "phase_deadline_at": task.PhaseDeadlineAt,
+				"version": gorm.Expr("version + 1"), "updated_at": at,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 1 {
+			return tx.Create(&model.CommandEvent{
+				CommandID: *task.CommandID, EventType: "WAITING_TRANSFER", FromStatus: model.CommandStatusSent,
+				ToStatus: model.CommandStatusWaitingTransfer, Stage: "transfer.lifecycle", CreatedAt: at,
+			}).Error
+		}
+		return nil
+	}
+	if target != model.TransferStatusCompleted && target != model.TransferStatusFailed && target != model.TransferStatusTimeout {
 		return nil
 	}
 	updates := map[string]any{

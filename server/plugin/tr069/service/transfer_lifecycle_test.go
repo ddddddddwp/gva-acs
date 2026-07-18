@@ -81,6 +81,10 @@ func TestTransferLifecycleStatusOneAcceptsTransferCompleteBeforeFile(t *testing.
 	if err := lifecycle.OnUploadResponse(context.Background(), *task.CommandID, 1, at); err != nil {
 		t.Fatalf("UploadResponse status 1: %v", err)
 	}
+	var waitingCommand model.Command
+	if err := db.First(&waitingCommand, "command_id = ?", *task.CommandID).Error; err != nil || waitingCommand.Status != model.CommandStatusWaitingTransfer || waitingCommand.PhaseDeadlineAt == nil {
+		t.Fatalf("waiting command=%#v err=%v", waitingCommand, err)
+	}
 	if err := lifecycle.OnTransferComplete(context.Background(), *task.CommandKey, 0, "", at.Add(time.Second)); err != nil {
 		t.Fatalf("TransferComplete: %v", err)
 	}
