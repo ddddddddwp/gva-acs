@@ -15,6 +15,7 @@ import (
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/initialize"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/router"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/ddddddddwp/gva-acs/server/utils"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -72,6 +73,8 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 	deviceRouter.InitDeviceRouter(r)
 	alarmRouter := new(router.AlarmRouter)
 	alarmRouter.InitAlarmRouter(r)
+	artifactRouter := router.NewArtifactRouter(service.NewTransferStore(global.GVA_DB), initialize.CurrentArtifactStore())
+	artifactRouter.InitArtifactRouter(r)
 }
 
 func (p *tr069Plugin) RouterPath() string {

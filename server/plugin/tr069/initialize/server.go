@@ -55,11 +55,12 @@ func StartTR069Server() {
 // SetupEngine creates and configures the gin engine for TR069
 // Exported for testing purposes
 func SetupEngine() *gin.Engine {
-	routes, workers, err := buildRuntimeFileIngressRoutes()
+	routes, workers, objectStore, err := buildRuntimeFileIngressRoutes()
 	if err != nil {
 		panic(fmt.Errorf("initialize TR-069 file ingress: %w", err))
 	}
 	setTransferWorkers(workers)
+	setArtifactStore(objectStore)
 	return setupEngine(routes)
 }
 
@@ -126,16 +127,16 @@ func setupEngine(fileIngressRoutes map[string]gin.HandlerFunc) *gin.Engine {
 	return engine
 }
 
-func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, *service.TransferWorkers, error) {
+func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, *service.TransferWorkers, service.ArtifactStore, error) {
 	runtime := config.CurrentRuntime()
 	if !runtime.Settings.FileIngress.Enabled {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if global.GVA_DB == nil {
-		return nil, nil, errors.New("database is required")
+		return nil, nil, nil, errors.New("database is required")
 	}
 	if global.GVA_REDIS == nil {
-		return nil, nil, errors.New("Redis is required")
+		return nil, nil, nil, errors.New("Redis is required")
 	}
 	storeConfig := runtime.Settings.FileIngress.ArtifactStore
 	objectStore, err := adapter.NewMinioArtifactStoreClient(
@@ -143,7 +144,7 @@ func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, *service.Trans
 		storeConfig.Bucket, storeConfig.UseSSL,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	transferStore := service.NewTransferStore(global.GVA_DB)
 	identityStore := adapter.NewUploadIdentityStore(global.GVA_REDIS)
@@ -158,7 +159,7 @@ func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, *service.Trans
 			routes[channel.Path] = ingressHandler
 		}
 	}
-	return routes, workers, nil
+	return routes, workers, objectStore, nil
 }
 
 var transferWorkerRuntime struct {
@@ -166,10 +167,29 @@ var transferWorkerRuntime struct {
 	workers *service.TransferWorkers
 }
 
+var artifactStoreRuntime struct {
+	sync.RWMutex
+	store service.ArtifactStore
+}
+
 func setTransferWorkers(workers *service.TransferWorkers) {
 	transferWorkerRuntime.Lock()
 	transferWorkerRuntime.workers = workers
 	transferWorkerRuntime.Unlock()
+}
+
+func setArtifactStore(store service.ArtifactStore) {
+	artifactStoreRuntime.Lock()
+	artifactStoreRuntime.store = store
+	artifactStoreRuntime.Unlock()
+}
+
+// CurrentArtifactStore returns the object store initialized for file ingress.
+// It may be nil when file ingress is disabled; metadata list APIs remain usable.
+func CurrentArtifactStore() service.ArtifactStore {
+	artifactStoreRuntime.RLock()
+	defer artifactStoreRuntime.RUnlock()
+	return artifactStoreRuntime.store
 }
 
 func StartTransferWorkers(ctx context.Context) {
