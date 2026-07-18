@@ -43,3 +43,14 @@ test('reboot form keeps CommandKey server-owned', async () => {
   assert.match(dialog, /case 'reboot':\s*return undefined/)
   assert.match(api, /rebootDevice\s*=\s*\(deviceId\)\s*=>\s*postCommand\(deviceId,\s*'reboot'\)/)
 })
+
+test('log upload form submits only file type and delay', async () => {
+  const dialog = await readFile(new URL('./components/rpc-command-dialog.vue', import.meta.url), 'utf8')
+
+  assert.match(dialog, /v-else-if="action\.key === 'download'"/)
+  assert.match(dialog, /v-else-if="action\.key === 'upload'"/)
+  const uploadCase = dialog.match(/case 'upload':([\s\S]*?)case 'reboot':/)?.[1] || ''
+  assert.match(uploadCase, /fileType:/)
+  assert.match(uploadCase, /delaySeconds:/)
+  assert.doesNotMatch(uploadCase, /url:|username:|password:/)
+})

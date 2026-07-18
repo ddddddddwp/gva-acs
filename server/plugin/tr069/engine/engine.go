@@ -39,18 +39,24 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 
 func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 	var profileRepository *adapter.ConnectionProfileRepository
-	var payloadProtector *adapter.ConnectionProfilePayloadProtector
+	var payloadCodec *adapter.CompositeCommandPayloadCodec
 	var provisioner *adapter.ConnectionCredentialProvisioner
 	var rebootConfirmer *service.RebootConfirmationService
 	var rebootScanner *service.RebootTimeoutScanner
 	if adapter.DBAvailable() {
 		profileRepository = adapter.NewConnectionProfileRepository(nil, adapter.NewRuntimeCredentialCipher())
-		payloadProtector = adapter.NewConnectionProfilePayloadProtector(profileRepository)
+		payloadCodec = adapter.NewCompositeCommandPayloadCodec(
+			adapter.NewConnectionProfilePayloadProtector(profileRepository),
+			adapter.LogUploadPayloadCodec{},
+		)
 		wakeup := deps.CommandWakeup
 		if wakeup == nil {
 			wakeup = adapter.EnqueueImmediate
 		}
-		manager := service.NewCommandManager(nil, wakeup, service.WithCommandPayloadProtector(payloadProtector))
+		manager := service.NewCommandManager(nil, wakeup,
+			service.WithCommandPayloadProtector(payloadCodec),
+			service.WithCommandCreatedHook(service.NewActiveUploadTaskHook(nil)),
+		)
 		provisioner = adapter.NewConnectionCredentialProvisioner(manager, profileRepository)
 		rebootConfirmer = service.NewRebootConfirmationService(global.GVA_DB)
 		rebootScanner = service.NewRebootTimeoutScanner(global.GVA_DB)
@@ -114,7 +120,7 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 			var err error
 			queue, err = adapter.NewRedisCommandSource(
 				queueCfg,
-				adapter.WithRedisCommandHydrator(payloadProtector),
+				adapter.WithRedisCommandHydrator(payloadCodec),
 			)
 			if err != nil {
 				global.GVA_LOG.Error("failed to create Redis command source", zap.Error(err))

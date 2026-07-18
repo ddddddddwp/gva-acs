@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
@@ -108,10 +109,19 @@ func TestCommandAPISubmitsEveryTypedRPCOperation(t *testing.T) {
 	}
 
 	previousService := commandService
+	previousRuntime := config.CurrentRuntime()
+	config.StoreRuntime(config.TR069Config{FileIngress: config.FileIngressConfig{
+		Enabled: true, PublicBaseURL: "http://gva:7458",
+		Authentication: config.FileIngressAuthConfig{Username: "log-user", Password: "log-password", Realm: "GVA", Schemes: []string{"basic"}},
+		Channels:       map[string]config.TransferChannelConfig{"log": {Enabled: true, Path: "/acs/log"}},
+	}})
 	commandService = service.NewCommandService(service.NewCommandManager(db, func(context.Context, string) error {
 		return nil
 	}, service.WithCommandManagerNow(func() time.Time { return now })))
-	t.Cleanup(func() { commandService = previousService })
+	t.Cleanup(func() {
+		commandService = previousService
+		config.StoreRuntime(previousRuntime.Settings)
+	})
 
 	api := new(CommandApi)
 	tests := []struct {
@@ -129,7 +139,7 @@ func TestCommandAPISubmitsEveryTypedRPCOperation(t *testing.T) {
 		{operation: "AddObject", path: "addObject", handler: api.AddObject, body: `{"objectName":"Device.WiFi.SSID.","parameterKey":"add-1"}`},
 		{operation: "DeleteObject", path: "deleteObject", handler: api.DeleteObject, body: `{"objectName":"Device.WiFi.SSID.7.","parameterKey":"delete-1"}`},
 		{operation: "Download", path: "download", handler: api.Download, body: `{"fileType":"1 Firmware Upgrade Image","url":"https://example.test/firmware.bin","fileSize":1024,"targetFileName":"firmware.bin","delaySeconds":0}`},
-		{operation: "Upload", path: "upload", handler: api.Upload, body: `{"fileType":"1 Vendor Configuration File","url":"https://example.test/upload","delaySeconds":0}`},
+		{operation: "Upload", path: "upload", handler: api.Upload, body: `{"fileType":"1 Vendor Configuration File","delaySeconds":0}`},
 		{operation: "Reboot", path: "reboot", handler: api.Reboot, body: `{"commandKey":"reboot-1"}`},
 		{operation: "FactoryReset", path: "factoryReset", handler: api.FactoryReset},
 	}

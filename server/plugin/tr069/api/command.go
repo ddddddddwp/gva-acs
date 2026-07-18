@@ -3,9 +3,11 @@ package api
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/ddddddddwp/gva-acs/server/model/common/response"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	req "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
@@ -14,14 +16,18 @@ import (
 
 type CommandApi struct{}
 
-var commandPayloadProtector = adapter.NewConnectionProfilePayloadProtector(
-	adapter.NewConnectionProfileRepository(nil, adapter.NewRuntimeCredentialCipher()),
+var commandPayloadProtector = adapter.NewCompositeCommandPayloadCodec(
+	adapter.NewConnectionProfilePayloadProtector(
+		adapter.NewConnectionProfileRepository(nil, adapter.NewRuntimeCredentialCipher()),
+	),
+	adapter.LogUploadPayloadCodec{},
 )
 
 var commandService = service.NewCommandService(service.NewCommandManager(
 	nil,
 	adapter.EnqueueImmediate,
 	service.WithCommandPayloadProtector(commandPayloadProtector),
+	service.WithCommandCreatedHook(service.NewActiveUploadTaskHook(nil)),
 ))
 
 func commandFailureMessage(err error) string {
@@ -138,7 +144,23 @@ func (a *CommandApi) Download(c *gin.Context) {
 
 // Upload 下发 Upload。
 func (a *CommandApi) Upload(c *gin.Context) {
-	bindAndSubmitCommand[req.UploadRequest](c, "Upload")
+	var in req.LogCollectionRequest
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.FailWithMessage("参数错误", c)
+		return
+	}
+	runtime := config.CurrentRuntime().Settings.FileIngress
+	logChannel, ok := runtime.Channels["log"]
+	if !runtime.Enabled || !ok || !logChannel.Enabled || strings.TrimSpace(runtime.PublicBaseURL) == "" ||
+		runtime.Authentication.Username == "" || runtime.Authentication.Password == "" {
+		response.FailWithMessage("LOG 文件入口未启用或配置不完整", c)
+		return
+	}
+	submitCommand(c, "Upload", req.UploadRequest{
+		FileType: in.FileType, DelaySeconds: in.DelaySeconds,
+		URL:      strings.TrimRight(runtime.PublicBaseURL, "/") + logChannel.Path,
+		Username: runtime.Authentication.Username, Password: runtime.Authentication.Password,
+	})
 }
 
 // Reboot 下发 Reboot。

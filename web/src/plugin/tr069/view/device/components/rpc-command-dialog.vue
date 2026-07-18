@@ -106,7 +106,7 @@
         />
       </template>
 
-      <template v-else-if="action.key === 'download' || action.key === 'upload'">
+      <template v-else-if="action.key === 'download'">
         <el-form-item label="文件类型">
           <el-input v-model="form.fileType" placeholder="CWMP FileType，例如 1 Firmware Upgrade Image" />
         </el-form-item>
@@ -116,12 +116,17 @@
         <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password /></el-form-item>
         <el-form-item label="延迟秒数"><el-input-number v-model="form.delaySeconds" :min="0" /></el-form-item>
-        <template v-if="action.key === 'download'">
-          <el-form-item label="文件大小"><el-input-number v-model="form.fileSize" :min="0" /></el-form-item>
-          <el-form-item label="目标文件名"><el-input v-model="form.targetFileName" /></el-form-item>
-          <el-form-item label="成功回调 URL"><el-input v-model="form.successURL" /></el-form-item>
-          <el-form-item label="失败回调 URL"><el-input v-model="form.failureURL" /></el-form-item>
-        </template>
+        <el-form-item label="文件大小"><el-input-number v-model="form.fileSize" :min="0" /></el-form-item>
+        <el-form-item label="目标文件名"><el-input v-model="form.targetFileName" /></el-form-item>
+        <el-form-item label="成功回调 URL"><el-input v-model="form.successURL" /></el-form-item>
+        <el-form-item label="失败回调 URL"><el-input v-model="form.failureURL" /></el-form-item>
+      </template>
+
+      <template v-else-if="action.key === 'upload'">
+        <el-form-item label="文件类型">
+          <el-input v-model="form.fileType" placeholder="CWMP FileType，例如 Vendor Log File" />
+        </el-form-item>
+        <el-form-item label="延迟秒数"><el-input-number v-model="form.delaySeconds" :min="0" /></el-form-item>
       </template>
 
       <template v-else-if="action.key === 'factoryReset'">
@@ -260,9 +265,6 @@ const buildPayload = () => {
     case 'upload':
       return {
         fileType: requireValue(form.fileType, '请填写文件类型'),
-        url: requireValue(form.url, '请填写文件 URL'),
-        username: form.username,
-        password: form.password,
         delaySeconds: form.delaySeconds
       }
     case 'reboot':

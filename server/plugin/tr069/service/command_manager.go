@@ -36,15 +36,22 @@ const (
 )
 
 type CommandManager struct {
-	db        *gorm.DB
-	wakeup    CommandWakeupFunc
-	now       func() time.Time
-	protector CommandPayloadProtector
+	db          *gorm.DB
+	wakeup      CommandWakeupFunc
+	now         func() time.Time
+	protector   CommandPayloadProtector
+	createdHook CommandCreatedHook
 }
 
 func WithCommandPayloadProtector(protector CommandPayloadProtector) CommandManagerOption {
 	return func(manager *CommandManager) {
 		manager.protector = protector
+	}
+}
+
+func WithCommandCreatedHook(hook CommandCreatedHook) CommandManagerOption {
+	return func(manager *CommandManager) {
+		manager.createdHook = hook
 	}
 }
 
@@ -221,6 +228,11 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 		}
 		if err := NewCommandStore(tx).Create(ctx, &command); err != nil {
 			return err
+		}
+		if m.createdHook != nil {
+			if err := m.createdHook(ctx, tx, &command); err != nil {
+				return err
+			}
 		}
 		if submission.hook != nil {
 			return submission.hook(ctx, tx, &command)

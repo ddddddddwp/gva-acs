@@ -119,6 +119,30 @@ func (s *TransferStore) CreateActive(ctx context.Context, command *model.Command
 	})
 }
 
+func (s *TransferStore) CreateActiveTask(ctx context.Context, command *model.Command, taskID string) error {
+	if s == nil || s.db == nil || command == nil || command.CommandID == "" || taskID == "" {
+		return errors.New("persisted command and active transfer task ID are required")
+	}
+	if command.Operation != "Upload" || command.CommandKey == nil || *command.CommandKey == "" {
+		return errors.New("active transfer task requires an Upload command and CommandKey")
+	}
+	now := command.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	task := model.TransferTask{
+		TaskID: taskID, DeviceID: command.DeviceID, Channel: "LOG", Source: model.TransferSourceActive,
+		CommandID: &command.CommandID, CommandKey: command.CommandKey, Status: model.TransferStatusWaitingFile,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.db.WithContext(ctx).Create(&task).Error; err != nil {
+		return err
+	}
+	return s.db.WithContext(ctx).Create(&model.TransferEvent{
+		TaskID: task.TaskID, Code: "CREATED", Phase: "task.create", ToStatus: task.Status, CreatedAt: now,
+	}).Error
+}
+
 func (s *TransferStore) CreatePeriodicReceiving(ctx context.Context, deviceID uint, channel string, metadata ReceiveMetadata) (model.TransferTask, model.Artifact, error) {
 	if s == nil || s.db == nil {
 		return model.TransferTask{}, model.Artifact{}, errors.New("transfer database is required")

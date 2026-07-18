@@ -29,10 +29,104 @@ func newCommandManagerTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(new(model.Device), new(model.DeviceRPCMethods), new(model.Command), new(model.CommandEvent)); err != nil {
+	if err := db.AutoMigrate(new(model.Device), new(model.DeviceRPCMethods), new(model.Command), new(model.CommandEvent), new(model.TransferTask), new(model.TransferEvent)); err != nil {
 		t.Fatalf("migrate command manager models: %v", err)
 	}
 	return db
+}
+
+func TestCommandManagerCreatedHookCreatesActiveUploadTaskAtomically(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 19, 7, 0, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "ACTIVE-UPLOAD", now)
+	setCommandManagerCapabilities(t, db, device.ID, `["Upload"]`)
+	order := make([]string, 0, 2)
+	managerHook := NewActiveUploadTaskHook(func() string { return "active-task-fixed" })
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+		WithCommandCreatedHook(func(ctx context.Context, tx *gorm.DB, command *model.Command) error {
+			order = append(order, "manager")
+			return managerHook(ctx, tx, command)
+		}),
+	)
+	result, err := manager.SubmitSystem(context.Background(), device.ID, "Upload", req.UploadRequest{
+		FileType: "Vendor Log File", URL: "http://gva:7458/acs/log", Username: "log", Password: "secret",
+	}, "", func(context.Context, *gorm.DB, *model.Command) error {
+		order = append(order, "submission")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("submit Upload: %v", err)
+	}
+	var command model.Command
+	if err := db.First(&command, "command_id = ?", result.CommandID).Error; err != nil {
+		t.Fatalf("load command: %v", err)
+	}
+	assertDerivedCommandKey(t, command)
+	var task model.TransferTask
+	if err := db.First(&task, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("load active task: %v", err)
+	}
+	if task.TaskID != "active-task-fixed" || task.Source != model.TransferSourceActive || task.Status != model.TransferStatusWaitingFile || task.CommandKey == nil || *task.CommandKey != *command.CommandKey {
+		t.Fatalf("task=%#v", task)
+	}
+	if !reflect.DeepEqual(order, []string{"manager", "submission"}) {
+		t.Fatalf("hook order=%#v", order)
+	}
+}
+
+func TestCommandManagerCreatedHookFailureRollsBackCommand(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 19, 7, 5, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "HOOK-ROLLBACK", now)
+	setCommandManagerCapabilities(t, db, device.ID, `["Upload"]`)
+	injected := errors.New("active task create failed")
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+		WithCommandCreatedHook(func(context.Context, *gorm.DB, *model.Command) error { return injected }),
+	)
+	if _, err := manager.Submit(context.Background(), device.ID, "Upload", req.UploadRequest{FileType: "Vendor Log File", URL: "http://gva/acs/log"}); !errors.Is(err, injected) {
+		t.Fatalf("submit error=%v", err)
+	}
+	var commands int64
+	db.Model(new(model.Command)).Count(&commands)
+	if commands != 0 {
+		t.Fatalf("commands after hook rollback=%d", commands)
+	}
+}
+
+func TestCommandManagerRetryUploadCreatesNewActiveTaskAndCommandKey(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 19, 7, 10, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "UPLOAD-RETRY", now)
+	setCommandManagerCapabilities(t, db, device.ID, `["Upload"]`)
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+		WithCommandCreatedHook(NewActiveUploadTaskHook(nil)),
+	)
+	first, err := manager.Submit(context.Background(), device.ID, "Upload", req.UploadRequest{FileType: "Vendor Log File", URL: "http://gva/acs/log"})
+	if err != nil {
+		t.Fatalf("submit first Upload: %v", err)
+	}
+	finishedAt := now.Add(time.Minute)
+	if err := db.Model(new(model.Command)).Where("command_id = ?", first.CommandID).Updates(map[string]any{"status": model.CommandStatusTimeout, "finished_at": finishedAt}).Error; err != nil {
+		t.Fatalf("mark first Upload timeout: %v", err)
+	}
+	retry, err := manager.Retry(context.Background(), first.CommandID)
+	if err != nil {
+		t.Fatalf("retry Upload: %v", err)
+	}
+	var commands []model.Command
+	if err := db.Where("command_id IN ?", []string{first.CommandID, retry.CommandID}).Order("created_at ASC").Find(&commands).Error; err != nil || len(commands) != 2 {
+		t.Fatalf("commands=%#v err=%v", commands, err)
+	}
+	if commands[0].CommandKey == nil || commands[1].CommandKey == nil || *commands[0].CommandKey == *commands[1].CommandKey {
+		t.Fatalf("command keys=%v/%v", commands[0].CommandKey, commands[1].CommandKey)
+	}
+	var tasks []model.TransferTask
+	if err := db.Where("command_id IN ?", []string{first.CommandID, retry.CommandID}).Find(&tasks).Error; err != nil || len(tasks) != 2 || tasks[0].TaskID == tasks[1].TaskID {
+		t.Fatalf("tasks=%#v err=%v", tasks, err)
+	}
 }
 
 func createCommandManagerDevice(t *testing.T, db *gorm.DB, serial string, now time.Time) model.Device {
