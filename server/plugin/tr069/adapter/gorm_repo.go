@@ -20,9 +20,14 @@ import (
 )
 
 type GormDeviceRepo struct {
-	db          *gorm.DB
-	profiles    *ConnectionProfileRepository
-	provisioner ConnectionCredentialScheduler
+	db              *gorm.DB
+	profiles        *ConnectionProfileRepository
+	provisioner     ConnectionCredentialScheduler
+	rebootConfirmer RebootInformConfirmer
+}
+
+type RebootInformConfirmer interface {
+	ConfirmFromInform(context.Context, uint, []string, time.Time) error
 }
 
 func NewGormDeviceRepo(db *gorm.DB, profiles *ConnectionProfileRepository, provisioners ...ConnectionCredentialScheduler) *GormDeviceRepo {
@@ -31,6 +36,12 @@ func NewGormDeviceRepo(db *gorm.DB, profiles *ConnectionProfileRepository, provi
 		repo.provisioner = provisioners[0]
 	}
 	return repo
+}
+
+func (r *GormDeviceRepo) SetRebootInformConfirmer(confirmer RebootInformConfirmer) {
+	if r != nil {
+		r.rebootConfirmer = confirmer
+	}
 }
 
 func (r *GormDeviceRepo) database() *gorm.DB {
@@ -144,6 +155,7 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	// But does it clear deleted_at? Our OnConflict columns didn't include deleted_at.
 	// Let's add Unscoped to be safe and check if we need to restore it.
 
+	var persistedDeviceID uint
 	// 2. Sync parameters from Inform to DataModelValue
 	if info != nil && len(info.Params) > 0 {
 		var dbDevice model.Device
@@ -151,6 +163,7 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 		if err := db.Unscoped().WithContext(ctx).Select("id, deleted_at").Where("serial_number = ?", serial).First(&dbDevice).Error; err != nil {
 			global.GVA_LOG.Warn("failed to find device for parameter sync", zap.String("serial", serial), zap.Error(err))
 		} else {
+			persistedDeviceID = dbDevice.ID
 			// If it was deleted, restore it (clear deleted_at)
 			if dbDevice.DeletedAt.Valid {
 				if err := db.Unscoped().Model(&dbDevice).Update("deleted_at", nil).Error; err != nil {
@@ -216,6 +229,24 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 				}
 			} else if collected.NeedsProvisioning && r.provisioner != nil {
 				r.provisioner.Schedule(dbDevice.ID)
+			}
+		}
+	}
+
+	if info != nil && r.rebootConfirmer != nil {
+		if persistedDeviceID == 0 {
+			var persisted model.Device
+			if err := db.Unscoped().WithContext(ctx).Select("id").Where("serial_number = ?", serial).First(&persisted).Error; err != nil {
+				if global.GVA_LOG != nil {
+					global.GVA_LOG.Warn("failed to resolve device for Reboot confirmation", zap.String("serial", serial), zap.Error(err))
+				}
+			} else {
+				persistedDeviceID = persisted.ID
+			}
+		}
+		if persistedDeviceID != 0 {
+			if err := r.rebootConfirmer.ConfirmFromInform(ctx, persistedDeviceID, info.Events, time.Now()); err != nil && global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to confirm Reboot from Inform", zap.Uint("deviceID", persistedDeviceID), zap.Strings("eventCodes", info.Events), zap.Error(err))
 			}
 		}
 	}

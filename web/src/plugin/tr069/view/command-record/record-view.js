@@ -4,6 +4,7 @@ const STATUS_VIEWS = {
   BUILDING: { label: '构造中', type: 'warning' },
   SENT: { label: '已发送', type: 'warning' },
   WAITING_TRANSFER: { label: '等待传输完成', type: 'warning' },
+  WAITING_REBOOT: { label: '设备已受理，等待重启', type: 'warning' },
   COMPLETED: { label: '完成', type: 'success' },
   FAILED: { label: '失败', type: 'danger' },
   TIMEOUT: { label: '超时', type: 'danger' }

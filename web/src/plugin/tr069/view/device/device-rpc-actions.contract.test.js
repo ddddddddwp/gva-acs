@@ -32,3 +32,13 @@ test('frontend exposes one fixed API function for every RPC operation', async ()
     assert.match(source, new RegExp(`export const ${name} =`), `missing typed command API ${name}`)
   }
 })
+
+test('reboot form keeps CommandKey server-owned', async () => {
+  const dialog = await readFile(new URL('./components/rpc-command-dialog.vue', import.meta.url), 'utf8')
+  const api = await readFile(commandAPIURL, 'utf8')
+
+  assert.doesNotMatch(dialog, /v-model="form\.commandKey"/)
+  assert.doesNotMatch(dialog, /return\s*\{\s*commandKey:/)
+  assert.match(dialog, /case 'reboot':\s*return undefined/)
+  assert.match(api, /rebootDevice\s*=\s*\(deviceId\)\s*=>\s*postCommand\(deviceId,\s*'reboot'\)/)
+})

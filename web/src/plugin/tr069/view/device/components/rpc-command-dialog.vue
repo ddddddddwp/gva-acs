@@ -125,9 +125,12 @@
       </template>
 
       <template v-else-if="action.key === 'reboot'">
-        <el-form-item label="CommandKey">
-          <el-input v-model="form.commandKey" placeholder="可选，用于关联本次重启" />
-        </el-form-item>
+        <el-alert
+          title="GVA 将自动生成本次重启的唯一标识；设备受理后，还需等待启动 Inform 才会显示完成。"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
       </template>
 
       <template v-else-if="action.key === 'factoryReset'">
@@ -194,8 +197,7 @@ const defaultForm = () => ({
   targetFileName: '',
   delaySeconds: 0,
   successURL: '',
-  failureURL: '',
-  commandKey: ''
+  failureURL: ''
 })
 const form = reactive(defaultForm())
 
@@ -273,7 +275,7 @@ const buildPayload = () => {
         delaySeconds: form.delaySeconds
       }
     case 'reboot':
-      return { commandKey: form.commandKey }
+      return undefined
     default:
       throw new Error('不支持的设备操作')
   }

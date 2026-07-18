@@ -53,7 +53,7 @@ export const downloadFile = (deviceId, data) => postCommand(deviceId, 'download'
 
 export const uploadFile = (deviceId, data) => postCommand(deviceId, 'upload', data)
 
-export const rebootDevice = (deviceId, data) => postCommand(deviceId, 'reboot', data)
+export const rebootDevice = (deviceId) => postCommand(deviceId, 'reboot')
 
 export const factoryResetDevice = (deviceId) => postCommand(deviceId, 'factoryReset')
 

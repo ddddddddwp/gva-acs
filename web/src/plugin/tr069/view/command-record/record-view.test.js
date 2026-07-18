@@ -15,6 +15,7 @@ test('record status view uses concrete lifecycle labels and GVA tag colors', () 
   assert.deepEqual(statusView('BUILDING'), { label: '构造中', type: 'warning' })
   assert.deepEqual(statusView('SENT'), { label: '已发送', type: 'warning' })
   assert.deepEqual(statusView('WAITING_TRANSFER'), { label: '等待传输完成', type: 'warning' })
+  assert.deepEqual(statusView('WAITING_REBOOT'), { label: '设备已受理，等待重启', type: 'warning' })
   assert.deepEqual(statusView('COMPLETED'), { label: '完成', type: 'success' })
   assert.deepEqual(statusView('FAILED'), { label: '失败', type: 'danger' })
   assert.deepEqual(statusView('TIMEOUT'), { label: '超时', type: 'danger' })
@@ -47,6 +48,7 @@ test('record duration and retry visibility follow terminal state', () => {
   assert.equal(canRetryRecord({ status: 'FAILED' }), true)
   assert.equal(canRetryRecord({ status: 'TIMEOUT' }), true)
   assert.equal(canRetryRecord({ status: 'COMPLETED' }), false)
+  assert.equal(canRetryRecord({ status: 'WAITING_REBOOT' }), false)
 })
 
 test('record page uses GVA theme surfaces and visible-page five-second refresh', async () => {

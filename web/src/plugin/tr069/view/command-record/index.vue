@@ -142,6 +142,7 @@ const phaseLabel = row => {
     BUILDING: '构造请求 XML',
     SENT: '等待 RPC 响应',
     WAITING_TRANSFER: '等待 TransferComplete',
+    WAITING_REBOOT: '等待设备重新上线',
     COMPLETED: '已完成',
     FAILED: '执行失败',
     TIMEOUT: '等待超时'

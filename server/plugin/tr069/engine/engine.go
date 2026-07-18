@@ -41,6 +41,8 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 	var profileRepository *adapter.ConnectionProfileRepository
 	var payloadProtector *adapter.ConnectionProfilePayloadProtector
 	var provisioner *adapter.ConnectionCredentialProvisioner
+	var rebootConfirmer *service.RebootConfirmationService
+	var rebootScanner *service.RebootTimeoutScanner
 	if adapter.DBAvailable() {
 		profileRepository = adapter.NewConnectionProfileRepository(nil, adapter.NewRuntimeCredentialCipher())
 		payloadProtector = adapter.NewConnectionProfilePayloadProtector(profileRepository)
@@ -50,6 +52,8 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 		}
 		manager := service.NewCommandManager(nil, wakeup, service.WithCommandPayloadProtector(payloadProtector))
 		provisioner = adapter.NewConnectionCredentialProvisioner(manager, profileRepository)
+		rebootConfirmer = service.NewRebootConfirmationService(global.GVA_DB)
+		rebootScanner = service.NewRebootTimeoutScanner(global.GVA_DB)
 	}
 
 	eventSink := deps.EventSink
@@ -82,7 +86,9 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 	}
 	devRepo := deps.DeviceRepo
 	if devRepo == nil {
-		devRepo = adapter.NewGormDeviceRepo(nil, profileRepository, provisioner)
+		gormDeviceRepo := adapter.NewGormDeviceRepo(nil, profileRepository, provisioner)
+		gormDeviceRepo.SetRebootInformConfirmer(rebootConfirmer)
+		devRepo = gormDeviceRepo
 	}
 	cmdRepo := deps.CommandRepo
 	if cmdRepo == nil {
@@ -173,15 +179,35 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	var runtimeDone chan struct{}
-	if provisioner != nil && deps.RuntimeContext != nil {
-		runtimeDone = make(chan struct{})
-		go func() {
-			defer close(runtimeDone)
-			provisioner.Run(deps.RuntimeContext)
-		}()
+	workers := make([]func(context.Context), 0, 2)
+	if provisioner != nil {
+		workers = append(workers, provisioner.Run)
 	}
+	if rebootScanner != nil {
+		workers = append(workers, rebootScanner.Run)
+	}
+	runtimeDone := runRuntimeWorkers(deps.RuntimeContext, workers...)
 	return engine, runtimeDone, nil
+}
+
+func runRuntimeWorkers(ctx context.Context, workers ...func(context.Context)) <-chan struct{} {
+	if ctx == nil || len(workers) == 0 {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wait sync.WaitGroup
+		for _, worker := range workers {
+			wait.Add(1)
+			go func(run func(context.Context)) {
+				defer wait.Done()
+				run(ctx)
+			}(worker)
+		}
+		wait.Wait()
+	}()
+	return done
 }
 
 var (
