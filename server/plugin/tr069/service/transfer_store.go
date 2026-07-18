@@ -248,6 +248,22 @@ func (s *TransferStore) FindUniqueWaitingActive(ctx context.Context, deviceID ui
 	return tasks[0], nil
 }
 
+func (s *TransferStore) GetTaskArtifact(ctx context.Context, taskID string) (model.Artifact, error) {
+	var artifact model.Artifact
+	err := s.db.WithContext(ctx).Where("task_id = ?", taskID).First(&artifact).Error
+	return artifact, err
+}
+
+func (s *TransferStore) AppendTransferEvent(ctx context.Context, event model.TransferEvent) error {
+	if s == nil || s.db == nil || event.TaskID == "" || event.Code == "" {
+		return errors.New("transfer event task ID and code are required")
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	return s.db.WithContext(ctx).Create(&event).Error
+}
+
 func (s *TransferStore) MarkArtifactAvailable(ctx context.Context, artifactID string, expectedVersion uint, final ArtifactFinalization) (model.Artifact, error) {
 	receivedAt := final.ReceivedAt.UTC()
 	if receivedAt.IsZero() {

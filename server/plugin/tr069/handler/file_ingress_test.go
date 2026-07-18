@@ -128,6 +128,7 @@ func TestFileIngressMapsIdentitySizeBusyAndMethodFailures(t *testing.T) {
 		{name: "ambiguous", method: http.MethodPost, resolverErr: service.ErrUploadDeviceAmbiguous, want: http.StatusForbidden},
 		{name: "declared too large", method: http.MethodPut, length: 2048, want: http.StatusRequestEntityTooLarge},
 		{name: "busy", method: http.MethodPost, receiverErr: service.ErrTransferBusy, want: http.StatusServiceUnavailable},
+		{name: "different retry content", method: http.MethodPut, receiverErr: service.ErrTransferContentConflict, want: http.StatusConflict},
 		{name: "method", method: http.MethodDelete, want: http.StatusMethodNotAllowed},
 	}
 	for _, test := range tests {

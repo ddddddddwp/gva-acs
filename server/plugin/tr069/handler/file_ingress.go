@@ -97,6 +97,8 @@ func NewFileIngressHandler(auth FileRequestAuthenticator, resolver UploadDeviceR
 			case errors.Is(err, service.ErrTransferBusy):
 				c.Header("Retry-After", "5")
 				c.Status(http.StatusServiceUnavailable)
+			case errors.Is(err, service.ErrTransferContentConflict):
+				c.Status(http.StatusConflict)
 			case errors.Is(err, context.DeadlineExceeded):
 				c.Status(http.StatusRequestTimeout)
 			default:

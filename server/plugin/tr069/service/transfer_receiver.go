@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	ErrTransferFileTooLarge = errors.New("transfer file exceeds configured limit")
-	ErrTransferBusy         = errors.New("transfer ingress is busy")
-	ErrTransferSizeMismatch = errors.New("artifact store size mismatch")
+	ErrTransferFileTooLarge    = errors.New("transfer file exceeds configured limit")
+	ErrTransferBusy            = errors.New("transfer ingress is busy")
+	ErrTransferSizeMismatch    = errors.New("artifact store size mismatch")
+	ErrTransferContentConflict = errors.New("active transfer retry content differs")
 )
 
 type UploadDeviceIdentity struct {
@@ -85,6 +86,11 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 
 	receiveCtx, cancel := context.WithTimeout(ctx, request.UploadTimeout)
 	defer cancel()
+	if existing, found, err := r.existingActiveArtifact(receiveCtx, request.Device.DeviceID, request.Channel); err != nil {
+		return model.Artifact{}, err
+	} else if found {
+		return r.compareActiveRetry(receiveCtx, request, existing)
+	}
 	receivedAt := r.now().UTC()
 	artifactID := uuid.NewString()
 	objectKey, err := ArtifactObjectKey(request.StoragePrefix, request.Channel, request.Device.DeviceID, receivedAt, artifactID)
@@ -151,6 +157,64 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 		return model.Artifact{}, err
 	}
 	return artifact, nil
+}
+
+func (r *TransferReceiver) existingActiveArtifact(ctx context.Context, deviceID uint, channel string) (model.Artifact, bool, error) {
+	task, err := r.transfers.FindUniqueWaitingActive(ctx, deviceID, channel)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Artifact{}, false, nil
+	}
+	if err != nil {
+		return model.Artifact{}, false, err
+	}
+	if task.Status == model.TransferStatusWaitingFile {
+		return model.Artifact{}, false, nil
+	}
+	artifact, err := r.transfers.GetTaskArtifact(ctx, task.TaskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Artifact{}, false, ErrTransferBusy
+	}
+	if err != nil {
+		return model.Artifact{}, false, err
+	}
+	if artifact.Status != model.ArtifactStatusAvailable {
+		return model.Artifact{}, false, ErrTransferBusy
+	}
+	return artifact, true, nil
+}
+
+func (r *TransferReceiver) compareActiveRetry(ctx context.Context, request ReceiveRequest, existing model.Artifact) (model.Artifact, error) {
+	hasher := sha256.New()
+	limited := &io.LimitedReader{R: request.Body, N: request.MaxFileSize + 1}
+	buffer := r.buffers.Get().([]byte)
+	defer r.buffers.Put(buffer)
+	written, err := io.CopyBuffer(hasher, limited, buffer)
+	if err != nil {
+		return model.Artifact{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return model.Artifact{}, err
+	}
+	if written > request.MaxFileSize {
+		return model.Artifact{}, ErrTransferFileTooLarge
+	}
+	digest := hex.EncodeToString(hasher.Sum(nil))
+	if written != existing.Size || digest != existing.SHA256 {
+		if err := r.transfers.AppendTransferEvent(ctx, model.TransferEvent{
+			TaskID: existing.TaskID, ArtifactID: existing.ArtifactID, Code: "DUPLICATE_CONTENT_CONFLICT",
+			Phase: "ingress.idempotency", Message: "active upload retry content differs", CreatedAt: r.now().UTC(),
+		}); err != nil {
+			return model.Artifact{}, err
+		}
+		return model.Artifact{}, ErrTransferContentConflict
+	}
+	if err := r.transfers.AppendTransferEvent(ctx, model.TransferEvent{
+		TaskID: existing.TaskID, ArtifactID: existing.ArtifactID, Code: "DUPLICATE_ACCEPTED",
+		Phase: "ingress.idempotency", Message: "active upload retry matched existing artifact", CreatedAt: r.now().UTC(),
+	}); err != nil {
+		return model.Artifact{}, err
+	}
+	return existing, nil
 }
 
 func (r *TransferReceiver) createReceivingMetadata(ctx context.Context, request ReceiveRequest, metadata ReceiveMetadata) (model.TransferTask, model.Artifact, error) {

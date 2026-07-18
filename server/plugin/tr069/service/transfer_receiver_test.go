@@ -80,6 +80,67 @@ func TestTransferReceiverRejectsOversizedStreamAndAbortsObject(t *testing.T) {
 	}
 }
 
+func TestTransferReceiverMakesActiveUploadRetriesIdempotentByContent(t *testing.T) {
+	store, db, device := newTransferStoreTest(t)
+	now := time.Now().UTC()
+	commandID := "upload-retry-command"
+	commandKey := "uploadretrycommand000000000000001"
+	command := model.Command{
+		CommandID: commandID, DeviceID: device.ID, DeviceKey: device.SerialNumber,
+		Operation: "Upload", Status: model.CommandStatusSent, CommandKey: &commandKey,
+		QueuedAt: now, CreatedAt: now,
+	}
+	task := model.TransferTask{
+		TaskID: "upload-retry-task", DeviceID: device.ID, Channel: "LOG", Source: model.TransferSourceActive,
+		CommandID: &commandID, CommandKey: &commandKey, Status: model.TransferStatusWaitingFile, CreatedAt: now,
+	}
+	if err := store.CreateActive(context.Background(), &command, &task); err != nil {
+		t.Fatalf("create active task: %v", err)
+	}
+	objects := newMemoryArtifactStore()
+	receiver := NewTransferReceiver(store, objects)
+	payload := []byte("same-active-log")
+	request := func(body []byte) ReceiveRequest {
+		return ReceiveRequest{
+			Device:  UploadDeviceIdentity{DeviceID: device.ID, SerialNumber: device.SerialNumber, OUI: device.OUI},
+			Channel: "LOG", Body: bytes.NewReader(body), ContentLength: int64(len(body)),
+			Driver: "memory", StoragePrefix: "artifacts", MaxFileSize: 1024, UploadTimeout: time.Minute,
+			RetentionDays: 30, MaxConcurrent: 4, MaxConcurrentPerDevice: 1,
+		}
+	}
+	first, err := receiver.Receive(context.Background(), request(payload))
+	if err != nil {
+		t.Fatalf("first receive: %v", err)
+	}
+	duplicate, err := receiver.Receive(context.Background(), request(payload))
+	if err != nil || duplicate.ArtifactID != first.ArtifactID {
+		t.Fatalf("same-content retry artifact=%#v err=%v", duplicate, err)
+	}
+	if _, err := receiver.Receive(context.Background(), request([]byte("different-active-log"))); !errors.Is(err, ErrTransferContentConflict) {
+		t.Fatalf("different-content retry error=%v", err)
+	}
+	var artifacts, tasks int64
+	if err := db.Model(new(model.Artifact)).Count(&artifacts).Error; err != nil {
+		t.Fatalf("count artifacts: %v", err)
+	}
+	if err := db.Model(new(model.TransferTask)).Count(&tasks).Error; err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	objects.mu.Lock()
+	objectsCount := len(objects.objects)
+	objects.mu.Unlock()
+	if artifacts != 1 || tasks != 1 || objectsCount != 1 {
+		t.Fatalf("retry created extra state: artifacts=%d tasks=%d objects=%d", artifacts, tasks, objectsCount)
+	}
+	var retryEvents int64
+	if err := db.Model(new(model.TransferEvent)).Where("task_id = ? AND code IN ?", task.TaskID, []string{"DUPLICATE_ACCEPTED", "DUPLICATE_CONTENT_CONFLICT"}).Count(&retryEvents).Error; err != nil {
+		t.Fatalf("count retry events: %v", err)
+	}
+	if retryEvents != 2 {
+		t.Fatalf("retry audit events=%d, want 2", retryEvents)
+	}
+}
+
 func TestTransferAdmissionRejectsGlobalAndPerDeviceSaturation(t *testing.T) {
 	admission := NewTransferAdmissionController()
 	release, err := admission.Acquire(1, "LOG", 2, 1)
@@ -134,13 +195,31 @@ func TestUploadDeviceResolverUsesActiveTaskThenRejectsAmbiguousFallback(t *testi
 func TestUploadDeviceResolverValidatesLiveRedisCandidateAgainstDatabase(t *testing.T) {
 	store, db, device := newTransferStoreTest(t)
 	now := time.Now().UTC()
-	if err := db.Model(&device).Updates(map[string]any{"ip": "192.0.2.91", "last_inform": now, "oui": "8CE468"}).Error; err != nil {
+	if err := db.Model(&device).Updates(map[string]any{"ip": "192.0.2.91", "last_inform": now, "oui": "8CE468", "product_class": "NR-BS"}).Error; err != nil {
 		t.Fatalf("update device: %v", err)
 	}
-	resolver := NewUploadDeviceResolver(db, store, staticUploadIdentityResolver{candidates: []UploadDeviceIdentity{{DeviceID: device.ID, IP: "192.0.2.91"}}}, 30*time.Minute)
+	device.OUI = "8CE468"
+	device.ProductClass = "NR-BS"
+	exact := UploadDeviceIdentity{DeviceID: device.ID, IP: "192.0.2.91", OUI: device.OUI, ProductClass: device.ProductClass, SerialNumber: device.SerialNumber}
+	resolver := NewUploadDeviceResolver(db, store, staticUploadIdentityResolver{candidates: []UploadDeviceIdentity{exact}}, 30*time.Minute)
 	resolved, err := resolver.Resolve(context.Background(), "192.0.2.91", "LOG")
 	if err != nil || resolved.DeviceID != device.ID || resolved.SerialNumber != device.SerialNumber {
 		t.Fatalf("resolved=%#v err=%v", resolved, err)
+	}
+	for name, mutate := range map[string]func(*UploadDeviceIdentity){
+		"missing identity": func(candidate *UploadDeviceIdentity) { candidate.OUI = "" },
+		"OUI mismatch":     func(candidate *UploadDeviceIdentity) { candidate.OUI = "FFFFFF" },
+		"product mismatch": func(candidate *UploadDeviceIdentity) { candidate.ProductClass = "OTHER" },
+		"serial mismatch":  func(candidate *UploadDeviceIdentity) { candidate.SerialNumber = "OTHER-SN" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := exact
+			mutate(&candidate)
+			resolver.identities = staticUploadIdentityResolver{candidates: []UploadDeviceIdentity{candidate}}
+			if _, err := resolver.Resolve(context.Background(), "192.0.2.91", "LOG"); !errors.Is(err, ErrUploadDeviceNotFound) {
+				t.Fatalf("identity conflict error=%v", err)
+			}
+		})
 	}
 
 	resolver.identities = staticUploadIdentityResolver{candidates: []UploadDeviceIdentity{{DeviceID: 999999, IP: "192.0.2.91"}}}

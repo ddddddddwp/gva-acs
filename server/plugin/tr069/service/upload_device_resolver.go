@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
@@ -55,6 +56,9 @@ func (r *UploadDeviceResolver) Resolve(ctx context.Context, sourceIP, channel st
 		case 1:
 			return valid[0], nil
 		case 0:
+			if len(candidates) > 0 {
+				return UploadDeviceIdentity{}, ErrUploadDeviceNotFound
+			}
 		default:
 			return UploadDeviceIdentity{}, ErrUploadDeviceAmbiguous
 		}
@@ -94,19 +98,23 @@ func (r *UploadDeviceResolver) registeredCandidates(ctx context.Context, sourceI
 	valid := make([]UploadDeviceIdentity, 0, len(candidates))
 	seen := make(map[uint]struct{}, len(candidates))
 	for _, candidate := range candidates {
-		if candidate.DeviceID == 0 || candidate.IP != sourceIP {
+		if candidate.DeviceID == 0 || candidate.IP != sourceIP || strings.TrimSpace(candidate.OUI) == "" ||
+			strings.TrimSpace(candidate.ProductClass) == "" || strings.TrimSpace(candidate.SerialNumber) == "" {
 			continue
 		}
 		if _, exists := seen[candidate.DeviceID]; exists {
 			continue
 		}
 		var device model.Device
-		err := r.db.WithContext(ctx).Where("id = ? AND serial_number <> '' AND oui <> ''", candidate.DeviceID).First(&device).Error
+		err := r.db.WithContext(ctx).Where("id = ? AND serial_number <> '' AND oui <> '' AND product_class <> ''", candidate.DeviceID).First(&device).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			continue
 		}
 		if err != nil {
 			return nil, err
+		}
+		if !strings.EqualFold(candidate.OUI, device.OUI) || candidate.ProductClass != device.ProductClass || candidate.SerialNumber != device.SerialNumber {
+			continue
 		}
 		seen[device.ID] = struct{}{}
 		valid = append(valid, UploadDeviceIdentity{
