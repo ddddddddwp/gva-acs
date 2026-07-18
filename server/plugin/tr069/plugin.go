@@ -34,7 +34,9 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 			return errors.Join(engine.Stop(ctx), adapter.StopCommandWakeConsumer(ctx))
 		})
 	})
-	initialize.ReloadConfig()
+	if err := initialize.LoadConfig(); err != nil {
+		panic(fmt.Errorf("load TR-069 configuration: %w", err))
+	}
 	tr069Global.SetStartupConfig(config.CurrentRuntime().Settings)
 	if err := initialize.Gorm(context.Background()); err != nil {
 		panic(fmt.Errorf("initialize TR-069 database: %w", err))

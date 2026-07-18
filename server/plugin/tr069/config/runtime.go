@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -18,7 +19,25 @@ const (
 	defaultRPCXMLRetentionDays              = 30
 	defaultConnectionRequestTimeout         = 10
 	defaultConnectionRequestAuthScheme      = "digest"
+	defaultIdentityBindingTTL               = 1800
+	defaultFileIngressNonceTTL              = 300
+	defaultFileIngressMaxSize               = int64(64 << 20)
+	defaultFileIngressConcurrency           = 4
+	defaultFileIngressPerDeviceConcurrency  = 1
+	defaultFileIngressUploadTimeout         = 600
+	defaultFileIngressRetentionDays         = 30
 )
+
+type TransferChannelRuntime struct {
+	TransferChannelConfig
+	UploadTimeout time.Duration
+}
+
+type FileIngressRuntime struct {
+	IdentityBindingTTL time.Duration
+	NonceTTL           time.Duration
+	Channels           map[string]TransferChannelRuntime
+}
 
 // Runtime is an immutable snapshot of the TR-069 configuration used by workers.
 type Runtime struct {
@@ -29,6 +48,7 @@ type Runtime struct {
 	TransferCompleteTimeout  time.Duration
 	RPCXMLRetention          time.Duration
 	ConnectionRequestTimeout time.Duration
+	FileIngress              FileIngressRuntime
 }
 
 var current atomic.Pointer[Runtime]
@@ -74,6 +94,42 @@ func NormalizeRuntimeConfig(in TR069Config) TR069Config {
 	if in.ConnectionRequest.AuthScheme == "" {
 		in.ConnectionRequest.AuthScheme = defaultConnectionRequestAuthScheme
 	}
+	if in.FileIngress.IdentityBindingTTL <= 0 {
+		in.FileIngress.IdentityBindingTTL = defaultIdentityBindingTTL
+	}
+	if len(in.FileIngress.Authentication.Schemes) == 0 {
+		in.FileIngress.Authentication.Schemes = []string{"digest", "basic"}
+	}
+	if in.FileIngress.Authentication.Realm == "" {
+		in.FileIngress.Authentication.Realm = "GVA-TR069-LOG"
+	}
+	if in.FileIngress.Authentication.NonceTTL <= 0 {
+		in.FileIngress.Authentication.NonceTTL = defaultFileIngressNonceTTL
+	}
+	for name, channel := range in.FileIngress.Channels {
+		if channel.MaxFileSize <= 0 {
+			channel.MaxFileSize = defaultFileIngressMaxSize
+		}
+		if channel.MaxConcurrent <= 0 {
+			channel.MaxConcurrent = defaultFileIngressConcurrency
+		}
+		if channel.MaxConcurrentPerDevice <= 0 {
+			channel.MaxConcurrentPerDevice = defaultFileIngressPerDeviceConcurrency
+		}
+		if channel.UploadTimeout <= 0 {
+			channel.UploadTimeout = defaultFileIngressUploadTimeout
+		}
+		if channel.RetentionDays <= 0 {
+			channel.RetentionDays = defaultFileIngressRetentionDays
+		}
+		if channel.StoragePrefix == "" {
+			channel.StoragePrefix = strings.ToLower(name)
+		}
+		in.FileIngress.Channels[name] = channel
+	}
+	if in.FileIngress.ArtifactStore.Prefix == "" {
+		in.FileIngress.ArtifactStore.Prefix = "artifacts"
+	}
 	return in
 }
 
@@ -86,6 +142,14 @@ func StoreRuntime(in TR069Config) Runtime {
 
 func buildRuntime(in TR069Config) Runtime {
 	normalized := cloneTR069Config(NormalizeRuntimeConfig(in))
+	fileIngress := FileIngressRuntime{
+		IdentityBindingTTL: time.Duration(normalized.FileIngress.IdentityBindingTTL) * time.Second,
+		NonceTTL:           time.Duration(normalized.FileIngress.Authentication.NonceTTL) * time.Second,
+		Channels:           make(map[string]TransferChannelRuntime, len(normalized.FileIngress.Channels)),
+	}
+	for name, channel := range normalized.FileIngress.Channels {
+		fileIngress.Channels[name] = TransferChannelRuntime{TransferChannelConfig: channel, UploadTimeout: time.Duration(channel.UploadTimeout) * time.Second}
+	}
 	return Runtime{
 		Settings:                 normalized,
 		CommandQueueWaitTimeout:  time.Duration(normalized.CommandQueueWaitTimeout) * time.Second,
@@ -94,12 +158,21 @@ func buildRuntime(in TR069Config) Runtime {
 		TransferCompleteTimeout:  time.Duration(normalized.TransferCompleteTimeout) * time.Second,
 		RPCXMLRetention:          time.Duration(normalized.RPCXMLRetentionDays) * 24 * time.Hour,
 		ConnectionRequestTimeout: time.Duration(normalized.ConnectionRequest.RequestTimeout) * time.Second,
+		FileIngress:              fileIngress,
 	}
 }
 
 func cloneTR069Config(in TR069Config) TR069Config {
 	out := in
 	out.ConnectionRequest.AllowedCIDRs = append([]string(nil), in.ConnectionRequest.AllowedCIDRs...)
+	out.FileIngress.TrustedProxies = append([]string(nil), in.FileIngress.TrustedProxies...)
+	out.FileIngress.Authentication.Schemes = append([]string(nil), in.FileIngress.Authentication.Schemes...)
+	if in.FileIngress.Channels != nil {
+		out.FileIngress.Channels = make(map[string]TransferChannelConfig, len(in.FileIngress.Channels))
+		for name, channel := range in.FileIngress.Channels {
+			out.FileIngress.Channels[name] = channel
+		}
+	}
 	if in.ConnectionRequest.CredentialDecryptionKeys != nil {
 		out.ConnectionRequest.CredentialDecryptionKeys = make(map[string]string, len(in.ConnectionRequest.CredentialDecryptionKeys))
 		for version, key := range in.ConnectionRequest.CredentialDecryptionKeys {
@@ -112,6 +185,12 @@ func cloneTR069Config(in TR069Config) TR069Config {
 func cloneRuntime(in Runtime) Runtime {
 	out := in
 	out.Settings = cloneTR069Config(in.Settings)
+	if in.FileIngress.Channels != nil {
+		out.FileIngress.Channels = make(map[string]TransferChannelRuntime, len(in.FileIngress.Channels))
+		for name, channel := range in.FileIngress.Channels {
+			out.FileIngress.Channels[name] = channel
+		}
+	}
 	return out
 }
 

@@ -1,5 +1,52 @@
 package config
 
+import (
+	"errors"
+	"fmt"
+	"net/netip"
+	"net/url"
+	"strings"
+)
+
+type FileIngressAuthConfig struct {
+	Username string   `mapstructure:"username" json:"-" yaml:"username"`
+	Password string   `mapstructure:"password" json:"-" yaml:"password"`
+	Schemes  []string `mapstructure:"schemes" json:"schemes" yaml:"schemes"`
+	Realm    string   `mapstructure:"realm" json:"realm" yaml:"realm"`
+	NonceTTL int      `mapstructure:"nonceTTL" json:"nonceTTL" yaml:"nonceTTL"`
+}
+
+type TransferChannelConfig struct {
+	Enabled                bool   `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	Path                   string `mapstructure:"path" json:"path" yaml:"path"`
+	MaxFileSize            int64  `mapstructure:"maxFileSize" json:"maxFileSize" yaml:"maxFileSize"`
+	MaxConcurrent          int    `mapstructure:"maxConcurrent" json:"maxConcurrent" yaml:"maxConcurrent"`
+	MaxConcurrentPerDevice int    `mapstructure:"maxConcurrentPerDevice" json:"maxConcurrentPerDevice" yaml:"maxConcurrentPerDevice"`
+	UploadTimeout          int    `mapstructure:"uploadTimeout" json:"uploadTimeout" yaml:"uploadTimeout"`
+	RetentionDays          int    `mapstructure:"retentionDays" json:"retentionDays" yaml:"retentionDays"`
+	StoragePrefix          string `mapstructure:"storagePrefix" json:"storagePrefix" yaml:"storagePrefix"`
+}
+
+type ArtifactStoreConfig struct {
+	Driver    string `mapstructure:"driver" json:"driver" yaml:"driver"`
+	Endpoint  string `mapstructure:"endpoint" json:"endpoint" yaml:"endpoint"`
+	Bucket    string `mapstructure:"bucket" json:"bucket" yaml:"bucket"`
+	AccessKey string `mapstructure:"accessKey" json:"-" yaml:"accessKey"`
+	SecretKey string `mapstructure:"secretKey" json:"-" yaml:"secretKey"`
+	UseSSL    bool   `mapstructure:"useSSL" json:"useSSL" yaml:"useSSL"`
+	Prefix    string `mapstructure:"prefix" json:"prefix" yaml:"prefix"`
+}
+
+type FileIngressConfig struct {
+	Enabled            bool                             `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	PublicBaseURL      string                           `mapstructure:"publicBaseURL" json:"publicBaseURL" yaml:"publicBaseURL"`
+	TrustedProxies     []string                         `mapstructure:"trustedProxies" json:"trustedProxies" yaml:"trustedProxies"`
+	IdentityBindingTTL int                              `mapstructure:"identityBindingTTL" json:"identityBindingTTL" yaml:"identityBindingTTL"`
+	Authentication     FileIngressAuthConfig            `mapstructure:"authentication" json:"authentication" yaml:"authentication"`
+	Channels           map[string]TransferChannelConfig `mapstructure:"channels" json:"channels" yaml:"channels"`
+	ArtifactStore      ArtifactStoreConfig              `mapstructure:"artifactStore" json:"artifactStore" yaml:"artifactStore"`
+}
+
 type ConnectionRequestConfig struct {
 	AutoProvisionCredentials bool              `mapstructure:"autoProvisionCredentials" json:"autoProvisionCredentials" yaml:"autoProvisionCredentials"`
 	CredentialKeyVersion     string            `mapstructure:"credentialKeyVersion" json:"credentialKeyVersion" yaml:"credentialKeyVersion"`
@@ -69,4 +116,73 @@ type TR069Config struct {
 
 	// ConnectionRequest controls CPE wakeup and per-device credential provisioning.
 	ConnectionRequest ConnectionRequestConfig `mapstructure:"connectionRequest" json:"connectionRequest" yaml:"connectionRequest"`
+
+	FileIngress FileIngressConfig `mapstructure:"fileIngress" json:"fileIngress" yaml:"fileIngress"`
+}
+
+func ValidateFileIngress(in TR069Config) error {
+	cfg := in.FileIngress
+	if !cfg.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Authentication.Username) == "" {
+		return errors.New("tr069 file ingress username is required")
+	}
+	if strings.TrimSpace(cfg.Authentication.Password) == "" {
+		return errors.New("tr069 file ingress password is required")
+	}
+	if strings.TrimSpace(cfg.Authentication.Realm) == "" {
+		return errors.New("tr069 file ingress realm is required")
+	}
+	if cfg.IdentityBindingTTL <= 0 || cfg.Authentication.NonceTTL <= 0 {
+		return errors.New("tr069 file ingress TTL values must be positive")
+	}
+	parsedBase, err := url.Parse(strings.TrimSpace(cfg.PublicBaseURL))
+	if err != nil || parsedBase.Host == "" || (parsedBase.Scheme != "http" && parsedBase.Scheme != "https") {
+		return errors.New("tr069 file ingress publicBaseURL must be an absolute HTTP URL")
+	}
+	for _, raw := range cfg.TrustedProxies {
+		if _, err := netip.ParsePrefix(strings.TrimSpace(raw)); err != nil {
+			return fmt.Errorf("tr069 file ingress trusted proxy CIDR is invalid: %q", raw)
+		}
+	}
+	if len(cfg.Authentication.Schemes) == 0 {
+		return errors.New("tr069 file ingress authentication schemes are required")
+	}
+	for _, scheme := range cfg.Authentication.Schemes {
+		switch strings.ToLower(strings.TrimSpace(scheme)) {
+		case "basic", "digest":
+		default:
+			return fmt.Errorf("tr069 file ingress authentication scheme is unsupported: %q", scheme)
+		}
+	}
+	paths := make(map[string]string, len(cfg.Channels))
+	enabled := 0
+	for name, channel := range cfg.Channels {
+		if !channel.Enabled {
+			continue
+		}
+		enabled++
+		if !strings.HasPrefix(channel.Path, "/acs/") {
+			return fmt.Errorf("tr069 file ingress channel %q path must start with /acs/", name)
+		}
+		if existing, ok := paths[channel.Path]; ok {
+			return fmt.Errorf("tr069 file ingress channels %q and %q use the same path", existing, name)
+		}
+		paths[channel.Path] = name
+		if channel.MaxFileSize <= 0 || channel.MaxConcurrent <= 0 || channel.MaxConcurrentPerDevice <= 0 || channel.UploadTimeout <= 0 || channel.RetentionDays <= 0 {
+			return fmt.Errorf("tr069 file ingress channel %q limits must be positive", name)
+		}
+	}
+	if enabled == 0 {
+		return errors.New("tr069 file ingress requires at least one enabled channel")
+	}
+	store := cfg.ArtifactStore
+	if strings.ToLower(strings.TrimSpace(store.Driver)) != "minio" {
+		return errors.New("tr069 artifact store driver must be minio")
+	}
+	if strings.TrimSpace(store.Endpoint) == "" || strings.TrimSpace(store.Bucket) == "" || strings.TrimSpace(store.AccessKey) == "" || strings.TrimSpace(store.SecretKey) == "" {
+		return errors.New("tr069 minio endpoint, bucket, accessKey, and secretKey are required")
+	}
+	return nil
 }
