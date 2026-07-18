@@ -100,5 +100,6 @@
   "/src/plugin/tr069/view/device/components/data-model-viewer.vue": "DataModelViewer",
   "/src/plugin/tr069/view/device/components/fap-info.vue": "FapInfo",
   "/src/plugin/tr069/view/device/components/rpc-command-dialog.vue": "RpcCommandDialog",
-  "/src/plugin/tr069/view/device/index.vue": "Index"
+  "/src/plugin/tr069/view/device/index.vue": "Index",
+  "/src/plugin/tr069/view/log-file/index.vue": "Tr069LogFiles"
 }

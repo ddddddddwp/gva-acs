@@ -61,6 +61,30 @@ func Menu(ctx context.Context) {
 			return err
 		}
 
+		// 二级菜单：日志文件
+		logFileMenu := model.SysBaseMenu{
+			ParentId:  tr069Menu.ID,
+			Path:      "logFiles",
+			Name:      "tr069LogFiles",
+			Hidden:    false,
+			Component: "plugin/tr069/view/log-file/index.vue",
+			Sort:      3,
+			Meta:      model.Meta{Title: "日志文件", Icon: "files"},
+		}
+		if err := tx.Model(&model.SysBaseMenu{}).Where("name = ?", logFileMenu.Name).FirstOrCreate(&logFileMenu).Error; err != nil {
+			return err
+		}
+		logFileMenu.ParentId = tr069Menu.ID
+		logFileMenu.Component = "plugin/tr069/view/log-file/index.vue"
+		logFileMenu.Path = "logFiles"
+		logFileMenu.Sort = 3
+		logFileMenu.Meta.Title = "日志文件"
+		logFileMenu.Meta.Icon = "files"
+		logFileMenu.Hidden = false
+		if err := tx.Save(&logFileMenu).Error; err != nil {
+			return err
+		}
+
 		// 二级菜单：告警管理（作为父菜单）
 		alarmMenu := model.SysBaseMenu{
 			ParentId:  tr069Menu.ID,
@@ -68,7 +92,7 @@ func Menu(ctx context.Context) {
 			Name:      "tr069Alarm",
 			Hidden:    false,
 			Component: "view/routerHolder.vue",
-			Sort:      3,
+			Sort:      4,
 			Meta:      model.Meta{Title: "告警管理", Icon: "bell"},
 		}
 		if err := tx.Model(&model.SysBaseMenu{}).Where("name = ?", alarmMenu.Name).FirstOrCreate(&alarmMenu).Error; err != nil {
@@ -78,7 +102,7 @@ func Menu(ctx context.Context) {
 		alarmMenu.ParentId = tr069Menu.ID
 		alarmMenu.Component = "view/routerHolder.vue"
 		alarmMenu.Path = "alarm"
-		alarmMenu.Sort = 3
+		alarmMenu.Sort = 4
 		alarmMenu.Meta.Title = "告警管理"
 		alarmMenu.Meta.Icon = "bell"
 		alarmMenu.Hidden = false
