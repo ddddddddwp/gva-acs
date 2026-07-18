@@ -425,7 +425,7 @@ func (r *GormCommandRepo) current(ctx context.Context, commandID string) (model.
 	return command, err
 }
 
-func (r *GormCommandRepo) MarkSending(ctx context.Context, commandID, requestID string, sentAt time.Time) error {
+func (r *GormCommandRepo) MarkSending(ctx context.Context, commandID, cwmpID string, sentAt time.Time) error {
 	if sentAt.IsZero() {
 		sentAt = time.Now()
 	}
@@ -442,7 +442,7 @@ func (r *GormCommandRepo) MarkSending(ctx context.Context, commandID, requestID 
 		EventType:       "REQUEST_SENT",
 		Stage:           "request",
 		Updates: map[string]any{
-			"request_id":        requestID,
+			"cwmp_id":           cwmpID,
 			"sent_at":           sentAt,
 			"phase_deadline_at": deadline,
 		},

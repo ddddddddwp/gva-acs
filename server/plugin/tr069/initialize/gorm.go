@@ -3,6 +3,7 @@ package initialize
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 
 func Gorm(ctx context.Context) {
 	migrateDeviceOUIColumn(ctx)
+	if err := cutoverCommandIdentifierSchema(global.GVA_DB.WithContext(ctx)); err != nil {
+		global.GVA_LOG.Error("TR069 Command Identifier Schema Cutover Failed", zap.Error(err))
+		return
+	}
 	err := global.GVA_DB.WithContext(ctx).AutoMigrate(
 		new(model.Device),
 		new(model.Command),
@@ -51,6 +56,35 @@ func Gorm(ctx context.Context) {
 			global.GVA_LOG.Error("TR069 DataModelValue IngestFilter Init Failed", zap.Error(err))
 		}
 	}
+}
+
+func cutoverCommandIdentifierSchema(db *gorm.DB) error {
+	if db == nil {
+		return errors.New("TR069 command identifier schema cutover requires a database")
+	}
+	migrator := db.Migrator()
+	hasRequestID := migrator.HasColumn("tr069_commands", "request_id")
+	hasCWMPID := migrator.HasColumn("tr069_commands", "cwmp_id")
+	if hasRequestID && hasCWMPID {
+		return errors.New("tr069_commands contains both request_id and cwmp_id")
+	}
+	if hasRequestID {
+		if err := migrator.RenameColumn("tr069_commands", "request_id", "cwmp_id"); err != nil {
+			return fmt.Errorf("rename tr069_commands.request_id to cwmp_id: %w", err)
+		}
+	}
+	if migrator.HasColumn("tr069_command_xmls", "request_id") {
+		var err error
+		if db.Dialector.Name() == "sqlite" {
+			err = db.Exec("ALTER TABLE tr069_command_xmls DROP COLUMN request_id").Error
+		} else {
+			err = migrator.DropColumn("tr069_command_xmls", "request_id")
+		}
+		if err != nil {
+			return fmt.Errorf("drop tr069_command_xmls.request_id: %w", err)
+		}
+	}
+	return nil
 }
 
 const (

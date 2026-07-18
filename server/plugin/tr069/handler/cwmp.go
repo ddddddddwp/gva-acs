@@ -101,7 +101,7 @@ func CWMPHandler(c *gin.Context) {
 	})
 	handleStart := time.Now()
 	resp, err := eng.Handle(ctx, &core.Request{
-		ID:         reqID,
+		TraceID:    reqID,
 		RemoteIP:   clientIP,
 		Headers:    headers,
 		Body:       body,

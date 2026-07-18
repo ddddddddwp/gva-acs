@@ -132,7 +132,7 @@ func TestGormCommandRepoMarkSendingTransitionsAndAppendsEventTransactionally(t *
 	if err := db.First(&sent, "command_id = ?", command.CommandID).Error; err != nil {
 		t.Fatalf("load SENT command: %v", err)
 	}
-	if sent.Status != model.CommandStatusSent || sent.RequestID != "cwmp-request-20" || sent.SentAt == nil || !sent.SentAt.Equal(sentAt) {
+	if sent.Status != model.CommandStatusSent || sent.CWMPID != "cwmp-request-20" || sent.SentAt == nil || !sent.SentAt.Equal(sentAt) {
 		t.Fatalf("sent command = %#v", sent)
 	}
 	wantDeadline := sentAt.Add(17 * time.Second)
@@ -177,7 +177,7 @@ func TestGormCommandRepoMarkSendingRollsBackWhenEventInsertFails(t *testing.T) {
 	if err := db.First(&preserved, "command_id = ?", command.CommandID).Error; err != nil {
 		t.Fatalf("reload command: %v", err)
 	}
-	if preserved.Status != model.CommandStatusBuilding || preserved.RequestID != "" || preserved.SentAt != nil || preserved.Version != 0 {
+	if preserved.Status != model.CommandStatusBuilding || preserved.CWMPID != "" || preserved.SentAt != nil || preserved.Version != 0 {
 		t.Fatalf("command changed despite event rollback: %#v", preserved)
 	}
 }

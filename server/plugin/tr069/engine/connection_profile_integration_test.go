@@ -70,7 +70,7 @@ func TestEngineDefaultParserAndBuilderShareEventSink(t *testing.T) {
 		Manufacturer: "Manufacturer", OUI: "001122", ProductClass: "ProductClass", SerialNumber: "1234567890",
 	}, "127.0.0.1")
 	if _, err := engine.Handle(requestContext, &core.Request{
-		ID: "sink-inform", RemoteIP: "127.0.0.1", Body: []byte(sampleInformXMLBoot2), Headers: map[string]string{},
+		TraceID: "sink-inform", RemoteIP: "127.0.0.1", Body: []byte(sampleInformXMLBoot2), Headers: map[string]string{},
 	}); err != nil {
 		t.Fatalf("Handle Inform: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestEngineDefaultConnectionProfileRuntimeProvisionsEncryptedSystemCommand(t
 		Manufacturer: "Manufacturer", OUI: "001122", ProductClass: "ProductClass", SerialNumber: "1234567890",
 	}, "127.0.0.1")
 	if _, err := engine.Handle(requestContext, &core.Request{
-		ID: "profile-inform", RemoteIP: "127.0.0.1", Body: []byte(inform), Headers: map[string]string{},
+		TraceID: "profile-inform", RemoteIP: "127.0.0.1", Body: []byte(inform), Headers: map[string]string{},
 	}); err != nil {
 		t.Fatalf("Handle Inform: %v", err)
 	}

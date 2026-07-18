@@ -45,7 +45,6 @@ func (s *CommandXMLSink) Emit(ctx context.Context, event observability.Event) {
 		Direction: string(event.Direction),
 		Method:    event.Method,
 		CWMPID:    event.CWMPID,
-		RequestID: event.RequestID,
 		Payload:   append([]byte(nil), event.Payload...),
 		ExpiresAt: now.Add(retention),
 		CreatedAt: now,

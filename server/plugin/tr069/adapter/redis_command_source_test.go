@@ -485,7 +485,7 @@ func TestRedisCommandSourceNackDoesNotRestoreAfterRequestWasSent(t *testing.T) {
 	if err := db.First(&sent, "command_id = ?", command.CommandID).Error; err != nil {
 		t.Fatalf("load sent command: %v", err)
 	}
-	if sent.Status != model.CommandStatusSent || sent.RequestID != "cwmp-sent" {
+	if sent.Status != model.CommandStatusSent || sent.CWMPID != "cwmp-sent" {
 		t.Fatalf("nack restored already sent command: %#v", sent)
 	}
 	if locker.isHeld(RedisDeviceLockPrefix + command.DeviceKey) {

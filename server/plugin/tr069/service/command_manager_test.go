@@ -216,7 +216,7 @@ func TestCommandManagerWakeFailurePreservesAlreadySentCommand(t *testing.T) {
 	command := model.Command{
 		CommandID: "wake-raced-with-send", DeviceID: 1, DeviceKey: "001122-SENT",
 		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`),
-		Status: model.CommandStatusSent, RequestID: "cwmp-sent", QueuedAt: now, CreatedAt: now,
+		Status: model.CommandStatusSent, CWMPID: "cwmp-sent", QueuedAt: now, CreatedAt: now,
 	}
 	if err := NewCommandStore(db).Create(context.Background(), &command); err != nil {
 		t.Fatalf("seed SENT command: %v", err)

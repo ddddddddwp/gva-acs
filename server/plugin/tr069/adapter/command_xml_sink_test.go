@@ -30,13 +30,11 @@ func TestCommandXMLSinkPersistsSanitizedWireEventWithoutMutatingPayload(t *testi
 		t.Fatal("sink must enable only INFO events")
 	}
 	sink.Emit(context.Background(), observability.Event{
-		Level:     observability.LevelInfo,
-		Stage:     "wire.xml",
-		Direction: observability.DirectionOutbound,
-		Attributes: observability.Attributes{
-			CommandID: "cmd-wire", Method: "SetParameterValues", CWMPID: "cwmp-7", RequestID: "request-7",
-		},
-		Payload: payload,
+		Level:      observability.LevelInfo,
+		Stage:      "wire.xml",
+		Direction:  observability.DirectionOutbound,
+		Attributes: observability.Attributes{CommandID: "cmd-wire", Method: "SetParameterValues", CWMPID: "cwmp-7", TraceID: "trace-7"},
+		Payload:    payload,
 	})
 
 	if string(payload) != string(original) {
@@ -46,7 +44,7 @@ func TestCommandXMLSinkPersistsSanitizedWireEventWithoutMutatingPayload(t *testi
 	if err := db.First(&record, "command_id = ?", "cmd-wire").Error; err != nil {
 		t.Fatalf("load command XML: %v", err)
 	}
-	if record.Direction != "outbound" || record.Method != "SetParameterValues" || record.CWMPID != "cwmp-7" || record.RequestID != "request-7" {
+	if record.Direction != "outbound" || record.Method != "SetParameterValues" || record.CWMPID != "cwmp-7" {
 		t.Fatalf("metadata = %#v", record)
 	}
 	if strings.Contains(string(record.Payload), "wire-secret") || !strings.Contains(string(record.Payload), "******") {
@@ -75,7 +73,7 @@ func TestCommandXMLSinkCorrelatesBidirectionalWireEventsByCWMPID(t *testing.T) {
 		Operation:  "Reboot",
 		ParamsJSON: model.LongTextJSON(`{}`),
 		Status:     model.CommandStatusSent,
-		RequestID:  "cwmp-correlated-wire",
+		CWMPID:     "cwmp-correlated-wire",
 		CreatedAt:  time.Now(),
 	}
 	if err := db.Create(&command).Error; err != nil {
@@ -86,12 +84,12 @@ func TestCommandXMLSinkCorrelatesBidirectionalWireEventsByCWMPID(t *testing.T) {
 	for _, event := range []observability.Event{
 		{
 			Level: observability.LevelInfo, Stage: "wire.xml", Direction: observability.DirectionOutbound,
-			Attributes: observability.Attributes{CWMPID: command.RequestID, Method: "Reboot"},
+			Attributes: observability.Attributes{CWMPID: command.CWMPID, Method: "Reboot"},
 			Payload:    []byte(`<Envelope><Reboot><CommandKey>rpc-key</CommandKey></Reboot></Envelope>`),
 		},
 		{
 			Level: observability.LevelInfo, Stage: "wire.xml", Direction: observability.DirectionInbound,
-			Attributes: observability.Attributes{CWMPID: command.RequestID, Method: "RebootResponse"},
+			Attributes: observability.Attributes{CWMPID: command.CWMPID, Method: "RebootResponse"},
 			Payload:    []byte(`<Envelope><RebootResponse/></Envelope>`),
 		},
 	} {

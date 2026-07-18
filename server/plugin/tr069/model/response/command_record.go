@@ -15,7 +15,7 @@ type CommandRecordSummary struct {
 	RetryOf         string     `json:"retryOf"`
 	CommandKey      *string    `json:"commandKey"`
 	Status          string     `json:"status"`
-	RequestID       string     `json:"requestId"`
+	CWMPID          string     `json:"cwmpId"`
 	PhaseDeadlineAt *time.Time `json:"phaseDeadlineAt"`
 	QueuedAt        time.Time  `json:"queuedAt"`
 	WaitingAt       *time.Time `json:"waitingAt"`
@@ -33,7 +33,7 @@ func NewCommandRecordSummary(command model.Command) CommandRecordSummary {
 	return CommandRecordSummary{
 		CommandID: redact.CommandText(command.CommandID), DeviceID: command.DeviceID, DeviceKey: redact.CommandText(command.DeviceKey),
 		Operation: redact.CommandText(command.Operation), RetryOf: redact.CommandText(command.RetryOf), CommandKey: sanitizedCommandKey(command.CommandKey),
-		Status: redact.CommandText(command.Status), RequestID: redact.CommandText(command.RequestID), PhaseDeadlineAt: command.PhaseDeadlineAt,
+		Status: redact.CommandText(command.Status), CWMPID: redact.CommandText(command.CWMPID), PhaseDeadlineAt: command.PhaseDeadlineAt,
 		QueuedAt: command.QueuedAt, WaitingAt: command.WaitingAt, BuildingAt: command.BuildingAt,
 		SentAt: command.SentAt, FinishedAt: command.FinishedAt, FailureStage: redact.CommandText(command.FailureStage),
 		FaultCode: command.FaultCode, FaultString: redact.CommandText(command.FaultString),
@@ -46,7 +46,6 @@ type CommandXMLResponse struct {
 	Direction string    `json:"direction"`
 	Method    string    `json:"method"`
 	CWMPID    string    `json:"cwmpId"`
-	RequestID string    `json:"requestId"`
 	XML       string    `json:"xml"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -74,8 +73,8 @@ func CommandRecordDetailFrom(command model.Command, events []model.CommandEvent,
 		}
 		xml = append(xml, CommandXMLResponse{
 			ID: record.ID, Direction: redact.CommandText(record.Direction), Method: redact.CommandText(record.Method),
-			CWMPID: redact.CommandText(record.CWMPID), RequestID: redact.CommandText(record.RequestID),
-			XML: string(sanitized), CreatedAt: record.CreatedAt,
+			CWMPID: redact.CommandText(record.CWMPID),
+			XML:    string(sanitized), CreatedAt: record.CreatedAt,
 		})
 	}
 	return CommandRecordDetail{Command: command, Events: sanitizedEvents, XML: xml}
@@ -90,7 +89,7 @@ func sanitizeCommandStrings(command *model.Command) {
 	command.DedupKey = redact.CommandText(command.DedupKey)
 	command.CommandKey = sanitizedCommandKey(command.CommandKey)
 	command.Status = redact.CommandText(command.Status)
-	command.RequestID = redact.CommandText(command.RequestID)
+	command.CWMPID = redact.CommandText(command.CWMPID)
 	command.FailureStage = redact.CommandText(command.FailureStage)
 	command.FaultString = redact.CommandText(command.FaultString)
 }

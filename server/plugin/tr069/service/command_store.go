@@ -218,7 +218,7 @@ func (s *CommandStore) SaveXML(ctx context.Context, record *model.CommandXML) er
 		var command model.Command
 		err := s.db.WithContext(ctx).
 			Select("command_id").
-			Where("request_id = ?", copyRecord.CWMPID).
+			Where("cwmp_id = ?", copyRecord.CWMPID).
 			Order("created_at DESC").
 			First(&command).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {

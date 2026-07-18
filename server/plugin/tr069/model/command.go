@@ -75,7 +75,7 @@ type Command struct {
 	DedupKey        string       `json:"dedupKey" gorm:"size:128;index"`
 	CommandKey      *string      `json:"commandKey" gorm:"size:128;uniqueIndex"`
 	Status          string       `json:"status" gorm:"size:24;index;index:idx_tr069_command_device_head,priority:2"`
-	RequestID       string       `json:"requestId" gorm:"size:64;index"`
+	CWMPID          string       `json:"cwmpId" gorm:"column:cwmp_id;size:64;index"`
 	PhaseDeadlineAt *time.Time   `json:"phaseDeadlineAt" gorm:"index"`
 	QueuedAt        time.Time    `json:"queuedAt"`
 	WaitingAt       *time.Time   `json:"waitingAt"`

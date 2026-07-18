@@ -363,7 +363,6 @@ func TestCommandStoreAppendEventAndSaveXMLPreservePayloads(t *testing.T) {
 		Direction: "outbound",
 		Method:    "Download",
 		CWMPID:    "cwmp-12",
-		RequestID: "request-12",
 		Payload:   xmlPayload,
 		ExpiresAt: now.Add(30 * 24 * time.Hour),
 		CreatedAt: now,
