@@ -3,6 +3,7 @@ package tr069
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -35,7 +36,9 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 	})
 	initialize.ReloadConfig()
 	tr069Global.SetStartupConfig(config.CurrentRuntime().Settings)
-	initialize.Gorm(context.Background())
+	if err := initialize.Gorm(context.Background()); err != nil {
+		panic(fmt.Errorf("initialize TR-069 database: %w", err))
+	}
 	if _, err := engine.Get(); err != nil {
 		global.GVA_LOG.Error("failed to initialize TR-069 engine", zap.Error(err))
 	}

@@ -1,9 +1,11 @@
 package initialize
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	serverGlobal "github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -70,5 +72,19 @@ func TestCutoverCommandIdentifierSchemaAllowsFreshDatabase(t *testing.T) {
 	db := openIdentifierCutoverDB(t)
 	if err := cutoverCommandIdentifierSchema(db); err != nil {
 		t.Fatalf("fresh database cutover: %v", err)
+	}
+}
+
+func TestGormPropagatesIdentifierCutoverFailure(t *testing.T) {
+	db := openIdentifierCutoverDB(t)
+	execIdentifierDDL(t, db, `CREATE TABLE tr069_commands (command_id text primary key, request_id text, cwmp_id text)`)
+
+	previousDB := serverGlobal.GVA_DB
+	serverGlobal.GVA_DB = db
+	t.Cleanup(func() { serverGlobal.GVA_DB = previousDB })
+
+	err := Gorm(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "both request_id and cwmp_id") {
+		t.Fatalf("Gorm error = %v, want identifier cutover failure", err)
 	}
 }

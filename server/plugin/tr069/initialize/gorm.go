@@ -17,11 +17,13 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func Gorm(ctx context.Context) {
+func Gorm(ctx context.Context) error {
 	migrateDeviceOUIColumn(ctx)
+	if global.GVA_DB == nil {
+		return errors.New("TR069 database is not initialized")
+	}
 	if err := cutoverCommandIdentifierSchema(global.GVA_DB.WithContext(ctx)); err != nil {
-		global.GVA_LOG.Error("TR069 Command Identifier Schema Cutover Failed", zap.Error(err))
-		return
+		return fmt.Errorf("TR069 command identifier schema cutover: %w", err)
 	}
 	err := global.GVA_DB.WithContext(ctx).AutoMigrate(
 		new(model.Device),
@@ -37,8 +39,7 @@ func Gorm(ctx context.Context) {
 		new(tr069MigrationMarker),
 	)
 	if err != nil {
-		global.GVA_LOG.Error("TR069 Plugin AutoMigrate Failed", zap.Error(err))
-		return
+		return fmt.Errorf("TR069 plugin auto migrate: %w", err)
 	}
 	if err := migrateConnectionProfiles(ctx, global.GVA_DB); err != nil {
 		global.GVA_LOG.Error("TR069 ConnectionProfile Migration Failed", zap.Error(err))
@@ -56,6 +57,7 @@ func Gorm(ctx context.Context) {
 			global.GVA_LOG.Error("TR069 DataModelValue IngestFilter Init Failed", zap.Error(err))
 		}
 	}
+	return nil
 }
 
 func cutoverCommandIdentifierSchema(db *gorm.DB) error {
