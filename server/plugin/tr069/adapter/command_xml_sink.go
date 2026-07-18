@@ -32,7 +32,7 @@ func (s *CommandXMLSink) Enabled(level observability.Level) bool {
 }
 
 func (s *CommandXMLSink) Emit(ctx context.Context, event observability.Event) {
-	if s == nil || s.store == nil || event.Stage != "wire.xml" || event.CommandID == "" || len(event.Payload) == 0 {
+	if s == nil || s.store == nil || event.Stage != "wire.xml" || len(event.Payload) == 0 {
 		return
 	}
 	now := time.Now()
@@ -50,10 +50,14 @@ func (s *CommandXMLSink) Emit(ctx context.Context, event observability.Event) {
 		ExpiresAt: now.Add(retention),
 		CreatedAt: now,
 	})
+	if errors.Is(err, service.ErrUncorrelatedCommandXML) {
+		return
+	}
 	if err != nil && global.GVA_LOG != nil {
 		global.GVA_LOG.Error("TR069 command XML persistence failed",
 			zap.String("stage", event.Stage),
 			zap.String("commandId", event.CommandID),
+			zap.String("cwmpId", event.CWMPID),
 			zap.String("reason", commandXMLSinkErrorReason(err)),
 		)
 	}

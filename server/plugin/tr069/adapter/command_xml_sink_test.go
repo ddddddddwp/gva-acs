@@ -60,18 +60,72 @@ func TestCommandXMLSinkPersistsSanitizedWireEventWithoutMutatingPayload(t *testi
 	}
 }
 
+func TestCommandXMLSinkCorrelatesBidirectionalWireEventsByCWMPID(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(new(model.Command), new(model.CommandXML)); err != nil {
+		t.Fatal(err)
+	}
+	command := model.Command{
+		CommandID:  "cmd-correlated-wire",
+		DeviceID:   8,
+		DeviceKey:  "001122-WIRE",
+		Operation:  "Reboot",
+		ParamsJSON: model.LongTextJSON(`{}`),
+		Status:     model.CommandStatusSent,
+		RequestID:  "cwmp-correlated-wire",
+		CreatedAt:  time.Now(),
+	}
+	if err := db.Create(&command).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	sink := NewCommandXMLSink(service.NewCommandStore(db), func() time.Duration { return time.Hour })
+	for _, event := range []observability.Event{
+		{
+			Level: observability.LevelInfo, Stage: "wire.xml", Direction: observability.DirectionOutbound,
+			Attributes: observability.Attributes{CWMPID: command.RequestID, Method: "Reboot"},
+			Payload:    []byte(`<Envelope><Reboot><CommandKey>rpc-key</CommandKey></Reboot></Envelope>`),
+		},
+		{
+			Level: observability.LevelInfo, Stage: "wire.xml", Direction: observability.DirectionInbound,
+			Attributes: observability.Attributes{CWMPID: command.RequestID, Method: "RebootResponse"},
+			Payload:    []byte(`<Envelope><RebootResponse/></Envelope>`),
+		},
+	} {
+		sink.Emit(context.Background(), event)
+	}
+
+	var records []model.CommandXML
+	if err := db.Order("id ASC").Find(&records).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("stored rows = %d, want outbound and inbound XML", len(records))
+	}
+	if records[0].CommandID != command.CommandID || records[0].Direction != string(observability.DirectionOutbound) {
+		t.Fatalf("outbound record = %#v", records[0])
+	}
+	if records[1].CommandID != command.CommandID || records[1].Direction != string(observability.DirectionInbound) {
+		t.Fatalf("inbound record = %#v", records[1])
+	}
+}
+
 func TestCommandXMLSinkFiltersIncompleteOrNonWireEvents(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(new(model.CommandXML)); err != nil {
+	if err := db.AutoMigrate(new(model.Command), new(model.CommandXML)); err != nil {
 		t.Fatal(err)
 	}
 	sink := NewCommandXMLSink(service.NewCommandStore(db), func() time.Duration { return time.Hour })
 	for _, event := range []observability.Event{
 		{Level: observability.LevelInfo, Stage: "parser.completed", Attributes: observability.Attributes{CommandID: "cmd"}, Payload: []byte(`<Envelope/>`)},
 		{Level: observability.LevelInfo, Stage: "wire.xml", Payload: []byte(`<Envelope/>`)},
+		{Level: observability.LevelInfo, Stage: "wire.xml", Attributes: observability.Attributes{CWMPID: "cwmp-missing"}, Payload: []byte(`<Envelope/>`)},
 		{Level: observability.LevelInfo, Stage: "wire.xml", Attributes: observability.Attributes{CommandID: "cmd"}},
 	} {
 		sink.Emit(context.Background(), event)

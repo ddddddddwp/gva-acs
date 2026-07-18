@@ -632,6 +632,41 @@ func TestCommandStoreDetailReturnsOrderedEventsAndXML(t *testing.T) {
 	}
 }
 
+func TestCommandStoreDetailMergesCommandKeyWithoutMutatingPersistedParams(t *testing.T) {
+	db := newCommandStoreTestDB(t)
+	store := NewCommandStore(db)
+	commandKey := "rpc-detail-command-key"
+	command := model.Command{
+		CommandID:  "cmd-detail-command-key",
+		DeviceID:   42,
+		DeviceKey:  "001122-SN42",
+		Operation:  "Reboot",
+		ParamsJSON: model.LongTextJSON(`{}`),
+		CommandKey: &commandKey,
+		Status:     model.CommandStatusSent,
+		CreatedAt:  time.Now(),
+	}
+	if err := db.Create(&command).Error; err != nil {
+		t.Fatalf("seed command: %v", err)
+	}
+
+	detail, err := store.Detail(context.Background(), command.CommandID)
+	if err != nil {
+		t.Fatalf("command detail: %v", err)
+	}
+	if got := string(detail.Command.ParamsJSON); got != `{"commandKey":"rpc-detail-command-key"}` {
+		t.Fatalf("detail params = %s, want merged commandKey", got)
+	}
+
+	var persisted model.Command
+	if err := db.First(&persisted, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("reload command: %v", err)
+	}
+	if got := string(persisted.ParamsJSON); got != `{}` {
+		t.Fatalf("persisted params = %s, want original {}", got)
+	}
+}
+
 func TestCommandStoreTransitionRollsBackStateWhenEventAppendFails(t *testing.T) {
 	db := newCommandStoreTestDB(t)
 	store := NewCommandStore(db)

@@ -18,6 +18,7 @@ var (
 	ErrInvalidCommandTransition  = errors.New("invalid command transition")
 	ErrInvalidCommandJSON        = errors.New("invalid command JSON")
 	ErrInvalidCommandXML         = errors.New("invalid command XML")
+	ErrUncorrelatedCommandXML    = errors.New("uncorrelated command XML")
 	ErrInvalidCommandStatus      = errors.New("invalid command status")
 )
 
@@ -209,11 +210,29 @@ func (s *CommandStore) SaveXML(ctx context.Context, record *model.CommandXML) er
 	if record == nil {
 		return errors.New("command XML is required")
 	}
+	copyRecord := *record
+	if copyRecord.CommandID == "" {
+		if copyRecord.CWMPID == "" {
+			return ErrUncorrelatedCommandXML
+		}
+		var command model.Command
+		err := s.db.WithContext(ctx).
+			Select("command_id").
+			Where("request_id = ?", copyRecord.CWMPID).
+			Order("created_at DESC").
+			First(&command).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrUncorrelatedCommandXML
+		}
+		if err != nil {
+			return err
+		}
+		copyRecord.CommandID = command.CommandID
+	}
 	sanitized, err := redact.CWMPXML(append([]byte(nil), record.Payload...))
 	if err != nil {
 		return ErrInvalidCommandXML
 	}
-	copyRecord := *record
 	copyRecord.Payload = sanitized
 	return s.db.WithContext(ctx).Create(&copyRecord).Error
 }
@@ -288,6 +307,20 @@ func (s *CommandStore) Detail(ctx context.Context, commandID string) (CommandDet
 			Order("id ASC").
 			Find(&detail.XML).Error
 	})
+	if err == nil && detail.Command.CommandKey != nil {
+		params := make(map[string]any)
+		if len(detail.Command.ParamsJSON) > 0 && string(detail.Command.ParamsJSON) != "null" {
+			if err := json.Unmarshal(detail.Command.ParamsJSON, &params); err != nil {
+				return detail, fmt.Errorf("%w: params", ErrInvalidCommandJSON)
+			}
+		}
+		params["commandKey"] = *detail.Command.CommandKey
+		merged, marshalErr := json.Marshal(params)
+		if marshalErr != nil {
+			return detail, fmt.Errorf("encode command detail params: %w", marshalErr)
+		}
+		detail.Command.ParamsJSON = model.LongTextJSON(merged)
+	}
 	return detail, err
 }
 
