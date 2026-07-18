@@ -316,7 +316,7 @@ const submit = async () => {
       ElMessage.error(res.msg || '命令下发失败')
       return
     }
-    ElMessage.success(`命令已提交，commandId=${res.data?.commandId || '-'}`)
+    ElMessage.success('命令已提交')
     emit('submitted', { action: props.action, command: res.data })
     visible.value = false
   } finally {

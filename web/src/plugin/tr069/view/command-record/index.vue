@@ -2,9 +2,6 @@
   <div>
     <div class="gva-search-box">
       <el-form :inline="true" :model="searchInfo">
-        <el-form-item label="Command ID">
-          <el-input v-model="searchInfo.commandId" placeholder="支持模糊查询" clearable />
-        </el-form-item>
         <el-form-item label="设备">
           <el-input v-model="searchInfo.deviceSerial" placeholder="序列号或 Device Key" clearable />
         </el-form-item>
@@ -41,7 +38,6 @@
         <el-button :icon="Refresh" :loading="loading" @click="getTableData()">立即刷新</el-button>
       </div>
       <el-table :data="tableData" v-loading="loading" row-key="commandId">
-        <el-table-column prop="commandId" label="Command ID" min-width="230" show-overflow-tooltip />
         <el-table-column prop="deviceKey" label="设备" min-width="180" show-overflow-tooltip />
         <el-table-column label="功能" min-width="150">
           <template #default="scope">
@@ -124,7 +120,6 @@ const detailVisible = ref(false)
 const currentCommandId = ref('')
 const detailRefreshKey = ref(0)
 const searchInfo = reactive({
-  commandId: '',
   deviceSerial: '',
   operation: '',
   status: '',
@@ -157,7 +152,6 @@ const getTableData = async (silent = false) => {
     const res = await getCommandRecordList({
       page: page.value,
       pageSize: pageSize.value,
-      commandId: searchInfo.commandId,
       deviceSerial: searchInfo.deviceSerial,
       operation: searchInfo.operation,
       status: searchInfo.status,
@@ -184,7 +178,7 @@ const onSearch = () => {
 }
 
 const onReset = () => {
-  Object.assign(searchInfo, { commandId: '', deviceSerial: '', operation: '', status: '', createdRange: [] })
+  Object.assign(searchInfo, { deviceSerial: '', operation: '', status: '', createdRange: [] })
   page.value = 1
   getTableData()
 }

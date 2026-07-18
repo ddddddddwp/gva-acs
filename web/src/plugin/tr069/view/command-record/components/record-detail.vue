@@ -8,14 +8,13 @@
         </div>
 
         <el-descriptions title="命令概览" :column="3" border>
-          <el-descriptions-item label="Command ID" :span="2">{{ command.commandId }}</el-descriptions-item>
+          <el-descriptions-item label="CWMP ID" :span="2">{{ cwmpIDDisplay(command) }}</el-descriptions-item>
           <el-descriptions-item label="功能">{{ operationLabel(command.operation) }}</el-descriptions-item>
           <el-descriptions-item label="设备">{{ command.deviceKey || command.deviceId }}</el-descriptions-item>
           <el-descriptions-item label="当前状态">{{ statusView(command.status).label }}</el-descriptions-item>
           <el-descriptions-item label="当前截止时间">{{ formatTime(command.phaseDeadlineAt) }}</el-descriptions-item>
-          <el-descriptions-item label="Request ID">{{ command.requestId || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="CommandKey">{{ command.commandKey || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="重试来源">{{ command.retryOf || '-' }}</el-descriptions-item>
+          <el-descriptions-item v-if="showsCommandKey(command.operation)" label="CommandKey">{{ command.commandKey || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="命令来源">{{ command.retryOf ? '重试命令' : '原始命令' }}</el-descriptions-item>
           <el-descriptions-item label="提交时间">{{ formatTime(command.createdAt) }}</el-descriptions-item>
           <el-descriptions-item label="发送时间">{{ formatTime(command.sentAt) }}</el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ formatTime(command.finishedAt) }}</el-descriptions-item>
@@ -69,7 +68,6 @@
                   <el-descriptions-item label="方向">{{ directionLabel(record.direction) }}</el-descriptions-item>
                   <el-descriptions-item label="时间">{{ formatTime(record.createdAt) }}</el-descriptions-item>
                   <el-descriptions-item label="CWMP ID">{{ record.cwmpId || '-' }}</el-descriptions-item>
-                  <el-descriptions-item label="Request ID">{{ record.requestId || '-' }}</el-descriptions-item>
                 </el-descriptions>
                 <pre class="xml-block">{{ record.xml }}</pre>
               </el-tab-pane>
@@ -88,10 +86,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCommandRecordDetail, retryCommandRecord } from '@/plugin/tr069/api/command-record'
 import {
   canRetryRecord,
+  cwmpIDDisplay,
   directionLabel,
   formatJSON,
   isDangerousOperation,
   operationLabel,
+  showsCommandKey,
   statusView
 } from '../record-view'
 
@@ -150,7 +150,7 @@ const handleRetry = async () => {
       ElMessage.error(res.msg || '重新下发失败')
       return
     }
-    ElMessage.success(`命令已重新提交，commandId=${res.data?.commandId || '-'}`)
+    ElMessage.success('命令已重新提交')
     emit('retried', res.data)
   } finally {
     retrying.value = false

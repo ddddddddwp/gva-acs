@@ -13,7 +13,8 @@ test('parameter drawer separates local refresh from device synchronization', () 
   assert.match(source, /:loading="syncingParameters"/)
   assert.match(source, /if \(!props\.row\.ID \|\| !deviceRow\.value\.online \|\| syncingParameters\.value\) return/)
   assert.match(source, /await fullDataModelSync\(props\.row\.ID\)/)
-  assert.match(source, /commandId=/)
+  assert.doesNotMatch(source, /commandId=/)
+  assert.match(source, /参数同步已下发/)
 })
 
 test('parameter tree uses the device online boolean', () => {

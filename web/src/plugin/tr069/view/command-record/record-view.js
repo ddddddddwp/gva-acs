@@ -37,6 +37,16 @@ export const canRetryRecord = (record) => ['FAILED', 'TIMEOUT'].includes(record?
 
 export const isDangerousOperation = (operation) => ['DeleteObject', 'Reboot', 'FactoryReset'].includes(operation)
 
+export const cwmpIDDisplay = (command) => {
+  if (command?.cwmpId) return command.cwmpId
+  if (command?.status === 'FAILED' && command?.failureStage === 'core.build') {
+    return '未生成（构造失败）'
+  }
+  return '尚未生成'
+}
+
+export const showsCommandKey = (operation) => ['Reboot', 'Download', 'Upload'].includes(operation)
+
 export const formatDuration = (start, end) => {
   if (!start || !end) return '-'
   const duration = Math.max(0, Math.floor((new Date(end).getTime() - new Date(start).getTime()) / 1000))

@@ -4,8 +4,10 @@ import { readFile } from 'node:fs/promises'
 
 import {
   canRetryRecord,
+  cwmpIDDisplay,
   formatDuration,
   operationLabel,
+  showsCommandKey,
   statusView
 } from './record-view.js'
 
@@ -49,6 +51,20 @@ test('record duration and retry visibility follow terminal state', () => {
   assert.equal(canRetryRecord({ status: 'TIMEOUT' }), true)
   assert.equal(canRetryRecord({ status: 'COMPLETED' }), false)
   assert.equal(canRetryRecord({ status: 'WAITING_REBOOT' }), false)
+})
+
+test('CWMP ID display distinguishes pending and build failure states', () => {
+  assert.equal(cwmpIDDisplay({ status: 'WAITING_DEVICE' }), '尚未生成')
+  assert.equal(cwmpIDDisplay({ status: 'FAILED', failureStage: 'core.build' }), '未生成（构造失败）')
+  assert.equal(cwmpIDDisplay({ status: 'COMPLETED', cwmpId: 'cwmp-1' }), 'cwmp-1')
+})
+
+test('CommandKey is visible only for asynchronous correlation methods', () => {
+  assert.equal(showsCommandKey('Reboot'), true)
+  assert.equal(showsCommandKey('Download'), true)
+  assert.equal(showsCommandKey('Upload'), true)
+  assert.equal(showsCommandKey('GetParameterValues'), false)
+  assert.equal(showsCommandKey('FactoryReset'), false)
 })
 
 test('record page uses GVA theme surfaces and visible-page five-second refresh', async () => {

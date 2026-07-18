@@ -251,7 +251,7 @@ const syncDeviceParameters = async () => {
   try {
     const res = await fullDataModelSync(props.row.ID)
     if (res.code === 0) {
-      ElMessage.success(`参数同步已下发，commandId=${res.data?.commandId || '-'}`)
+      ElMessage.success('参数同步已下发')
     } else {
       ElMessage.error(res.msg || '参数同步下发失败')
     }
