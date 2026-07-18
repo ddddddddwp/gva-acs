@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
@@ -130,10 +131,15 @@ func (s *TransferStore) CreateActiveTask(ctx context.Context, command *model.Com
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	waitTimeout := 10 * time.Minute
+	if channel, ok := config.CurrentRuntime().FileIngress.Channels["log"]; ok && channel.UploadTimeout > 0 {
+		waitTimeout = channel.UploadTimeout
+	}
+	deadline := now.Add(waitTimeout)
 	task := model.TransferTask{
 		TaskID: taskID, DeviceID: command.DeviceID, Channel: "LOG", Source: model.TransferSourceActive,
 		CommandID: &command.CommandID, CommandKey: command.CommandKey, Status: model.TransferStatusWaitingFile,
-		CreatedAt: now, UpdatedAt: now,
+		PhaseDeadlineAt: &deadline, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.db.WithContext(ctx).Create(&task).Error; err != nil {
 		return err

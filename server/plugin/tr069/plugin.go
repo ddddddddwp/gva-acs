@@ -31,7 +31,7 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 		utils.GlobalSystemEvents.RegisterConfigChangeHandler(initialize.ReloadConfig)
 		utils.GlobalSystemEvents.RegisterShutdownHandler(func(ctx context.Context) error {
 			adapter.StopRedisDispatcher()
-			return errors.Join(engine.Stop(ctx), adapter.StopCommandWakeConsumer(ctx))
+			return errors.Join(engine.Stop(ctx), adapter.StopCommandWakeConsumer(ctx), initialize.StopTransferWorkers(ctx))
 		})
 	})
 	if err := initialize.LoadConfig(); err != nil {
@@ -47,6 +47,7 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 	initialize.Api(context.Background())
 	initialize.Menu(context.Background())
 	initialize.StartTR069Server()
+	initialize.StartTransferWorkers(context.Background())
 
 	adapter.StartRedisDispatcher(context.Background(), adapter.RedisDispatcherConfig{
 		IngestStream: adapter.RedisIngestStreamKey,

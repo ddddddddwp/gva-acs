@@ -1,8 +1,10 @@
 package initialize
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
@@ -53,10 +55,11 @@ func StartTR069Server() {
 // SetupEngine creates and configures the gin engine for TR069
 // Exported for testing purposes
 func SetupEngine() *gin.Engine {
-	routes, err := buildRuntimeFileIngressRoutes()
+	routes, workers, err := buildRuntimeFileIngressRoutes()
 	if err != nil {
 		panic(fmt.Errorf("initialize TR-069 file ingress: %w", err))
 	}
+	setTransferWorkers(workers)
 	return setupEngine(routes)
 }
 
@@ -123,16 +126,16 @@ func setupEngine(fileIngressRoutes map[string]gin.HandlerFunc) *gin.Engine {
 	return engine
 }
 
-func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, error) {
+func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, *service.TransferWorkers, error) {
 	runtime := config.CurrentRuntime()
 	if !runtime.Settings.FileIngress.Enabled {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if global.GVA_DB == nil {
-		return nil, errors.New("database is required")
+		return nil, nil, errors.New("database is required")
 	}
 	if global.GVA_REDIS == nil {
-		return nil, errors.New("Redis is required")
+		return nil, nil, errors.New("Redis is required")
 	}
 	storeConfig := runtime.Settings.FileIngress.ArtifactStore
 	objectStore, err := adapter.NewMinioArtifactStoreClient(
@@ -140,12 +143,13 @@ func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, error) {
 		storeConfig.Bucket, storeConfig.UseSSL,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	transferStore := service.NewTransferStore(global.GVA_DB)
 	identityStore := adapter.NewUploadIdentityStore(global.GVA_REDIS)
 	deviceResolver := service.NewUploadDeviceResolver(global.GVA_DB, transferStore, identityStore, runtime.FileIngress.IdentityBindingTTL)
 	receiver := service.NewTransferReceiver(transferStore, objectStore)
+	workers := service.NewTransferWorkers(transferStore, objectStore)
 	authenticator := middleware.NewFileAuthenticator(middleware.RuntimeFileCredentialProvider{}, adapter.NewRedisDigestNonceStore(global.GVA_REDIS))
 	ingressHandler := handler.NewFileIngressHandler(authenticator, deviceResolver, receiver, handler.RuntimeFileIngressChannelProvider{})
 	routes := make(map[string]gin.HandlerFunc)
@@ -154,5 +158,35 @@ func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, error) {
 			routes[channel.Path] = ingressHandler
 		}
 	}
-	return routes, nil
+	return routes, workers, nil
+}
+
+var transferWorkerRuntime struct {
+	sync.Mutex
+	workers *service.TransferWorkers
+}
+
+func setTransferWorkers(workers *service.TransferWorkers) {
+	transferWorkerRuntime.Lock()
+	transferWorkerRuntime.workers = workers
+	transferWorkerRuntime.Unlock()
+}
+
+func StartTransferWorkers(ctx context.Context) {
+	transferWorkerRuntime.Lock()
+	workers := transferWorkerRuntime.workers
+	transferWorkerRuntime.Unlock()
+	if workers != nil {
+		go workers.Run(ctx)
+	}
+}
+
+func StopTransferWorkers(ctx context.Context) error {
+	transferWorkerRuntime.Lock()
+	workers := transferWorkerRuntime.workers
+	transferWorkerRuntime.Unlock()
+	if workers == nil {
+		return nil
+	}
+	return workers.Stop(ctx)
 }
