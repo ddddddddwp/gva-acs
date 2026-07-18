@@ -1,13 +1,17 @@
 package initialize
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/handler"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -49,15 +53,19 @@ func StartTR069Server() {
 // SetupEngine creates and configures the gin engine for TR069
 // Exported for testing purposes
 func SetupEngine() *gin.Engine {
+	routes, err := buildRuntimeFileIngressRoutes()
+	if err != nil {
+		panic(fmt.Errorf("initialize TR-069 file ingress: %w", err))
+	}
+	return setupEngine(routes)
+}
+
+func setupEngine(fileIngressRoutes map[string]gin.HandlerFunc) *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	// TR069 调试辅助：为每个请求生成仅用于内部日志链路的 traceId。
 	// 删除/禁用：移除这一行即可，不影响核心 TR069 处理逻辑。
 	engine.Use(middleware.EnsureTraceID())
-	// 原始报文中间件始终安装；每个请求从原子运行时快照决定是否捕获。
-	engine.Use(middleware.RawDump(middleware.RawDumpConfig{}))
-	engine.Use(middleware.RawResponseDump(middleware.RawResponseDumpConfig{}))
-
 	engine.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
 		var statusColor, methodColor, resetColor string
 		if param.IsOutputColor() {
@@ -100,9 +108,51 @@ func SetupEngine() *gin.Engine {
 		)
 	}))
 
-	// Register CWMP Handler
-	engine.POST("/", handler.CWMPHandler)
-	engine.POST("/acs", handler.CWMPHandler)
+	// Raw XML capture is deliberately limited to CWMP routes. File ingress bodies
+	// must never be buffered or written to the XML/raw diagnostic log.
+	cwmp := engine.Group("")
+	cwmp.Use(middleware.RawDump(middleware.RawDumpConfig{}))
+	cwmp.Use(middleware.RawResponseDump(middleware.RawResponseDumpConfig{}))
+	cwmp.POST("/", handler.CWMPHandler)
+	cwmp.POST("/acs", handler.CWMPHandler)
+
+	for routePath, routeHandler := range fileIngressRoutes {
+		engine.Any(routePath, routeHandler)
+	}
 
 	return engine
+}
+
+func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, error) {
+	runtime := config.CurrentRuntime()
+	if !runtime.Settings.FileIngress.Enabled {
+		return nil, nil
+	}
+	if global.GVA_DB == nil {
+		return nil, errors.New("database is required")
+	}
+	if global.GVA_REDIS == nil {
+		return nil, errors.New("Redis is required")
+	}
+	storeConfig := runtime.Settings.FileIngress.ArtifactStore
+	objectStore, err := adapter.NewMinioArtifactStoreClient(
+		storeConfig.Endpoint, storeConfig.AccessKey, storeConfig.SecretKey,
+		storeConfig.Bucket, storeConfig.UseSSL,
+	)
+	if err != nil {
+		return nil, err
+	}
+	transferStore := service.NewTransferStore(global.GVA_DB)
+	identityStore := adapter.NewUploadIdentityStore(global.GVA_REDIS)
+	deviceResolver := service.NewUploadDeviceResolver(global.GVA_DB, transferStore, identityStore, runtime.FileIngress.IdentityBindingTTL)
+	receiver := service.NewTransferReceiver(transferStore, objectStore)
+	authenticator := middleware.NewFileAuthenticator(middleware.RuntimeFileCredentialProvider{}, adapter.NewRedisDigestNonceStore(global.GVA_REDIS))
+	ingressHandler := handler.NewFileIngressHandler(authenticator, deviceResolver, receiver, handler.RuntimeFileIngressChannelProvider{})
+	routes := make(map[string]gin.HandlerFunc)
+	for _, channel := range runtime.Settings.FileIngress.Channels {
+		if channel.Enabled {
+			routes[channel.Path] = ingressHandler
+		}
+	}
+	return routes, nil
 }

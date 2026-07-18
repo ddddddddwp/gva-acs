@@ -11,20 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/redis/go-redis/v9"
 )
 
 const uploadIdentityKeyPrefix = "tr069:file-ingress"
 
-type UploadIdentityBinding struct {
-	DeviceID     uint      `json:"deviceId"`
-	IP           string    `json:"ip"`
-	OUI          string    `json:"oui"`
-	ProductClass string    `json:"productClass"`
-	SerialNumber string    `json:"serialNumber"`
-	BoundAt      time.Time `json:"boundAt"`
-	ExpiresAt    time.Time `json:"expiresAt"`
-}
+type UploadIdentityBinding = service.UploadDeviceIdentity
 
 type UploadIdentityStore struct {
 	client redis.UniversalClient

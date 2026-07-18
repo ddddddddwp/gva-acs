@@ -158,6 +158,48 @@ func (s *TransferStore) CreatePeriodicReceiving(ctx context.Context, deviceID ui
 	return task, artifact, err
 }
 
+func (s *TransferStore) CreateActiveReceiving(ctx context.Context, task model.TransferTask, metadata ReceiveMetadata) (model.TransferTask, model.Artifact, error) {
+	if task.TaskID == "" || task.Source != model.TransferSourceActive {
+		return model.TransferTask{}, model.Artifact{}, errors.New("active transfer task is required")
+	}
+	now := metadata.CreatedAt.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if metadata.ArtifactID == "" {
+		metadata.ArtifactID = uuid.NewString()
+	}
+	artifact := model.Artifact{
+		ArtifactID: metadata.ArtifactID, TaskID: task.TaskID, DeviceID: task.DeviceID, Channel: task.Channel,
+		Status: model.ArtifactStatusReceiving, Driver: metadata.Driver, ObjectKey: metadata.ObjectKey,
+		OriginalName: metadata.OriginalName, ContentType: metadata.ContentType, SourceIP: metadata.SourceIP,
+		DeleteAt: metadata.DeleteAt, CreatedAt: now, UpdatedAt: now,
+	}
+	var transitioned model.TransferTask
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(new(model.TransferTask)).
+			Where("task_id = ? AND source = ? AND status = ? AND version = ?", task.TaskID, model.TransferSourceActive, model.TransferStatusWaitingFile, task.Version).
+			Updates(map[string]any{"status": model.TransferStatusReceiving, "version": gorm.Expr("version + 1"), "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrTransferTransitionConflict
+		}
+		if err := tx.Create(&artifact).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.TransferEvent{
+			TaskID: task.TaskID, ArtifactID: artifact.ArtifactID, Code: "RECEIVING_STARTED", Phase: "ingress.receive",
+			FromStatus: task.Status, ToStatus: model.TransferStatusReceiving, CreatedAt: now,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Where("task_id = ?", task.TaskID).First(&transitioned).Error
+	})
+	return transitioned, artifact, err
+}
+
 func (s *TransferStore) FindUniqueWaitingActive(ctx context.Context, deviceID uint, channel string) (model.TransferTask, error) {
 	var tasks []model.TransferTask
 	err := s.db.WithContext(ctx).
@@ -198,6 +240,19 @@ func (s *TransferStore) MarkArtifactAvailable(ctx context.Context, artifactID st
 		return tx.Where("artifact_id = ?", artifactID).First(&artifact).Error
 	})
 	return artifact, err
+}
+
+func (s *TransferStore) MarkArtifactFailed(ctx context.Context, artifactID string, expectedVersion uint) error {
+	result := s.db.WithContext(ctx).Model(new(model.Artifact)).
+		Where("artifact_id = ? AND status = ? AND version = ?", artifactID, model.ArtifactStatusReceiving, expectedVersion).
+		Updates(map[string]any{"status": model.ArtifactStatusFailed, "version": gorm.Expr("version + 1"), "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrArtifactTransitionConflict
+	}
+	return nil
 }
 
 func (s *TransferStore) TransitionTask(ctx context.Context, transition TransferTransition) (model.TransferTask, error) {
