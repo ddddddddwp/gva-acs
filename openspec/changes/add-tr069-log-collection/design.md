@@ -1,8 +1,8 @@
 ## Context
 
-当前 TR-069 插件在独立监听端口 `7458` 上处理 `POST /acs`。CWMP RawDump 中间件会读取整个请求体并记录 XML，这种处理适合受控大小的 SOAP 报文，但不能用于约 20 MiB 的压缩日志文件。GVA 已有附件上传和 MinIO 支持，但现有适配器以 `multipart.FileHeader` 和内存缓冲为中心，无法满足设备以 HTTP PUT 流式上传、传输中止清理和跨存储迁移的要求。
+当前 TR-069 插件在独立监听端口 `7458` 上处理 `POST /acs`。CWMP RawDump 中间件会读取整个请求体并记录 XML，这种处理适合受控大小的 SOAP 报文，但不能用于约 20 MiB 的压缩日志文件。GVA 已有附件上传和 MinIO 支持，但现有适配器以 `multipart.FileHeader` 和内存缓冲为中心，无法满足设备以 HTTP PUT/POST 原始请求体流式上传、传输中止清理和跨存储迁移的要求。
 
-TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Password 和 CommandKey；随后设备发起的 HTTP PUT 不包含标准 DeviceIdStruct，也不保证回传 CommandKey。项目决定所有 BS 共用一套配置文件中的 LOG 账号，因而认证账号只能标识“允许访问 LOG 通道”，不能标识具体设备。设备身份必须由先前 Inform 保存的设备标识和来源 IP 唯一解析。
+TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Password 和 CommandKey。标准文件传输使用 HTTP PUT；为兼容 BS 厂商实现，本项目同时接受 POST。后续文件请求无论使用 PUT 还是 POST，都不包含标准 DeviceIdStruct，也不保证回传 CommandKey。项目决定所有 BS 共用一套配置文件中的 LOG 账号，因而认证账号只能标识“允许访问 LOG 通道”，不能标识具体设备。设备身份必须由先前 Inform 保存的设备标识和来源 IP 唯一解析。
 
 相关参与者包括 BS/CPE、TR-069 7458 文件入口、TR-069 命令管理器、MySQL、Redis、MinIO，以及通过 GVA JWT/Casbin 访问日志页面的管理用户。
 
@@ -36,11 +36,11 @@ TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Pa
 | 方法与路由 | 用途 | 中间件链 |
 | --- | --- | --- |
 | `POST /acs` | Inform、RPC Response、TransferComplete | CWMP RawDump、XML 解析、CWMP Handler |
-| `PUT /acs/log` | 压缩日志上传 | 文件认证、设备解析、并发限制、流式接收 |
-| `PUT /acs/pm` | 预留 | 默认未注册/禁用 |
-| `PUT /acs/mr` | 预留 | 默认未注册/禁用 |
+| `PUT/POST /acs/log` | 压缩日志上传 | 文件认证、设备解析、并发限制、流式接收 |
+| `PUT/POST /acs/pm` | 预留 | 默认未注册/禁用 |
+| `PUT/POST /acs/mr` | 预留 | 默认未注册/禁用 |
 
-文件路由绝不经过 RawDump、XML 解析或 `io.ReadAll`。选择同端口可简化 BS、防火墙和部署配置；路由隔离仍可让 SOAP 与文件流量使用不同限制。替代方案是独立文件端口，但会增加设备配置和网络暴露，并不能消除存储和认证复杂度。
+文件通道固定允许 PUT 和 POST，二者共享同一 handler，并把请求体直接视为文件字节流；POST 不启用 multipart/form-data 解析。其他方法返回 `405 Method Not Allowed` 并通过 `Allow: PUT, POST` 声明支持范围。文件路由绝不经过 RawDump、XML 解析或 `io.ReadAll`。选择同端口可简化 BS、防火墙和部署配置；路由隔离仍可让 SOAP 与文件流量使用不同限制。替代方案是独立文件端口，但会增加设备配置和网络暴露，并不能消除存储和认证复杂度。
 
 ### 2. 通道配置和启动校验
 
@@ -84,7 +84,7 @@ tr069:
 
 ### 3. 共享账号只认证通道
 
-`PUT /acs/log` 支持 HTTP Basic 和 Digest。Digest 支持 `qop=auth`，并兼容设备常见的 MD5/MD5-sess；算法和挑战行为通过协议测试固定。Digest nonce 有有效期并校验 nonce-count，重放状态存入 Redis。Basic 与 Digest 使用同一套共享账号，生产环境仍应通过 HTTPS 保护文件正文和 Basic 凭据。
+`PUT/POST /acs/log` 支持 HTTP Basic 和 Digest。Digest 校验必须把实际 HTTP 方法纳入响应摘要计算，并支持 `qop=auth` 及设备常见的 MD5/MD5-sess；算法和挑战行为通过协议测试固定。Digest nonce 有有效期并校验 nonce-count，重放状态存入 Redis。Basic 与 Digest 使用同一套共享账号，生产环境仍应通过 HTTPS 保护文件正文和 Basic 凭据。
 
 认证失败返回 `401` 和适当的 `WWW-Authenticate` 挑战。认证成功只得到 `channel=LOG`，不会从 username 推导 deviceId。相比每设备账号，共享账号降低 BS 配置成本，但失去凭据级设备隔离；该权衡由当前部署规模和明确需求接受。
 
@@ -112,9 +112,9 @@ tr069:file-ingress:ip:<normalized-ip>
 
 ### 5. 主动与周期上传的关联
 
-主动采集继续通过现有 Upload RPC 创建 GVA 命令，同时创建 `source=ACTIVE` 的传输任务并进入 `WAITING_FILE`。RPC 中的 URL 指向 `/acs/log`，用户名和密码来自共享配置，CommandKey 继续关联 UploadResponse 和 TransferComplete。设备发起 PUT 时，如果该设备只有一个等待文件的主动 LOG 任务，则文件关联该任务；否则没有主动任务时自动创建 `source=PERIODIC` 的任务。
+主动采集继续通过现有 Upload RPC 创建 GVA 命令，同时创建 `source=ACTIVE` 的传输任务并进入 `WAITING_FILE`。RPC 中的 URL 指向 `/acs/log`，用户名和密码来自共享配置，CommandKey 继续关联 UploadResponse 和 TransferComplete。设备发起 PUT 或 POST 时，如果该设备只有一个等待文件的主动 LOG 任务，则文件关联该任务；否则没有主动任务时自动创建 `source=PERIODIC` 的任务。
 
-同一设备同一时间只允许一个 LOG 文件流和一个等待文件的主动任务，避免共享 URL 不携带任务标识造成错误关联。若周期文件恰好与主动等待窗口重叠，协议本身无法从 PUT 区分两者，系统优先关联唯一主动任务并在事件中记录推断来源。这是共享 URL/共享账号方案的明确限制。
+同一设备同一时间只允许一个 LOG 文件流和一个等待文件的主动任务，避免共享 URL 不携带任务标识造成错误关联。若周期文件恰好与主动等待窗口重叠，协议本身无法从 PUT/POST 文件请求区分两者，系统优先关联唯一主动任务并在事件中记录推断来源。这是共享 URL/共享账号方案的明确限制。
 
 主动任务完成规则：
 
@@ -133,7 +133,7 @@ tr069:file-ingress:ip:<normalized-ip>
 - 使用固定大小缓冲池，文件内容不进入 Zap、RawDump、Trace 或数据库。
 - 全局或设备并发已满返回 `503` 和 `Retry-After`。
 - 请求上下文取消、上传超时、大小超限或客户端断开都会 Abort multipart upload 并把制品标记为失败。
-- 同一任务重复上传相同 SHA-256 和大小时返回幂等成功；内容不同则新增冲突事件并拒绝覆盖。
+- 同一任务通过 PUT、POST 或两种方法交叉重复上传相同 SHA-256 和大小时返回幂等成功；内容不同则新增冲突事件并拒绝覆盖。
 - 日志只记录 deviceId、taskId、artifactId、大小、SHA-256、耗时、来源 IP 摘要和失败阶段。
 
 ### 7. 独立制品存储接口和一致性
@@ -204,7 +204,7 @@ MySQL 是任务、事件和制品元数据的事实来源。Redis 只保存有 T
 2. 运行 AutoMigrate 创建三张新表，初始化日志菜单、API 与 Casbin 权限。
 3. 启动后端，先验证 `/acs` CWMP 回归，再用测试客户端验证 Basic/Digest、限长和 MinIO。
 4. 在单台 BS 上由用户配置 `Device.LogMgmt.URL/Username/Password`，验证 Inform 后周期上传和按设备 ID 查询下载。
-5. 验证主动 Upload、UploadResponse、文件 PUT 和 TransferComplete 的乱序组合。
+5. 分别验证主动 Upload、UploadResponse、文件 PUT/POST 和 TransferComplete 的乱序组合。
 6. 回滚时先禁用 `file-ingress` 并保留表和对象；旧 CWMP `/acs` 不依赖新通道，可独立继续运行。
 
 ## Open Questions

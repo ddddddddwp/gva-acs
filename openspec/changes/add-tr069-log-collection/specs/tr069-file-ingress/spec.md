@@ -1,19 +1,34 @@
 ## ADDED Requirements
 
 ### Requirement: Shared LOG channel authentication
-The system SHALL authenticate every `PUT /acs/log` request with the configured non-empty shared LOG username and password, SHALL support HTTP Basic and Digest, and SHALL fail plugin startup when the enabled channel has invalid credentials.
+The system SHALL authenticate every `PUT /acs/log` and `POST /acs/log` request with the configured non-empty shared LOG username and password, SHALL support HTTP Basic and Digest for both methods, and SHALL fail plugin startup when the enabled channel has invalid credentials.
 
 #### Scenario: Enabled channel has empty credentials
 - **WHEN** the LOG file ingress channel is enabled and its configured username or password is empty
 - **THEN** the TR-069 plugin SHALL refuse to start the file ingress and SHALL report a non-secret configuration error
 
 #### Scenario: Request has no authentication
-- **WHEN** a client sends `PUT /acs/log` without valid Basic or Digest authentication
+- **WHEN** a client sends `PUT /acs/log` or `POST /acs/log` without valid Basic or Digest authentication
 - **THEN** the system SHALL return `401` with an authentication challenge and SHALL not read or persist the file body
 
 #### Scenario: Shared credentials are valid
-- **WHEN** a client sends valid configured Basic or Digest credentials
+- **WHEN** a client sends valid configured Basic or Digest credentials with either supported upload method
 - **THEN** the system SHALL authorize access to the LOG channel without treating the username as a device identifier
+
+### Requirement: PUT and POST upload compatibility
+The system SHALL accept both PUT and POST for every enabled file-ingress channel, SHALL process both methods through the same authentication, identity, admission, streaming, storage, and state pipeline, and SHALL treat each request body as the raw artifact byte stream.
+
+#### Scenario: Device uploads with PUT
+- **WHEN** an authenticated and uniquely resolved device sends `PUT /acs/log` with a raw file body
+- **THEN** the system SHALL process the file through the LOG ingress pipeline
+
+#### Scenario: Device uploads with POST
+- **WHEN** an authenticated and uniquely resolved device sends `POST /acs/log` with a raw file body
+- **THEN** the system SHALL process the file identically to PUT without requiring multipart form data
+
+#### Scenario: Unsupported method is used
+- **WHEN** a client uses a method other than PUT or POST on an enabled file-ingress path
+- **THEN** the system SHALL return `405` with `Allow: PUT, POST` and SHALL not read or persist an artifact body
 
 ### Requirement: Unique registered-device resolution
 The system SHALL resolve an authenticated upload to exactly one registered device using its trusted source IP, recent Inform identity binding, and any unique active Upload task, and SHALL reject requests that cannot be resolved uniquely.
@@ -49,7 +64,7 @@ The system SHALL refresh a TTL-bound source-IP-to-device binding only after a va
 The system SHALL process CWMP XML and file-upload routes through separate middleware chains, and SHALL never send a file body through RawDump or XML parsing.
 
 #### Scenario: Log file is uploaded
-- **WHEN** an authenticated and resolved device sends `PUT /acs/log`
+- **WHEN** an authenticated and resolved device sends `PUT /acs/log` or `POST /acs/log`
 - **THEN** the request body SHALL be streamed directly to the artifact store with bounded buffering and SHALL not be copied into XML logs, traces, or database fields
 
 #### Scenario: CWMP message is posted
@@ -110,14 +125,14 @@ The system SHALL combine UploadResponse, artifact storage, and TransferComplete 
 - **THEN** the system SHALL mark the task failed while retaining any already available artifact for diagnosis
 
 #### Scenario: Response is delivered twice
-- **WHEN** a duplicate UploadResponse, PUT, or TransferComplete is received
+- **WHEN** a duplicate UploadResponse, PUT/POST file upload, or TransferComplete is received
 - **THEN** conditional state updates SHALL prevent duplicate completion and duplicate event effects
 
 ### Requirement: Channel registry reserves future transfer types
 The system SHALL register file ingress by channel configuration and SHALL ship PM and MR channels disabled without implementing their business processing.
 
 #### Scenario: Disabled future channel is requested
-- **WHEN** a client requests `/acs/pm` or `/acs/mr` while that channel is disabled
+- **WHEN** a client uses PUT or POST on `/acs/pm` or `/acs/mr` while that channel is disabled
 - **THEN** the system SHALL not invoke LOG handling or create a LOG artifact
 
 ### Requirement: GVA does not manage Device.LogMgmt parameters

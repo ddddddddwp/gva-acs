@@ -5,7 +5,7 @@ OpenSpec change：`add-tr069-log-collection`
 
 ## 1. 目标
 
-在现有 GVA TR-069 插件中增加独立的基站日志采集能力：BS 继续统一访问 7458，通过 `PUT /acs/log` 流式上传压缩日志；GVA 将文件写入 MinIO，并在 TR-069 菜单提供“日志文件”页面，支持按设备 ID 查询和下载。
+在现有 GVA TR-069 插件中增加独立的基站日志采集能力：BS 继续统一访问 7458，通过 `PUT/POST /acs/log` 流式上传压缩日志；GVA 将文件写入 MinIO，并在 TR-069 菜单提供“日志文件”页面，支持按设备 ID 查询和下载。
 
 本设计确认以下前提：
 
@@ -26,7 +26,7 @@ BS/CPE
   │                                  ├─ UploadResponse
   │                                  └─ TransferComplete
   │
-  └─ PUT :7458/acs/log ───────────> File Ingress
+  └─ PUT/POST :7458/acs/log ───────────> File Ingress
                                      ├─ Basic/Digest 共享认证
                                      ├─ 来源 IP -> 已注册设备唯一解析
                                      ├─ 全局/通道/设备并发限制
@@ -40,22 +40,24 @@ GVA Web :18080
        └─ GET :18888/tr069/artifact/:id/download
 ```
 
-`POST /acs` 和 `PUT /acs/log` 只共享监听端口，不共享请求体中间件。日志文件不会进入 XML 解析、RawDump、Zap 或 Trace。
+`POST /acs` 和 `PUT/POST /acs/log` 只共享监听端口，不共享请求体中间件。日志文件不会进入 XML 解析、RawDump、Zap 或 Trace。
 
 ## 3. 设备侧路由
 
 | 方法与路由 | 首期行为 |
 | --- | --- |
 | `POST /acs` | 保持当前 CWMP 会话行为 |
-| `PUT /acs/log` | 启用 LOG 文件上传 |
-| `PUT /acs/pm` | 保留通道定义，默认禁用 |
-| `PUT /acs/mr` | 保留通道定义，默认禁用 |
+| `PUT/POST /acs/log` | 启用 LOG 文件上传 |
+| `PUT/POST /acs/pm` | 保留通道定义，默认禁用 |
+| `PUT/POST /acs/mr` | 保留通道定义，默认禁用 |
 
 URL 不包含设备 ID、任务 ID、用户名或密码：
 
 ```text
 http://<GVA可达地址>:7458/acs/log
 ```
+
+TR-069 标准文件传输使用 PUT；为兼容 BS 厂商实现，文件通道同时接受 POST。PUT 和 POST 共用完全相同的认证、设备识别、限流、流式存储和任务状态处理。两种方法的请求体都直接视为压缩文件字节流，POST 不要求也不解析 multipart/form-data；其他 HTTP 方法返回 `405` 和 `Allow: PUT, POST`。
 
 主动 Upload RPC 中的 URL、Username 和 Password 由 GVA 配置提供；周期上传时由用户在 BS 的 `Device.LogMgmt.*` 中配置相同值。
 
@@ -65,11 +67,11 @@ http://<GVA可达地址>:7458/acs/log
 
 LOG 通道支持 HTTP Basic 和 Digest。启用通道时，配置的 username/password 任一为空都视为启动配置错误；请求缺少凭据、传空值或校验错误都返回 `401`，且在读取文件体之前结束。
 
-Digest 首期兼容 `qop=auth`、MD5 和 MD5-sess，nonce 有过期时间，并用 Redis 校验 nonce-count 防重放。生产必须优先使用 HTTPS，因为 Digest 不加密文件正文，Basic 在纯 HTTP 下也不能保护密码。
+Digest 首期兼容 `qop=auth`、MD5 和 MD5-sess，校验时使用请求实际采用的 PUT 或 POST 方法计算摘要；nonce 有过期时间，并用 Redis 校验 nonce-count 防重放。生产必须优先使用 HTTPS，因为 Digest 不加密文件正文，Basic 在纯 HTTP 下也不能保护密码。
 
-### 4.2 PUT 为什么不能直接得到设备 ID
+### 4.2 文件请求为什么不能直接得到设备 ID
 
-Inform SOAP 中包含 DeviceIdStruct，即 OUI、ProductClass、SerialNumber；但 Upload RPC 是 ACS 下发给设备的请求，后续 HTTP PUT 是独立文件传输，标准 PUT 请求体不包含 DeviceIdStruct，也不保证带回 CommandKey。因此不能假设“每次 PUT 自带设备 ID”，也不能用共享 username 识别设备。
+Inform SOAP 中包含 DeviceIdStruct，即 OUI、ProductClass、SerialNumber；但 Upload RPC 是 ACS 下发给设备的请求，后续 HTTP PUT/POST 是独立文件传输，文件请求体不包含 DeviceIdStruct，也不保证带回 CommandKey。因此不能假设“每次文件请求自带设备 ID”，也不能用共享 username 识别设备。
 
 ### 4.3 Inform/IP 绑定
 
@@ -103,7 +105,7 @@ tr069:file-ingress:ip:<normalized-ip>
   -> 同事务创建 ACTIVE 传输任务 WAITING_FILE
   -> 下发 URL + 共享账号 + CommandKey
   -> BS 返回 UploadResponse
-  -> BS PUT /acs/log
+  -> BS PUT 或 POST /acs/log
   -> GVA 关联该设备唯一等待任务并存储文件
   -> BS 按协议需要时发送 TransferComplete
   -> 状态机完成或失败
@@ -114,7 +116,7 @@ tr069:file-ingress:ip:<normalized-ip>
 - UploadResponse `Status=0`：文件成功存储即完成。
 - UploadResponse `Status=1`：文件成功存储并收到成功 TransferComplete 后完成，允许两者乱序。
 - TransferComplete 失败：任务失败，已经存储的文件保留用于排查。
-- 重复响应、重复 PUT 和重复 TransferComplete 使用条件更新保持幂等。
+- 重复响应、重复 PUT/POST 和重复 TransferComplete 使用条件更新保持幂等。
 
 ### 5.2 周期上传
 
@@ -122,7 +124,7 @@ tr069:file-ingress:ip:<normalized-ip>
 
 ### 5.3 已接受的限制
 
-共享 URL 和共享账号使 PUT 无法天然区分“主动任务文件”与“恰好同时到达的周期文件”。首期通过以下约束降低误关联：
+共享 URL 和共享账号使 PUT/POST 文件请求无法天然区分“主动任务文件”与“恰好同时到达的周期文件”。首期通过以下约束降低误关联：
 
 - 每台设备同时最多一个 LOG 文件流；
 - 每台设备同时最多一个 `WAITING_FILE` 主动任务；
@@ -156,7 +158,7 @@ tr069:file-ingress:ip:<normalized-ip>
 - 默认文件接收超时 10 分钟；TransferComplete 的 12 小时超时继续独立配置。
 - 客户端断开、超时或超限必须 Abort multipart upload 并释放令牌。
 - 接收过程中只记录 ID、大小、SHA-256、耗时和失败阶段，不记录文件内容或认证密码。
-- 同一任务重复 PUT 相同大小和 SHA-256 时幂等成功；内容不同不覆盖原文件。
+- 同一任务通过 PUT、POST 或两种方法交叉重复上传相同大小和 SHA-256 时幂等成功；内容不同不覆盖原文件。
 
 ## 7. 存储和一致性
 
@@ -265,6 +267,7 @@ tr069:
 
 | 情况 | HTTP | 处理 |
 | --- | --- | --- |
+| 文件通道使用 PUT/POST 以外的方法 | 405 | 返回 `Allow: PUT, POST`，不读取文件 |
 | 缺少/错误认证 | 401 | 挑战 Basic/Digest，不读取文件 |
 | 设备未注册/无法解析/歧义 | 403 | 外部统一消息，内部记录具体事件 |
 | 文件超限 | 413 | Abort，记录大小限制事件 |
@@ -278,7 +281,7 @@ tr069:
 
 测试覆盖：
 
-- Basic/Digest 协议向量、nonce 过期和重放；
+- PUT/POST 的 Basic/Digest 协议向量、Digest 方法摘要、nonce 过期和重放；
 - Inform/IP 绑定、可信代理、IPv4/IPv6、未注册和歧义拒绝；
 - 64 MiB 限长、chunked 超限、并发、取消、MinIO Abort；
 - ACTIVE/PERIODIC 分类、状态 0/1、TransferComplete 乱序、故障和幂等；

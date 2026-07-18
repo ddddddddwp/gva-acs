@@ -16,7 +16,7 @@
 
 ## 3. Basic and Digest Authentication
 
-- [ ] 3.1 Add protocol-vector tests for valid/invalid Basic, Digest qop=auth, MD5, MD5-sess, expired nonce, replayed nonce-count, missing credentials, and empty server configuration
+- [ ] 3.1 Add PUT/POST protocol-vector tests for valid/invalid Basic, Digest qop=auth, method-sensitive digest calculation, MD5, MD5-sess, expired nonce, replayed nonce-count, missing credentials, and empty server configuration
 - [ ] 3.2 Implement shared LOG Basic authentication with constant-time credential comparison and sanitized audit fields
 - [ ] 3.3 Implement Digest challenge and verification with expiring nonces and Redis-backed replay protection
 - [ ] 3.4 Compose route authentication so successful authentication grants only the configured channel and never derives a device from username
@@ -31,8 +31,8 @@
 
 ## 5. LOG File Ingress Pipeline
 
-- [ ] 5.1 Add failing route/service tests proving `PUT /acs/log` bypasses RawDump/XML parsing and disabled `/acs/pm` and `/acs/mr` do not invoke LOG handling
-- [ ] 5.2 Implement the channel registry and mount enabled file routes on the existing 7458 server with route-specific middleware
+- [ ] 5.1 Add failing route/service tests proving both `PUT /acs/log` and `POST /acs/log` accept raw file bodies and bypass RawDump/XML/multipart parsing, disabled PUT/POST `/acs/pm` and `/acs/mr` do not invoke LOG handling, and other methods return `405` with the correct Allow header
+- [ ] 5.2 Implement the channel registry and mount PUT/POST for every enabled file route on the existing 7458 server with one shared route-specific middleware and handler chain
 - [ ] 5.3 Implement global/channel/per-device admission control with `503` plus `Retry-After` and guaranteed token release
 - [ ] 5.4 Implement receive metadata creation, fixed-buffer streaming, Content-Length early rejection, streaming size enforcement, SHA-256 calculation, upload timeout, cancellation Abort, and `204` success
 - [ ] 5.5 Implement duplicate same-content idempotency, different-content conflict rejection, and secret/file-body-free structured events
@@ -42,7 +42,7 @@
 
 - [ ] 6.1 Add failing state-machine tests for ACTIVE/PERIODIC classification, one waiting active task per device, response/file/TransferComplete arrival permutations, faults, timeout, duplicate messages, and ambiguous tasks
 - [ ] 6.2 Create an ACTIVE transfer task transactionally when the existing Upload RPC command is accepted, using the configured shared URL and credentials while preserving CommandKey linkage
-- [ ] 6.3 Associate a PUT with the unique `WAITING_FILE` task or create a PERIODIC task when none exists
+- [ ] 6.3 Associate a PUT or POST upload with the unique `WAITING_FILE` task or create a PERIODIC task when none exists
 - [ ] 6.4 Implement idempotent completion for UploadResponse status 0 and status 1, including out-of-order successful TransferComplete and retained artifacts on faults
 - [ ] 6.5 Integrate file-wait and existing TransferComplete timeout handling so every created transfer task reaches a defined terminal state
 
@@ -71,7 +71,7 @@
 ## 10. Integration, Security, and Operations
 
 - [ ] 10.1 Add MinIO and file-ingress example configuration, secret injection documentation, bucket bootstrap, health checks, and Docker development wiring without changing automatic container restart policy
-- [ ] 10.2 Add an end-to-end test client for Basic and Digest PUT that performs Inform binding, streams a representative log, verifies MinIO metadata, filters by device ID, and downloads matching bytes
+- [ ] 10.2 Add end-to-end Basic/Digest clients for both PUT and POST that perform Inform binding, stream a representative raw log body, verify MinIO metadata and cross-method idempotency, filter by device ID, and download matching bytes
 - [ ] 10.3 Run existing TR-069 CWMP/core/backend/frontend regression suites and verify POST `/acs` behavior is unchanged
 - [ ] 10.4 Test a real BS periodic upload after the user configures `Device.LogMgmt.*`, then test active Upload/TransferComplete without executing unrelated dangerous RPCs
 - [ ] 10.5 Run race/static checks and verify a 64 MiB bounded upload does not create whole-file allocations or file-body log entries
