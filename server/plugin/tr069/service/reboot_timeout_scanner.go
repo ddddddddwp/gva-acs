@@ -17,11 +17,16 @@ const (
 )
 
 type RebootTimeoutScanner struct {
-	db *gorm.DB
+	db       *gorm.DB
+	advancer *CommandQueueAdvancer
 }
 
-func NewRebootTimeoutScanner(db *gorm.DB) *RebootTimeoutScanner {
-	return &RebootTimeoutScanner{db: db}
+func NewRebootTimeoutScanner(db *gorm.DB, advancers ...*CommandQueueAdvancer) *RebootTimeoutScanner {
+	scanner := &RebootTimeoutScanner{db: db}
+	if len(advancers) > 0 {
+		scanner.advancer = advancers[0]
+	}
+	return scanner
 }
 
 func (s *RebootTimeoutScanner) Run(ctx context.Context) {
@@ -66,6 +71,9 @@ func (s *RebootTimeoutScanner) ScanOnce(ctx context.Context, now time.Time) erro
 		})
 		if err != nil && !errors.Is(err, ErrCommandTransitionConflict) {
 			return err
+		}
+		if err == nil && s.advancer != nil {
+			s.advancer.AdvanceAfterTerminal(ctx, command.DeviceID)
 		}
 	}
 	return nil

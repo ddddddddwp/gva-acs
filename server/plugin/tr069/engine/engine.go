@@ -41,6 +41,7 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 	var profileRepository *adapter.ConnectionProfileRepository
 	var payloadCodec *adapter.CompositeCommandPayloadCodec
 	var provisioner *adapter.ConnectionCredentialProvisioner
+	var queueAdvancer *service.CommandQueueAdvancer
 	var rebootConfirmer *service.RebootConfirmationService
 	var rebootScanner *service.RebootTimeoutScanner
 	var transferLifecycle *service.TransferLifecycle
@@ -54,14 +55,15 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 		if wakeup == nil {
 			wakeup = adapter.EnqueueImmediate
 		}
+		queueAdvancer = service.NewCommandQueueAdvancer(global.GVA_DB, wakeup)
 		manager := service.NewCommandManager(nil, wakeup,
 			service.WithCommandPayloadProtector(payloadCodec),
 			service.WithCommandCreatedHook(service.NewActiveUploadTaskHook(nil)),
 		)
 		provisioner = adapter.NewConnectionCredentialProvisioner(manager, profileRepository)
-		rebootConfirmer = service.NewRebootConfirmationService(global.GVA_DB)
-		rebootScanner = service.NewRebootTimeoutScanner(global.GVA_DB)
-		transferLifecycle = service.NewTransferLifecycle(global.GVA_DB)
+		rebootConfirmer = service.NewRebootConfirmationService(global.GVA_DB, queueAdvancer)
+		rebootScanner = service.NewRebootTimeoutScanner(global.GVA_DB, queueAdvancer)
+		transferLifecycle = service.NewTransferLifecycle(global.GVA_DB, queueAdvancer)
 	}
 
 	eventSink := deps.EventSink
@@ -104,7 +106,7 @@ func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
 	cmdRepo := deps.CommandRepo
 	if cmdRepo == nil {
 		if adapter.DBAvailable() {
-			cmdRepo = new(adapter.GormCommandRepo)
+			cmdRepo = adapter.NewGormCommandRepo(global.GVA_DB, queueAdvancer)
 		} else {
 			cmdRepo = defaults.NewMemoryCommandRepo()
 		}

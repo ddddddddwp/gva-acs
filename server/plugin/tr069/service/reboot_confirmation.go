@@ -12,11 +12,16 @@ import (
 )
 
 type RebootConfirmationService struct {
-	db *gorm.DB
+	db       *gorm.DB
+	advancer *CommandQueueAdvancer
 }
 
-func NewRebootConfirmationService(db *gorm.DB) *RebootConfirmationService {
-	return &RebootConfirmationService{db: db}
+func NewRebootConfirmationService(db *gorm.DB, advancers ...*CommandQueueAdvancer) *RebootConfirmationService {
+	service := &RebootConfirmationService{db: db}
+	if len(advancers) > 0 {
+		service.advancer = advancers[0]
+	}
+	return service
 }
 
 func hasRebootConfirmationEvent(events []string) bool {
@@ -36,6 +41,7 @@ func (s *RebootConfirmationService) ConfirmFromInform(ctx context.Context, devic
 	if confirmedAt.IsZero() {
 		confirmedAt = time.Now()
 	}
+	completed := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var command model.Command
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -53,10 +59,16 @@ func (s *RebootConfirmationService) ConfirmFromInform(ctx context.Context, devic
 			EventType: "REBOOT_CONFIRMED", Stage: "reboot.inform",
 			Updates: map[string]any{"finished_at": confirmedAt, "phase_deadline_at": nil},
 		})
+		if err == nil {
+			completed = true
+		}
 		return err
 	})
 	if errors.Is(err, ErrCommandTransitionConflict) {
 		return nil
+	}
+	if err == nil && completed && s.advancer != nil {
+		s.advancer.AdvanceAfterTerminal(ctx, deviceID)
 	}
 	return err
 }

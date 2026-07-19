@@ -304,6 +304,45 @@ func TestCommandManagerRedisEnqueueFailureTerminatesCreatedCommand(t *testing.T)
 	}
 }
 
+func TestCommandManagerWakeFailureAdvancesQueuedFollower(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 19, 18, 20, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "FAIL-NEXT", now)
+	current := model.Command{
+		CommandID: "wake-failed-head", DeviceID: device.ID, DeviceKey: device.OUI + "-" + device.SerialNumber,
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusWaitingDevice,
+		QueuedAt: now, WaitingAt: &now, CreatedAt: now,
+	}
+	next := model.Command{
+		CommandID: "queued-after-wake-failure", DeviceID: device.ID, DeviceKey: current.DeviceKey,
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusQueued,
+		QueuedAt: now.Add(time.Second), CreatedAt: now.Add(time.Second),
+	}
+	for _, command := range []*model.Command{&current, &next} {
+		if err := NewCommandStore(db).Create(context.Background(), command); err != nil {
+			t.Fatalf("seed command %s: %v", command.CommandID, err)
+		}
+	}
+	wakeups := 0
+	manager := NewCommandManager(db, func(context.Context, string) error {
+		wakeups++
+		return nil
+	}, WithCommandManagerNow(func() time.Time { return now.Add(time.Minute) }))
+	if _, err := manager.failWakeup(context.Background(), current, SubmitResult{CommandID: current.CommandID, Status: current.Status}, errors.New("initial enqueue failed")); err != nil {
+		t.Fatalf("failWakeup: %v", err)
+	}
+	var failed, promoted model.Command
+	if err := db.First(&failed, "command_id = ?", current.CommandID).Error; err != nil {
+		t.Fatalf("load failed command: %v", err)
+	}
+	if err := db.First(&promoted, "command_id = ?", next.CommandID).Error; err != nil {
+		t.Fatalf("load promoted command: %v", err)
+	}
+	if failed.Status != model.CommandStatusFailed || promoted.Status != model.CommandStatusWaitingDevice || wakeups != 1 {
+		t.Fatalf("statuses failed=%s promoted=%s wakeups=%d", failed.Status, promoted.Status, wakeups)
+	}
+}
+
 func TestCommandManagerWakeFailurePreservesAlreadySentCommand(t *testing.T) {
 	db := newCommandManagerTestDB(t)
 	now := time.Date(2026, 7, 16, 13, 10, 0, 0, time.UTC)

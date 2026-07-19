@@ -78,6 +78,97 @@ func newGormCommandRepoTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestGormCommandRepoCompletionAdvancesNextFIFOCommand(t *testing.T) {
+	db := newGormCommandRepoTestDB(t)
+	if err := db.AutoMigrate(new(model.Device)); err != nil {
+		t.Fatalf("migrate device: %v", err)
+	}
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	device := model.Device{OUI: "8CE468", SerialNumber: "AUTO-NEXT"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	current := model.Command{
+		CommandID: "current-sent", DeviceID: device.ID, DeviceKey: "8CE468-AUTO-NEXT",
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`),
+		Status: model.CommandStatusSent, QueuedAt: now, CreatedAt: now,
+	}
+	next := model.Command{
+		CommandID: "next-queued", DeviceID: device.ID, DeviceKey: "8CE468-AUTO-NEXT",
+		Operation: "GetParameterValues", ParamsJSON: model.LongTextJSON(`{}`),
+		Status: model.CommandStatusQueued, QueuedAt: now.Add(time.Second), CreatedAt: now.Add(time.Second),
+	}
+	for _, command := range []*model.Command{&current, &next} {
+		if err := service.NewCommandStore(db).Create(context.Background(), command); err != nil {
+			t.Fatalf("seed command %s: %v", command.CommandID, err)
+		}
+	}
+	wakeups := make([]string, 0, 1)
+	advancer := service.NewCommandQueueAdvancer(db, func(_ context.Context, deviceKey string) error {
+		wakeups = append(wakeups, deviceKey)
+		return nil
+	}, service.WithCommandQueueAdvancerNow(func() time.Time { return now.Add(time.Minute) }))
+
+	if err := NewGormCommandRepo(db, advancer).MarkSuccess(context.Background(), current.CommandID, now.Add(30*time.Second)); err != nil {
+		t.Fatalf("MarkSuccess: %v", err)
+	}
+	var completed, promoted model.Command
+	if err := db.First(&completed, "command_id = ?", current.CommandID).Error; err != nil {
+		t.Fatalf("load completed command: %v", err)
+	}
+	if err := db.First(&promoted, "command_id = ?", next.CommandID).Error; err != nil {
+		t.Fatalf("load promoted command: %v", err)
+	}
+	if completed.Status != model.CommandStatusCompleted || promoted.Status != model.CommandStatusWaitingDevice {
+		t.Fatalf("statuses completed=%s promoted=%s", completed.Status, promoted.Status)
+	}
+	if len(wakeups) != 1 || wakeups[0] != next.DeviceKey {
+		t.Fatalf("wakeups=%#v", wakeups)
+	}
+}
+
+func TestGormCommandRepoFailureAdvancesNextFIFOCommand(t *testing.T) {
+	db := newGormCommandRepoTestDB(t)
+	if err := db.AutoMigrate(new(model.Device)); err != nil {
+		t.Fatalf("migrate device: %v", err)
+	}
+	now := time.Date(2026, 7, 19, 18, 5, 0, 0, time.UTC)
+	device := model.Device{OUI: "8CE468", SerialNumber: "FAILURE-NEXT"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	current := model.Command{
+		CommandID: "current-building-failure", DeviceID: device.ID, DeviceKey: "8CE468-FAILURE-NEXT",
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`),
+		Status: model.CommandStatusBuilding, QueuedAt: now, CreatedAt: now,
+	}
+	next := model.Command{
+		CommandID: "next-after-failure", DeviceID: device.ID, DeviceKey: current.DeviceKey,
+		Operation: "GetParameterValues", ParamsJSON: model.LongTextJSON(`{}`),
+		Status: model.CommandStatusQueued, QueuedAt: now.Add(time.Second), CreatedAt: now.Add(time.Second),
+	}
+	for _, command := range []*model.Command{&current, &next} {
+		if err := service.NewCommandStore(db).Create(context.Background(), command); err != nil {
+			t.Fatalf("seed command %s: %v", command.CommandID, err)
+		}
+	}
+	wakeups := 0
+	advancer := service.NewCommandQueueAdvancer(db, func(context.Context, string) error {
+		wakeups++
+		return nil
+	})
+	if err := NewGormCommandRepo(db, advancer).MarkFail(context.Background(), current.CommandID, 9002, "fault", now.Add(time.Minute)); err != nil {
+		t.Fatalf("MarkFail: %v", err)
+	}
+	var promoted model.Command
+	if err := db.First(&promoted, "command_id = ?", next.CommandID).Error; err != nil {
+		t.Fatalf("load promoted command: %v", err)
+	}
+	if promoted.Status != model.CommandStatusWaitingDevice || wakeups != 1 {
+		t.Fatalf("promoted status=%s wakeups=%d", promoted.Status, wakeups)
+	}
+}
+
 func TestGormDeviceRepoProvisionerSchedulesNeededInformProfile(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

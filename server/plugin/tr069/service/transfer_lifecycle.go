@@ -13,11 +13,16 @@ import (
 )
 
 type TransferLifecycle struct {
-	db *gorm.DB
+	db       *gorm.DB
+	advancer *CommandQueueAdvancer
 }
 
-func NewTransferLifecycle(db *gorm.DB) *TransferLifecycle {
-	return &TransferLifecycle{db: db}
+func NewTransferLifecycle(db *gorm.DB, advancers ...*CommandQueueAdvancer) *TransferLifecycle {
+	lifecycle := &TransferLifecycle{db: db}
+	if len(advancers) > 0 {
+		lifecycle.advancer = advancers[0]
+	}
+	return lifecycle
 }
 
 func (l *TransferLifecycle) OnUploadResponse(ctx context.Context, commandID string, status int, at time.Time) error {
@@ -94,7 +99,8 @@ func (l *TransferLifecycle) mutate(ctx context.Context, where string, value any,
 	} else {
 		at = at.UTC()
 	}
-	return l.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var terminalDeviceID uint
+	err := l.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task model.TransferTask
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(where, value).First(&task).Error; err != nil {
 			return err
@@ -135,8 +141,16 @@ func (l *TransferLifecycle) mutate(ctx context.Context, where string, value any,
 		}).Error; err != nil {
 			return err
 		}
-		return updateLifecycleCommand(tx, task, target, at)
+		deviceID, terminal, err := updateLifecycleCommand(tx, task, target, at)
+		if err == nil && terminal {
+			terminalDeviceID = deviceID
+		}
+		return err
 	})
+	if err == nil && terminalDeviceID != 0 && l.advancer != nil {
+		l.advancer.AdvanceAfterTerminal(ctx, terminalDeviceID)
+	}
+	return err
 }
 
 func hasAvailableArtifact(tx *gorm.DB, taskID string) (bool, error) {
@@ -180,9 +194,9 @@ func recomputeTransferStatus(task model.TransferTask, artifactAvailable bool) st
 	}
 }
 
-func updateLifecycleCommand(tx *gorm.DB, task model.TransferTask, target string, at time.Time) error {
+func updateLifecycleCommand(tx *gorm.DB, task model.TransferTask, target string, at time.Time) (uint, bool, error) {
 	if task.CommandID == nil {
-		return nil
+		return 0, false, nil
 	}
 	if task.UploadResponseStatus != nil && *task.UploadResponseStatus == 1 &&
 		target != model.TransferStatusCompleted && target != model.TransferStatusFailed && target != model.TransferStatusTimeout {
@@ -193,18 +207,18 @@ func updateLifecycleCommand(tx *gorm.DB, task model.TransferTask, target string,
 				"version": gorm.Expr("version + 1"), "updated_at": at,
 			})
 		if result.Error != nil {
-			return result.Error
+			return 0, false, result.Error
 		}
 		if result.RowsAffected == 1 {
-			return tx.Create(&model.CommandEvent{
+			return 0, false, tx.Create(&model.CommandEvent{
 				CommandID: *task.CommandID, EventType: "WAITING_TRANSFER", FromStatus: model.CommandStatusSent,
 				ToStatus: model.CommandStatusWaitingTransfer, Stage: "transfer.lifecycle", CreatedAt: at,
 			}).Error
 		}
-		return nil
+		return 0, false, nil
 	}
 	if target != model.TransferStatusCompleted && target != model.TransferStatusFailed && target != model.TransferStatusTimeout {
-		return nil
+		return 0, false, nil
 	}
 	updates := map[string]any{
 		"status": target, "finished_at": at, "phase_deadline_at": nil,
@@ -218,10 +232,17 @@ func updateLifecycleCommand(tx *gorm.DB, task model.TransferTask, target string,
 	}
 	result := tx.Model(new(model.Command)).Where("command_id = ? AND status IN ?", *task.CommandID, model.NonTerminalCommandStatuses()).Updates(updates)
 	if result.Error != nil || result.RowsAffected == 0 {
-		return result.Error
+		return 0, false, result.Error
 	}
-	return tx.Create(&model.CommandEvent{
+	if err := tx.Create(&model.CommandEvent{
 		CommandID: *task.CommandID, EventType: "TRANSFER_" + target, ToStatus: target,
 		Stage: "transfer.lifecycle", Message: task.FailureMessage, CreatedAt: at,
-	}).Error
+	}).Error; err != nil {
+		return 0, false, err
+	}
+	var command model.Command
+	if err := tx.Select("device_id").First(&command, "command_id = ?", *task.CommandID).Error; err != nil {
+		return 0, false, err
+	}
+	return command.DeviceID, true, nil
 }

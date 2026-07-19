@@ -17,10 +17,46 @@ func newRebootLifecycleTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(new(model.Command), new(model.CommandEvent)); err != nil {
+	if err := db.AutoMigrate(new(model.Device), new(model.Command), new(model.CommandEvent)); err != nil {
 		t.Fatalf("migrate reboot lifecycle models: %v", err)
 	}
 	return db
+}
+
+func TestRebootConfirmationAdvancesNextFIFOCommand(t *testing.T) {
+	db := newRebootLifecycleTestDB(t)
+	now := time.Date(2026, 7, 19, 18, 10, 0, 0, time.UTC)
+	device := model.Device{OUI: "8CE468", SerialNumber: "REBOOT-NEXT"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	reboot := seedWaitingReboot(t, db, "reboot-before-next", device.ID, now.Add(-time.Minute), now.Add(time.Minute))
+	next := model.Command{
+		CommandID: "queued-after-reboot", DeviceID: device.ID, DeviceKey: device.OUI + "-" + device.SerialNumber,
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusQueued,
+		QueuedAt: now, CreatedAt: now,
+	}
+	if err := NewCommandStore(db).Create(context.Background(), &next); err != nil {
+		t.Fatalf("seed next command: %v", err)
+	}
+	wakeups := 0
+	advancer := NewCommandQueueAdvancer(db, func(context.Context, string) error {
+		wakeups++
+		return nil
+	})
+	if err := NewRebootConfirmationService(db, advancer).ConfirmFromInform(context.Background(), device.ID, []string{"1 BOOT"}, now); err != nil {
+		t.Fatalf("ConfirmFromInform: %v", err)
+	}
+	var confirmed, promoted model.Command
+	if err := db.First(&confirmed, "command_id = ?", reboot.CommandID).Error; err != nil {
+		t.Fatalf("load confirmed command: %v", err)
+	}
+	if err := db.First(&promoted, "command_id = ?", next.CommandID).Error; err != nil {
+		t.Fatalf("load promoted command: %v", err)
+	}
+	if confirmed.Status != model.CommandStatusCompleted || promoted.Status != model.CommandStatusWaitingDevice || wakeups != 1 {
+		t.Fatalf("statuses confirmed=%s promoted=%s wakeups=%d", confirmed.Status, promoted.Status, wakeups)
+	}
 }
 
 func seedWaitingReboot(t *testing.T, db *gorm.DB, commandID string, deviceID uint, createdAt, deadline time.Time) model.Command {
@@ -125,5 +161,38 @@ func TestRebootTimeoutScannerExpiresOnlyDueWaitingReboots(t *testing.T) {
 	}
 	if events != 1 {
 		t.Fatalf("timeout events = %d, want 1", events)
+	}
+}
+
+func TestRebootTimeoutAdvancesNextFIFOCommand(t *testing.T) {
+	db := newRebootLifecycleTestDB(t)
+	now := time.Date(2026, 7, 19, 18, 30, 0, 0, time.UTC)
+	device := model.Device{OUI: "8CE468", SerialNumber: "TIMEOUT-NEXT"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	seedWaitingReboot(t, db, "expired-before-next", device.ID, now.Add(-time.Minute), now.Add(-time.Second))
+	next := model.Command{
+		CommandID: "queued-after-timeout", DeviceID: device.ID, DeviceKey: device.OUI + "-" + device.SerialNumber,
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusQueued,
+		QueuedAt: now, CreatedAt: now,
+	}
+	if err := NewCommandStore(db).Create(context.Background(), &next); err != nil {
+		t.Fatalf("seed queued command: %v", err)
+	}
+	wakeups := 0
+	advancer := NewCommandQueueAdvancer(db, func(context.Context, string) error {
+		wakeups++
+		return nil
+	})
+	if err := NewRebootTimeoutScanner(db, advancer).ScanOnce(context.Background(), now); err != nil {
+		t.Fatalf("ScanOnce: %v", err)
+	}
+	var promoted model.Command
+	if err := db.First(&promoted, "command_id = ?", next.CommandID).Error; err != nil {
+		t.Fatalf("load promoted command: %v", err)
+	}
+	if promoted.Status != model.CommandStatusWaitingDevice || wakeups != 1 {
+		t.Fatalf("promoted status=%s wakeups=%d", promoted.Status, wakeups)
 	}
 }

@@ -308,6 +308,10 @@ func (m *CommandManager) failWakeup(ctx context.Context, command model.Command, 
 		})
 		if compensationErr == nil {
 			result.Status = terminal.Status
+			if terminal.Status == model.CommandStatusFailed {
+				NewCommandQueueAdvancer(m.database(), m.wakeup, WithCommandQueueAdvancerNow(m.now)).
+					AdvanceAfterTerminal(cleanupCtx, terminal.DeviceID)
+			}
 			return result, nil
 		}
 		if !errors.Is(compensationErr, ErrCommandTransitionConflict) {

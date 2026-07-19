@@ -425,12 +425,17 @@ func (r *GormDeviceRepo) UpdateOnlineStatus(ctx context.Context, deviceID string
 }
 
 type GormCommandRepo struct {
-	db    *gorm.DB
-	store *service.CommandStore
+	db       *gorm.DB
+	store    *service.CommandStore
+	advancer *service.CommandQueueAdvancer
 }
 
 func newGormCommandRepo(db *gorm.DB) *GormCommandRepo {
-	return &GormCommandRepo{db: db, store: service.NewCommandStore(db)}
+	return NewGormCommandRepo(db, nil)
+}
+
+func NewGormCommandRepo(db *gorm.DB, advancer *service.CommandQueueAdvancer) *GormCommandRepo {
+	return &GormCommandRepo{db: db, store: service.NewCommandStore(db), advancer: advancer}
 }
 
 func (r *GormCommandRepo) database() *gorm.DB {
@@ -482,7 +487,8 @@ func (r *GormCommandRepo) MarkSuccess(ctx context.Context, commandID string, fin
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
 	}
-	return r.database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var terminalDeviceID uint
+	err := r.database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current model.Command
 		if err := tx.WithContext(ctx).First(&current, "command_id = ?", commandID).Error; err != nil {
 			return err
@@ -517,8 +523,16 @@ func (r *GormCommandRepo) MarkSuccess(ctx context.Context, commandID string, fin
 		}); err != nil {
 			return err
 		}
-		return (&ConnectionProfileRepository{db: tx}).MarkTerminal(ctx, tx, commandID, model.ConnectionProfileStateReady, "")
+		if err := (&ConnectionProfileRepository{db: tx}).MarkTerminal(ctx, tx, commandID, model.ConnectionProfileStateReady, ""); err != nil {
+			return err
+		}
+		terminalDeviceID = current.DeviceID
+		return nil
 	})
+	if err == nil && r != nil && r.advancer != nil {
+		r.advancer.AdvanceAfterTerminal(ctx, terminalDeviceID)
+	}
+	return err
 }
 
 func (r *GormCommandRepo) MarkFail(ctx context.Context, commandID string, faultCode int, faultString string, finishedAt time.Time) error {
@@ -533,7 +547,8 @@ func (r *GormCommandRepo) markFailAtStage(ctx context.Context, commandID string,
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
 	}
-	return r.database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var terminalDeviceID uint
+	err := r.database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current model.Command
 		if err := tx.WithContext(ctx).First(&current, "command_id = ?", commandID).Error; err != nil {
 			return err
@@ -569,6 +584,14 @@ func (r *GormCommandRepo) markFailAtStage(ctx context.Context, commandID string,
 		}); err != nil {
 			return err
 		}
-		return (&ConnectionProfileRepository{db: tx}).MarkTerminal(ctx, tx, commandID, model.ConnectionProfileStateFailed, faultString)
+		if err := (&ConnectionProfileRepository{db: tx}).MarkTerminal(ctx, tx, commandID, model.ConnectionProfileStateFailed, faultString); err != nil {
+			return err
+		}
+		terminalDeviceID = current.DeviceID
+		return nil
 	})
+	if err == nil && r != nil && r.advancer != nil {
+		r.advancer.AdvanceAfterTerminal(ctx, terminalDeviceID)
+	}
+	return err
 }

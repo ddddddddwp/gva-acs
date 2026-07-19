@@ -73,6 +73,48 @@ func TestTransferLifecycleStatusZeroCompletesOnlyAfterFile(t *testing.T) {
 	}
 }
 
+func TestTransferLifecycleCompletionAdvancesNextFIFOCommand(t *testing.T) {
+	store, db, device := newTransferStoreTest(t)
+	task := seedActiveLifecycleTask(t, store, device, "fifo-next")
+	var active model.Command
+	if err := db.First(&active, "command_id = ?", *task.CommandID).Error; err != nil {
+		t.Fatalf("load active command: %v", err)
+	}
+	next := model.Command{
+		CommandID: "queued-after-transfer", DeviceID: device.ID, DeviceKey: active.DeviceKey,
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusQueued,
+		QueuedAt: active.CreatedAt.Add(time.Second), CreatedAt: active.CreatedAt.Add(time.Second),
+	}
+	if err := NewCommandStore(db).Create(context.Background(), &next); err != nil {
+		t.Fatalf("seed queued command: %v", err)
+	}
+	wakeups := 0
+	advancer := NewCommandQueueAdvancer(db, func(context.Context, string) error {
+		wakeups++
+		return nil
+	})
+	lifecycle := NewTransferLifecycle(db, advancer)
+	at := time.Now().UTC()
+	if err := lifecycle.OnUploadResponse(context.Background(), *task.CommandID, 0, at); err != nil {
+		t.Fatalf("UploadResponse: %v", err)
+	}
+	var waiting model.TransferTask
+	if err := db.First(&waiting, "task_id = ?", task.TaskID).Error; err != nil {
+		t.Fatalf("load waiting task: %v", err)
+	}
+	artifact := makeLifecycleArtifactAvailable(t, store, waiting, "fifo-next", at.Add(time.Second))
+	if err := lifecycle.OnArtifactAvailable(context.Background(), task.TaskID, artifact.ID, at.Add(time.Second)); err != nil {
+		t.Fatalf("artifact available: %v", err)
+	}
+	var promoted model.Command
+	if err := db.First(&promoted, "command_id = ?", next.CommandID).Error; err != nil {
+		t.Fatalf("load promoted command: %v", err)
+	}
+	if promoted.Status != model.CommandStatusWaitingDevice || wakeups != 1 {
+		t.Fatalf("promoted status=%s wakeups=%d", promoted.Status, wakeups)
+	}
+}
+
 func TestTransferLifecycleStatusOneAcceptsTransferCompleteBeforeFile(t *testing.T) {
 	store, db, device := newTransferStoreTest(t)
 	task := seedActiveLifecycleTask(t, store, device, "status-one")

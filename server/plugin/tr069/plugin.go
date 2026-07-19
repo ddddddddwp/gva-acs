@@ -66,6 +66,9 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 	}); err != nil {
 		global.GVA_LOG.Error("failed to start TR-069 command wake consumer", zap.Error(err))
 	}
+	if err := service.NewCommandQueueAdvancer(global.GVA_DB, adapter.EnqueueImmediate).Recover(context.Background()); err != nil {
+		global.GVA_LOG.Error("failed to recover TR-069 command FIFO", zap.Error(err))
+	}
 
 	r := group.Group("tr069")
 	r.Use(middleware.JWTAuth()).Use(middleware.CasbinHandler())
