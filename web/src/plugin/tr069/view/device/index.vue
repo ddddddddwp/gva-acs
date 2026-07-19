@@ -26,7 +26,10 @@
         <el-table-column prop="ip" label="IP地址" width="140" show-overflow-tooltip />
         <el-table-column label="在线状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.online ? 'success' : 'info'" effect="light">
+            <el-tag v-if="scope.row.deleting" type="warning" effect="light">
+              删除中
+            </el-tag>
+            <el-tag v-else :type="scope.row.online ? 'success' : 'info'" effect="light">
               {{ scope.row.online ? '在线' : '离线' }}
             </el-tag>
           </template>
@@ -34,41 +37,51 @@
         <el-table-column label="操作" width="360" fixed="right" align="center">
           <template #default="scope">
             <div class="device-row-actions">
-              <el-button type="primary" link :icon="Connection" @click="openDataModelFromRow(scope.row)">参数</el-button>
+              <template v-if="!scope.row.deleting">
+                <el-button type="primary" link :icon="Connection" @click="openDataModelFromRow(scope.row)">参数</el-button>
 
-              <el-dropdown
-                v-for="menu in RPC_ACTION_MENUS"
-                :key="menu.key"
-                trigger="click"
-                @command="command => handleMoreCommand(command, scope.row)"
+                <el-dropdown
+                  v-for="menu in RPC_ACTION_MENUS"
+                  :key="menu.key"
+                  trigger="click"
+                  @command="command => handleMoreCommand(command, scope.row)"
+                >
+                  <el-button type="primary" link>
+                    {{ menu.label }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <template v-for="(group, groupIndex) in menu.groups" :key="group.label">
+                        <el-dropdown-item
+                          disabled
+                          :divided="groupIndex > 0"
+                          class="rpc-group-title"
+                        >
+                          {{ group.label }}
+                        </el-dropdown-item>
+                        <el-dropdown-item
+                          v-for="action in group.actions"
+                          :key="action.key"
+                          :command="action.key"
+                          :disabled="!canIssueRPCAction(scope.row, action)"
+                        >
+                          {{ action.label }}
+                        </el-dropdown-item>
+                      </template>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+
+              <el-button
+                type="danger"
+                link
+                :loading="deletingDeviceId === scope.row.ID"
+                :disabled="deletingDeviceId !== 0 && deletingDeviceId !== scope.row.ID"
+                @click="deleteRow(scope.row)"
               >
-                <el-button type="primary" link>
-                  {{ menu.label }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <template v-for="(group, groupIndex) in menu.groups" :key="group.label">
-                      <el-dropdown-item
-                        disabled
-                        :divided="groupIndex > 0"
-                        class="rpc-group-title"
-                      >
-                        {{ group.label }}
-                      </el-dropdown-item>
-                      <el-dropdown-item
-                        v-for="action in group.actions"
-                        :key="action.key"
-                        :command="action.key"
-                        :disabled="!canIssueRPCAction(scope.row, action)"
-                      >
-                        {{ action.label }}
-                      </el-dropdown-item>
-                    </template>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-
-              <el-button type="danger" link @click="deleteRow(scope.row)">删除</el-button>
+                {{ scope.row.deleting ? '重试删除' : '删除' }}
+              </el-button>
             </div>
           </template>
         </el-table-column>
@@ -152,6 +165,7 @@ const currentRow = ref({})
 const currentRPCAction = ref()
 const rpcDialogVisible = ref(false)
 const dmDrawerVisible = ref(false)
+const deletingDeviceId = ref(0)
 
 // 表单校验规则
 const rules = {
@@ -219,17 +233,37 @@ const enterDevice = async () => {
 }
 
 const deleteRow = async (row) => {
+  if (deletingDeviceId.value !== 0) return
+
   try {
-    await ElMessageBox.confirm('确定要删除该设备吗?', '提示', { type: 'warning' })
+    await ElMessageBox.confirm(
+      '删除设备将永久删除该设备的参数树、RPC 记录、告警和全部日志文件，且无法恢复。确定继续吗？',
+      '永久删除设备',
+      {
+        type: 'error',
+        confirmButtonText: '永久删除',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch (error) {
+    return
+  }
+
+  deletingDeviceId.value = row.ID
+  try {
     const res = await deleteDevice(row.ID)
     if (res.code === 0) {
       ElMessage.success('删除成功')
-      getTableData()
+      await getTableData()
     } else {
       ElMessage.error(res.msg || '删除失败')
+      await getTableData()
     }
   } catch (error) {
-    // 用户取消
+    ElMessage.error('删除失败，请稍后重试')
+    await getTableData()
+  } finally {
+    deletingDeviceId.value = 0
   }
 }
 

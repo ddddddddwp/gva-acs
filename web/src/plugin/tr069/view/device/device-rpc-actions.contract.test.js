@@ -15,7 +15,7 @@ test('device list renders four aligned top-level actions and two grouped RPC men
   assert.match(source, /\{\{ menu\.label \}\}/)
   assert.match(source, /menu\.groups/)
   assert.match(source, /groupIndex > 0/)
-  assert.match(source, /type="danger"[\s\S]*@click="deleteRow\(scope\.row\)"[\s\S]*>删除<\/el-button>/)
+  assert.match(source, /type="danger"[\s\S]*@click="deleteRow\(scope\.row\)"[\s\S]*scope\.row\.deleting \? '重试删除' : '删除'/)
   assert.doesNotMatch(source, /command="deleteDevice"/)
   assert.doesNotMatch(source, /syncParameters\(scope\.row\)/)
 })
@@ -53,4 +53,16 @@ test('log upload form submits only file type and delay', async () => {
   assert.match(uploadCase, /fileType:/)
   assert.match(uploadCase, /delaySeconds:/)
   assert.doesNotMatch(uploadCase, /url:|username:|password:/)
+})
+
+test('device deletion is permanent, row-scoped, and retryable', async () => {
+  const source = await readFile(devicePageURL, 'utf8')
+
+  assert.match(source, /永久删除该设备的参数树、RPC 记录、告警和全部日志文件/)
+  assert.match(source, /deletingDeviceId/)
+  assert.match(source, /scope\.row\.deleting/)
+  assert.match(source, /重试删除/)
+  assert.match(source, /:loading="deletingDeviceId === scope\.row\.ID"/)
+  assert.match(source, /deletingDeviceId\.value = row\.ID/)
+  assert.match(source, /finally\s*\{\s*deletingDeviceId\.value = 0/)
 })
