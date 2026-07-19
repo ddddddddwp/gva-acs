@@ -100,6 +100,43 @@ func TestArtifactAPIListsByExactDeviceAndStreamsSafeDownload(t *testing.T) {
 	}
 }
 
+func TestArtifactAPIHidesDeletingDevice(t *testing.T) {
+	db := seedArtifactAPI(t)
+	var device model.Device
+	if err := db.Where("serial_number = ?", "SNB123456789").First(&device).Error; err != nil {
+		t.Fatalf("load device: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Model(&device).Update("deleting_at", now).Error; err != nil {
+		t.Fatalf("mark deleting: %v", err)
+	}
+	var artifact model.Artifact
+	if err := db.Where("device_id = ?", device.ID).First(&artifact).Error; err != nil {
+		t.Fatalf("load artifact: %v", err)
+	}
+
+	artifactAPI := NewArtifactApi(service.NewTransferStore(db), &artifactAPIFakeStore{
+		objects: map[string][]byte{artifact.ObjectKey: []byte("hidden")},
+	})
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/tr069/artifact/list", artifactAPI.List)
+	router.GET("/tr069/artifact/:fileId/download", artifactAPI.Download)
+
+	listRecorder := httptest.NewRecorder()
+	router.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/tr069/artifact/list?page=1&pageSize=10&serialNumber=SNB123456789", nil))
+	if !strings.Contains(listRecorder.Body.String(), `"total":0`) {
+		t.Fatalf("deleting device artifact remained visible: %s", listRecorder.Body.String())
+	}
+
+	downloadRecorder := httptest.NewRecorder()
+	path := "/tr069/artifact/" + strconv.FormatUint(artifact.ID, 10) + "/download"
+	router.ServeHTTP(downloadRecorder, httptest.NewRequest(http.MethodGet, path, nil))
+	if downloadRecorder.Code != http.StatusNotFound {
+		t.Fatalf("deleting device artifact status = %d, want 404", downloadRecorder.Code)
+	}
+}
+
 func seedArtifactAPI(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})

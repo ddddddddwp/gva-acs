@@ -79,7 +79,7 @@ func (r *UploadDeviceResolver) resolveActive(ctx context.Context, sourceIP, chan
 		Select("devices.id AS device_id, devices.ip, devices.oui, devices.product_class, devices.serial_number").
 		Joins("JOIN tr069_devices AS devices ON devices.id = tasks.device_id").
 		Where("tasks.source = ? AND tasks.channel = ? AND tasks.status = ?", model.TransferSourceActive, channel, model.TransferStatusWaitingFile).
-		Where("devices.ip = ? AND devices.deleted_at IS NULL AND devices.serial_number <> '' AND devices.oui <> ''", sourceIP).
+		Where("devices.ip = ? AND devices.deleted_at IS NULL AND devices.deleting_at IS NULL AND devices.serial_number <> '' AND devices.oui <> ''", sourceIP).
 		Order("tasks.created_at ASC").Limit(2).Scan(&rows).Error
 	if err != nil {
 		return UploadDeviceIdentity{}, false, err
@@ -106,7 +106,7 @@ func (r *UploadDeviceResolver) registeredCandidates(ctx context.Context, sourceI
 			continue
 		}
 		var device model.Device
-		err := r.db.WithContext(ctx).Where("id = ? AND serial_number <> '' AND oui <> '' AND product_class <> ''", candidate.DeviceID).First(&device).Error
+		err := r.db.WithContext(ctx).Where("id = ? AND deleting_at IS NULL AND serial_number <> '' AND oui <> '' AND product_class <> ''", candidate.DeviceID).First(&device).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			continue
 		}
@@ -129,7 +129,7 @@ func (r *UploadDeviceResolver) resolveDatabaseFallback(ctx context.Context, sour
 	cutoff := r.now().UTC().Add(-r.bindingTTL)
 	var devices []model.Device
 	err := r.db.WithContext(ctx).
-		Where("ip = ? AND last_inform >= ? AND serial_number <> '' AND oui <> ''", sourceIP, cutoff).
+		Where("ip = ? AND deleting_at IS NULL AND last_inform >= ? AND serial_number <> '' AND oui <> ''", sourceIP, cutoff).
 		Order("last_inform DESC").Order("id ASC").Limit(2).Find(&devices).Error
 	if err != nil {
 		return UploadDeviceIdentity{}, err

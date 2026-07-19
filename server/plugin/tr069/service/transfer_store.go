@@ -351,6 +351,7 @@ func (s *TransferStore) ListArtifacts(ctx context.Context, filter ArtifactListFi
 	query := s.db.WithContext(ctx).Table("tr069_artifacts AS artifacts").
 		Joins("JOIN tr069_transfer_tasks AS tasks ON tasks.task_id = artifacts.task_id").
 		Joins("JOIN tr069_devices AS devices ON devices.id = artifacts.device_id").
+		Where("devices.deleting_at IS NULL").
 		Where("artifacts.channel = ? AND artifacts.status = ?", "LOG", model.ArtifactStatusAvailable)
 	if filter.SerialNumber != "" {
 		query = query.Where("devices.serial_number = ?", filter.SerialNumber)
@@ -385,7 +386,11 @@ func (s *TransferStore) ListArtifacts(ctx context.Context, filter ArtifactListFi
 
 func (s *TransferStore) GetAvailableArtifact(ctx context.Context, fileID uint64) (model.Artifact, error) {
 	var artifact model.Artifact
-	err := s.db.WithContext(ctx).Where("id = ? AND status = ?", fileID, model.ArtifactStatusAvailable).First(&artifact).Error
+	err := s.db.WithContext(ctx).Table("tr069_artifacts AS artifacts").
+		Select("artifacts.*").
+		Joins("JOIN tr069_devices AS devices ON devices.id = artifacts.device_id").
+		Where("artifacts.id = ? AND artifacts.status = ? AND devices.deleting_at IS NULL", fileID, model.ArtifactStatusAvailable).
+		First(&artifact).Error
 	return artifact, err
 }
 

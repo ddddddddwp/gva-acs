@@ -227,3 +227,21 @@ func TestUploadDeviceResolverValidatesLiveRedisCandidateAgainstDatabase(t *testi
 		t.Fatalf("unknown device error=%v", err)
 	}
 }
+
+func TestUploadDeviceResolverRejectsDeletingDevice(t *testing.T) {
+	store, db, device := newTransferStoreTest(t)
+	now := time.Now().UTC()
+	if err := db.Model(&device).Updates(map[string]any{
+		"ip": "192.0.2.92", "last_inform": now, "product_class": "NR-BS", "deleting_at": now,
+	}).Error; err != nil {
+		t.Fatalf("mark deleting device: %v", err)
+	}
+	identity := UploadDeviceIdentity{
+		DeviceID: device.ID, IP: "192.0.2.92", OUI: device.OUI,
+		ProductClass: "NR-BS", SerialNumber: device.SerialNumber,
+	}
+	resolver := NewUploadDeviceResolver(db, store, staticUploadIdentityResolver{candidates: []UploadDeviceIdentity{identity}}, 30*time.Minute)
+	if _, err := resolver.Resolve(context.Background(), identity.IP, "LOG"); !errors.Is(err, ErrUploadDeviceNotFound) {
+		t.Fatalf("Resolve() error = %v, want ErrUploadDeviceNotFound", err)
+	}
+}

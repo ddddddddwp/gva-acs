@@ -183,9 +183,12 @@ func (m *CommandManager) submitPersisted(ctx context.Context, deviceID uint, ope
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var device model.Device
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "oui", "serial_number", "last_inform").
+			Select("id", "oui", "serial_number", "last_inform", "deleting_at").
 			First(&device, deviceID).Error; err != nil {
 			return err
+		}
+		if device.DeletingAt != nil {
+			return ErrDeviceDeleting
 		}
 		if submission.system {
 			if device.LastInform.IsZero() || now.Sub(device.LastInform) >= commandOnlineThreshold {

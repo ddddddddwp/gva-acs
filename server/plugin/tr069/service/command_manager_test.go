@@ -139,6 +139,32 @@ func createCommandManagerDevice(t *testing.T, db *gorm.DB, serial string, now ti
 	return device
 }
 
+func TestCommandManagerRejectsDeletingDevice(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "DELETING-COMMAND", now)
+	deletingAt := now.Add(-time.Second)
+	if err := db.Model(&device).Update("deleting_at", deletingAt).Error; err != nil {
+		t.Fatalf("mark device deleting: %v", err)
+	}
+
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+	)
+	_, err := manager.Submit(context.Background(), device.ID, "GetRPCMethods", nil)
+	if !errors.Is(err, ErrDeviceDeleting) {
+		t.Fatalf("Submit() error = %v, want ErrDeviceDeleting", err)
+	}
+
+	var commands int64
+	if err := db.Model(new(model.Command)).Where("device_id = ?", device.ID).Count(&commands).Error; err != nil {
+		t.Fatalf("count commands: %v", err)
+	}
+	if commands != 0 {
+		t.Fatalf("deleting device command count = %d, want 0", commands)
+	}
+}
+
 func setCommandManagerCapabilities(t *testing.T, db *gorm.DB, deviceID uint, methods string) {
 	t.Helper()
 	if err := db.Create(&model.DeviceRPCMethods{DeviceID: deviceID, MethodsJSON: datatypes.JSON(methods)}).Error; err != nil {

@@ -157,7 +157,7 @@ func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 	deviceResponses := make([]deviceResponse.DeviceResponse, 0, len(devices))
 	for _, d := range devices {
 		var isOnline bool
-		if !d.LastInform.IsZero() {
+		if d.DeletingAt == nil && !d.LastInform.IsZero() {
 			isOnline = now.Sub(d.LastInform).Seconds() < float64(offlineThreshold)
 		} else {
 			isOnline = false
@@ -182,6 +182,7 @@ func (a *DeviceApi) GetDeviceList(c *gin.Context) {
 			GroupId:          d.GroupId,
 			Remark:           d.Remark,
 			IsWhite:          d.IsWhite,
+			Deleting:         d.DeletingAt != nil,
 			Online:           isOnline,
 			RPCMethods:       rpcMethodsByDevice[d.ID],
 		})
