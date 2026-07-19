@@ -114,6 +114,35 @@ func (s *UploadIdentityStore) Resolve(ctx context.Context, ipValue string) ([]Up
 	return bindings, nil
 }
 
+func (s *UploadIdentityStore) Unbind(ctx context.Context, ipValue string, deviceID uint) error {
+	if s == nil || s.client == nil {
+		return errors.New("upload identity Redis client is required")
+	}
+	if deviceID == 0 {
+		return errors.New("upload identity device ID is required")
+	}
+	ip, err := normalizeUploadIdentityIP(ipValue)
+	if err != nil {
+		return err
+	}
+	member := strconv.FormatUint(uint64(deviceID), 10)
+	zsetKey := uploadIdentityIPKey(ip)
+	pipe := s.client.TxPipeline()
+	pipe.ZRem(ctx, zsetKey, member)
+	pipe.Del(ctx, uploadIdentityMemberKey(ip, deviceID))
+	if _, err := pipe.Exec(ctx); err != nil {
+		return err
+	}
+	remaining, err := s.client.ZCard(ctx, zsetKey).Result()
+	if err != nil {
+		return err
+	}
+	if remaining == 0 {
+		return s.client.Del(ctx, zsetKey).Err()
+	}
+	return nil
+}
+
 func normalizeUploadIdentityIP(value string) (string, error) {
 	address, err := netip.ParseAddr(strings.TrimSpace(value))
 	if err != nil {
