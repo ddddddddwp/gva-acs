@@ -55,16 +55,20 @@ type TransferReceiver struct {
 	objects   ArtifactStore
 	admission *TransferAdmissionController
 	lifecycle *TransferLifecycle
+	runtime   *UploadRuntimeRegistry
 	now       func() time.Time
 	buffers   sync.Pool
 }
 
-func NewTransferReceiver(transfers *TransferStore, objects ArtifactStore) *TransferReceiver {
+func NewTransferReceiver(transfers *TransferStore, objects ArtifactStore, registries ...*UploadRuntimeRegistry) *TransferReceiver {
 	var lifecycle *TransferLifecycle
 	if transfers != nil {
 		lifecycle = NewTransferLifecycle(transfers.db)
 	}
 	receiver := &TransferReceiver{transfers: transfers, objects: objects, admission: NewTransferAdmissionController(), lifecycle: lifecycle, now: time.Now}
+	if len(registries) > 0 {
+		receiver.runtime = registries[0]
+	}
 	receiver.buffers.New = func() any { return make([]byte, 64*1024) }
 	return receiver
 }
@@ -87,6 +91,21 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 
 	receiveCtx, cancel := context.WithTimeout(ctx, request.UploadTimeout)
 	defer cancel()
+	var runtimeHandle *UploadRuntimeHandle
+	if r.runtime != nil {
+		runtimeCancel := func() {
+			cancel()
+			if closer, ok := request.Body.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		}
+		var err error
+		runtimeHandle, err = r.runtime.Register(request.Device.DeviceID, runtimeCancel)
+		if err != nil {
+			return model.Artifact{}, err
+		}
+		defer runtimeHandle.Unregister()
+	}
 	if existing, found, err := r.existingActiveArtifact(receiveCtx, request.Device.DeviceID, request.Channel); err != nil {
 		return model.Artifact{}, err
 	} else if found {
@@ -113,6 +132,12 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 	if err != nil {
 		r.failReceiving(receiveCtx, task, artifact, "storage.begin", "STORE_BEGIN_FAILED", err)
 		return model.Artifact{}, err
+	}
+	if runtimeHandle != nil {
+		if err := runtimeHandle.AttachWriter(w); err != nil {
+			r.failReceiving(context.Background(), task, artifact, "runtime.register", "DEVICE_DELETING", err)
+			return model.Artifact{}, err
+		}
 	}
 
 	hasher := sha256.New()

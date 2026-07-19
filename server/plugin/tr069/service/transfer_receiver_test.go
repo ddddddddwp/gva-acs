@@ -7,12 +7,38 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	"gorm.io/gorm"
 )
+
+type blockingUploadBody struct {
+	started chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func newBlockingUploadBody() *blockingUploadBody {
+	return &blockingUploadBody{started: make(chan struct{}), closed: make(chan struct{})}
+}
+
+func (b *blockingUploadBody) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (b *blockingUploadBody) Close() error {
+	select {
+	case <-b.closed:
+	default:
+		close(b.closed)
+	}
+	return nil
+}
 
 type staticUploadIdentityResolver struct {
 	candidates []UploadDeviceIdentity
@@ -77,6 +103,55 @@ func TestTransferReceiverRejectsOversizedStreamAndAbortsObject(t *testing.T) {
 	objects.mu.Unlock()
 	if count != 0 {
 		t.Fatalf("aborted object count=%d", count)
+	}
+}
+
+func TestTransferReceiverCancelsActiveUploadForDeletingDevice(t *testing.T) {
+	store, db, device := newTransferStoreTest(t)
+	objects := newMemoryArtifactStore()
+	registry := NewUploadRuntimeRegistry()
+	receiver := NewTransferReceiver(store, objects, registry)
+	body := newBlockingUploadBody()
+	result := make(chan error, 1)
+	go func() {
+		_, err := receiver.Receive(context.Background(), ReceiveRequest{
+			Device:  UploadDeviceIdentity{DeviceID: device.ID, SerialNumber: device.SerialNumber, OUI: device.OUI},
+			Channel: "LOG", Body: body, ContentLength: -1, Driver: "memory", StoragePrefix: "artifacts",
+			MaxFileSize: 1024, UploadTimeout: time.Minute, RetentionDays: 30,
+			MaxConcurrent: 4, MaxConcurrentPerDevice: 1,
+		})
+		result <- err
+	}()
+
+	select {
+	case <-body.started:
+	case <-time.After(time.Second):
+		t.Fatal("receiver did not begin reading upload")
+	}
+	if err := registry.BlockAndCancel(context.Background(), device.ID); err != nil {
+		t.Fatalf("BlockAndCancel() error = %v", err)
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("cancelled upload unexpectedly succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled upload did not exit")
+	}
+
+	objects.mu.Lock()
+	objectCount := len(objects.objects)
+	objects.mu.Unlock()
+	if objectCount != 0 {
+		t.Fatalf("committed object count = %d, want 0", objectCount)
+	}
+	var artifacts int64
+	if err := db.Model(new(model.Artifact)).Where("device_id = ? AND status = ?", device.ID, model.ArtifactStatusAvailable).Count(&artifacts).Error; err != nil {
+		t.Fatalf("count available artifacts: %v", err)
+	}
+	if artifacts != 0 {
+		t.Fatalf("available artifact count = %d, want 0", artifacts)
 	}
 }
 

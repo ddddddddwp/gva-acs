@@ -135,6 +135,17 @@ func TestFileIngressVendorPathsDoNotRedirect(t *testing.T) {
 	}
 }
 
+func TestSetupEnginePublishesUploadRuntimeRegistry(t *testing.T) {
+	previousRuntime := config.CurrentRuntime()
+	t.Cleanup(func() { config.StoreRuntime(previousRuntime.Settings) })
+	config.StoreRuntime(config.TR069Config{})
+
+	_ = SetupEngine()
+	if CurrentUploadRuntimeRegistry() == nil {
+		t.Fatal("SetupEngine() did not publish upload runtime registry")
+	}
+}
+
 func readRuntimeInfoLog(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, time.Now().Format("2006-01-02"), "tr069info.log")

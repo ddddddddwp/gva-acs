@@ -56,12 +56,14 @@ func StartTR069Server() {
 // SetupEngine creates and configures the gin engine for TR069
 // Exported for testing purposes
 func SetupEngine() *gin.Engine {
-	routes, workers, objectStore, err := buildRuntimeFileIngressRoutes()
+	uploadRuntime := service.NewUploadRuntimeRegistry()
+	routes, workers, objectStore, err := buildRuntimeFileIngressRoutes(uploadRuntime)
 	if err != nil {
 		panic(fmt.Errorf("initialize TR-069 file ingress: %w", err))
 	}
 	setTransferWorkers(workers)
 	setArtifactStore(objectStore)
+	setUploadRuntimeRegistry(uploadRuntime)
 	return setupEngine(routes)
 }
 
@@ -134,7 +136,7 @@ func setupEngine(fileIngressRoutes map[string]gin.HandlerFunc) *gin.Engine {
 	return engine
 }
 
-func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, *service.TransferWorkers, service.ArtifactStore, error) {
+func buildRuntimeFileIngressRoutes(uploadRuntime *service.UploadRuntimeRegistry) (map[string]gin.HandlerFunc, *service.TransferWorkers, service.ArtifactStore, error) {
 	runtime := config.CurrentRuntime()
 	if !runtime.Settings.FileIngress.Enabled {
 		return nil, nil, nil, nil
@@ -156,7 +158,7 @@ func buildRuntimeFileIngressRoutes() (map[string]gin.HandlerFunc, *service.Trans
 	transferStore := service.NewTransferStore(global.GVA_DB)
 	identityStore := adapter.NewUploadIdentityStore(global.GVA_REDIS)
 	deviceResolver := service.NewUploadDeviceResolver(global.GVA_DB, transferStore, identityStore, runtime.FileIngress.IdentityBindingTTL)
-	receiver := service.NewTransferReceiver(transferStore, objectStore)
+	receiver := service.NewTransferReceiver(transferStore, objectStore, uploadRuntime)
 	workers := service.NewTransferWorkers(transferStore, objectStore)
 	authenticator := middleware.NewFileAuthenticator(middleware.RuntimeFileCredentialProvider{}, adapter.NewRedisDigestNonceStore(global.GVA_REDIS))
 	ingressHandler := handler.NewFileIngressHandler(authenticator, deviceResolver, receiver, handler.RuntimeFileIngressChannelProvider{})
@@ -179,6 +181,11 @@ var artifactStoreRuntime struct {
 	store service.ArtifactStore
 }
 
+var uploadRuntimeRegistry struct {
+	sync.RWMutex
+	registry *service.UploadRuntimeRegistry
+}
+
 func setTransferWorkers(workers *service.TransferWorkers) {
 	transferWorkerRuntime.Lock()
 	transferWorkerRuntime.workers = workers
@@ -197,6 +204,18 @@ func CurrentArtifactStore() service.ArtifactStore {
 	artifactStoreRuntime.RLock()
 	defer artifactStoreRuntime.RUnlock()
 	return artifactStoreRuntime.store
+}
+
+func setUploadRuntimeRegistry(registry *service.UploadRuntimeRegistry) {
+	uploadRuntimeRegistry.Lock()
+	uploadRuntimeRegistry.registry = registry
+	uploadRuntimeRegistry.Unlock()
+}
+
+func CurrentUploadRuntimeRegistry() *service.UploadRuntimeRegistry {
+	uploadRuntimeRegistry.RLock()
+	defer uploadRuntimeRegistry.RUnlock()
+	return uploadRuntimeRegistry.registry
 }
 
 func StartTransferWorkers(ctx context.Context) {
