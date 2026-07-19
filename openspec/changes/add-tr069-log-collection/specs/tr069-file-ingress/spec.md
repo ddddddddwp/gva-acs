@@ -16,15 +16,23 @@ The system SHALL authenticate every `PUT /acs/log` and `POST /acs/log` request w
 - **THEN** the system SHALL authorize access to the LOG channel without treating the username as a device identifier
 
 ### Requirement: PUT and POST upload compatibility
-The system SHALL accept both PUT and POST for every enabled file-ingress channel, SHALL process both methods through the same authentication, identity, admission, streaming, storage, and state pipeline, and SHALL treat each request body as the raw artifact byte stream.
+The system SHALL accept both PUT and POST for every enabled file-ingress channel, SHALL accept the configured base path with or without a trailing slash, SHALL accept a single filename appended to a PUT path, and SHALL process every accepted form through the same authentication, identity, admission, streaming, storage, and state pipeline. Raw PUT/POST bodies SHALL be treated as artifact bytes, while a POST `multipart/form-data` compatibility envelope SHALL require its first part to be the `file` part and SHALL stream only that part without buffering the whole request.
 
 #### Scenario: Device uploads with PUT
 - **WHEN** an authenticated and uniquely resolved device sends `PUT /acs/log` with a raw file body
 - **THEN** the system SHALL process the file through the LOG ingress pipeline
 
+#### Scenario: Vendor device appends a filename to PUT
+- **WHEN** an authenticated and uniquely resolved device sends `PUT /acs/log/<filename>` with a raw file body
+- **THEN** the system SHALL stream the raw body and SHALL preserve a sanitized filename as artifact metadata without using it as an object key
+
 #### Scenario: Device uploads with POST
 - **WHEN** an authenticated and uniquely resolved device sends `POST /acs/log` with a raw file body
 - **THEN** the system SHALL process the file identically to PUT without requiring multipart form data
+
+#### Scenario: Vendor device falls back to multipart POST
+- **WHEN** an authenticated and uniquely resolved device sends `POST /acs/log/` whose first multipart field is `file`
+- **THEN** the system SHALL stream only that file part through the LOG ingress pipeline without redirecting, buffering the whole request, or persisting multipart boundaries
 
 #### Scenario: Unsupported method is used
 - **WHEN** a client uses a method other than PUT or POST on an enabled file-ingress path
@@ -76,11 +84,15 @@ The system SHALL enforce configured file-size, timeout, global concurrency, chan
 
 #### Scenario: File within configured limits succeeds
 - **WHEN** a uniquely resolved device uploads a file within all configured limits and MinIO commit succeeds
-- **THEN** the system SHALL persist its size and SHA-256, mark the artifact available, release all concurrency tokens, and return `204`
+- **THEN** the system SHALL persist its size and SHA-256, mark the artifact available, release all concurrency tokens, and return `201`
 
 #### Scenario: Declared file is too large
 - **WHEN** Content-Length exceeds the configured LOG maximum
 - **THEN** the system SHALL return `413` before starting object storage and SHALL not create an available artifact
+
+#### Scenario: Declared multipart request is too large
+- **WHEN** multipart Content-Length exceeds the configured LOG maximum plus the bounded compatibility-envelope allowance
+- **THEN** the system SHALL return `413` before parsing multipart parts or starting object storage
 
 #### Scenario: Chunked file exceeds the limit
 - **WHEN** a body without a usable Content-Length exceeds the configured LOG maximum while streaming

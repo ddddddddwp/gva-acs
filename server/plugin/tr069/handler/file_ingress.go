@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"io"
 	"mime"
 	"net/http"
 	"path"
@@ -15,6 +16,10 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
 )
+
+const multipartEnvelopeAllowance int64 = 1 << 20
+
+var errMultipartFileRequired = errors.New("multipart file field is required")
 
 type FileRequestAuthenticator interface {
 	Authenticate(*http.Request) (string, []string, error)
@@ -50,6 +55,10 @@ func NewFileIngressHandler(auth FileRequestAuthenticator, resolver UploadDeviceR
 			c.Status(http.StatusMethodNotAllowed)
 			return
 		}
+		if !supportedFileIngressSuffix(c.Request.Method, c.Param("filename")) {
+			c.Status(http.StatusNotFound)
+			return
+		}
 		channelName, challenges, err := auth.Authenticate(c.Request)
 		if err != nil {
 			for _, challenge := range challenges {
@@ -67,7 +76,12 @@ func NewFileIngressHandler(auth FileRequestAuthenticator, resolver UploadDeviceR
 			c.Status(http.StatusForbidden)
 			return
 		}
-		if c.Request.ContentLength > channel.MaxFileSize {
+		multipartUpload := isMultipartUpload(c.Request)
+		requestSizeLimit := channel.MaxFileSize
+		if multipartUpload {
+			requestSizeLimit += multipartEnvelopeAllowance
+		}
+		if c.Request.ContentLength > requestSizeLimit {
 			c.Status(http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -81,10 +95,19 @@ func NewFileIngressHandler(auth FileRequestAuthenticator, resolver UploadDeviceR
 			}
 			return
 		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, channel.MaxFileSize+1)
+		body, contentLength, originalName, contentType, err := ingressArtifactBody(c, channel.MaxFileSize, multipartUpload)
+		if err != nil {
+			var maxBytesError *http.MaxBytesError
+			if errors.As(err, &maxBytesError) {
+				c.Status(http.StatusRequestEntityTooLarge)
+			} else {
+				c.Status(http.StatusBadRequest)
+			}
+			return
+		}
 		_, err = receiver.Receive(c.Request.Context(), service.ReceiveRequest{
-			Device: device, Channel: channel.Name, Body: c.Request.Body, ContentLength: c.Request.ContentLength,
-			OriginalName: originalFilename(c.Request.Header.Get("Content-Disposition")), ContentType: c.Request.Header.Get("Content-Type"), SourceIP: sourceIP,
+			Device: device, Channel: channel.Name, Body: body, ContentLength: contentLength,
+			OriginalName: originalName, ContentType: contentType, SourceIP: sourceIP,
 			Driver: channel.Driver, StoragePrefix: channel.StoragePrefix, MaxFileSize: channel.MaxFileSize,
 			UploadTimeout: channel.UploadTimeout, RetentionDays: channel.RetentionDays,
 			MaxConcurrent: channel.MaxConcurrent, MaxConcurrentPerDevice: channel.MaxConcurrentPerDevice,
@@ -106,8 +129,59 @@ func NewFileIngressHandler(auth FileRequestAuthenticator, resolver UploadDeviceR
 			}
 			return
 		}
-		c.Status(http.StatusNoContent)
+		c.Status(http.StatusCreated)
 	}
+}
+
+func isMultipartUpload(request *http.Request) bool {
+	if request == nil || request.Method != http.MethodPost {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	return err == nil && strings.EqualFold(mediaType, "multipart/form-data")
+}
+
+func supportedFileIngressSuffix(method, value string) bool {
+	suffix := strings.TrimPrefix(value, "/")
+	if suffix == "" {
+		return true
+	}
+	return method == http.MethodPut && !strings.Contains(suffix, "/")
+}
+
+func ingressArtifactBody(c *gin.Context, maxFileSize int64, multipartUpload bool) (io.Reader, int64, string, string, error) {
+	if !multipartUpload {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxFileSize+1)
+		originalName := originalFilename(c.Request.Header.Get("Content-Disposition"))
+		if originalName == "" {
+			originalName = routeFilename(c.Param("filename"))
+		}
+		return c.Request.Body, c.Request.ContentLength, originalName, c.Request.Header.Get("Content-Type"), nil
+	}
+
+	// Multipart is accepted only as a compatibility envelope for vendor CPEs.
+	// MultipartReader keeps processing streaming and avoids ParseMultipartForm,
+	// multipart.FileHeader, temporary files, and whole-body buffering.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxFileSize+multipartEnvelopeAllowance)
+	reader, err := c.Request.MultipartReader()
+	if err != nil {
+		return nil, 0, "", "", err
+	}
+	part, err := reader.NextPart()
+	if errors.Is(err, io.EOF) {
+		return nil, 0, "", "", errMultipartFileRequired
+	}
+	if err != nil {
+		return nil, 0, "", "", err
+	}
+	if part.FormName() != "file" || strings.TrimSpace(part.FileName()) == "" {
+		return nil, 0, "", "", errMultipartFileRequired
+	}
+	return part, -1, service.SanitizeArtifactOriginalName(part.FileName()), part.Header.Get("Content-Type"), nil
+}
+
+func routeFilename(value string) string {
+	return service.SanitizeArtifactOriginalName(strings.TrimPrefix(value, "/"))
 }
 
 func originalFilename(contentDisposition string) string {

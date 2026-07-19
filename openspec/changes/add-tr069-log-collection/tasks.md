@@ -31,12 +31,14 @@
 
 ## 5. LOG File Ingress Pipeline
 
-- [x] 5.1 Add failing route/service tests proving both `PUT /acs/log` and `POST /acs/log` accept raw file bodies and bypass RawDump/XML/multipart parsing, disabled PUT/POST `/acs/pm` and `/acs/mr` do not invoke LOG handling, and other methods return `405` with the correct Allow header
+- [x] 5.1 Add failing route/service tests proving both `PUT /acs/log` and `POST /acs/log` accept raw file bodies and bypass RawDump/XML parsing, disabled PUT/POST `/acs/pm` and `/acs/mr` do not invoke LOG handling, and other methods return `405` with the correct Allow header
 - [x] 5.2 Implement the channel registry and mount PUT/POST for every enabled file route on the existing 7458 server with one shared route-specific middleware and handler chain
 - [x] 5.3 Implement global/channel/per-device admission control with `503` plus `Retry-After` and guaranteed token release
-- [x] 5.4 Implement receive metadata creation, fixed-buffer streaming, Content-Length early rejection, streaming size enforcement, SHA-256 calculation, upload timeout, cancellation Abort, and `204` success
+- [x] 5.4 Implement receive metadata creation, fixed-buffer streaming, Content-Length early rejection, streaming size enforcement, SHA-256 calculation, upload timeout, cancellation Abort, and successful completion response
 - [x] 5.5 Implement duplicate same-content idempotency, different-content conflict rejection, and secret/file-body-free structured events
 - [x] 5.6 Verify all authentication and identity failures occur before object creation and that no rejected request creates an available artifact
+- [x] 5.7 Add real-BS regression tests for PUT filename suffixes, trailing-slash POST multipart streaming, base-path authentication matching, no redirect, non-draining busy rejection, and `201` success
+- [x] 5.8 Implement real-BS route, authentication, filename, multipart-streaming, and response-code compatibility without changing the CWMP `/acs` pipeline
 
 ## 6. Active Upload and Transfer State Machine
 
@@ -59,6 +61,7 @@
 - [x] 8.2 Implement artifact list DTO/service/API with device identity metadata and exact `deviceId` filtering
 - [ ] 8.3 Implement protected backend-streamed download with safe Content-Disposition, context cancellation, device data permission revalidation, and GVA operation audit
 - [x] 8.4 Register list/download APIs and Casbin permissions in the TR-069 plugin initializer
+- [x] 8.5 Replace artifact UUIDs with auto-increment file IDs across models, events, receive lifecycle, reconciliation, object keys, download audit, and protected download lookup
 
 ## 9. GVA Log Files Page
 
@@ -67,6 +70,7 @@
 - [x] 9.3 Build the GVA-styled page with device ID search, reset, pagination, receive time, device identity, filename, size, checksum, source, status, and conditional download action
 - [ ] 9.4 Add component tests for device ID filtering, pagination, unavailable download disabling, permission behavior, and light/dark theme token usage
 - [x] 9.5 Regenerate or update frontend route component metadata using the repository's supported generator and verify production build resolution
+- [x] 9.6 Simplify the log-file list to file ID, SerialNumber, filename, source, human-readable size, receive time, and download; use an alphanumeric exact SerialNumber filter and remove status/SHA-256/OUI/database-device-ID UI
 
 ## 10. Integration, Security, and Operations
 
@@ -76,3 +80,4 @@
 - [ ] 10.4 Test a real BS periodic upload after the user configures `Device.LogMgmt.*`, then test active Upload/TransferComplete without executing unrelated dangerous RPCs
 - [ ] 10.5 Run race/static checks and verify a 64 MiB bounded upload does not create whole-file allocations or file-body log entries
 - [x] 10.6 Document the shared-credential/NAT limitation, HTTPS production requirement, failure codes, state recovery, retention, credential rotation, and Ceph/S3 migration procedure
+- [x] 10.7 Reset development transfer metadata and MinIO LOG objects, restart GVA, and verify a real BS upload receives an auto-increment file ID and remains downloadable by exact SerialNumber

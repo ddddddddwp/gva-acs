@@ -36,13 +36,13 @@ func makeLifecycleArtifactAvailable(t *testing.T, store *TransferStore, task mod
 		t.Fatalf("find waiting active task: %v", err)
 	}
 	transitioned, artifact, err := store.CreateActiveReceiving(context.Background(), current, ReceiveMetadata{
-		ArtifactID: "lifecycle-artifact-" + suffix, ObjectKey: "artifacts/log/" + suffix, Driver: "memory", CreatedAt: at,
+		StoragePrefix: "artifacts", Driver: "memory", CreatedAt: at,
 	})
 	if err != nil {
 		t.Fatalf("create active receiving artifact: %v", err)
 	}
 	_ = transitioned
-	available, err := store.MarkArtifactAvailable(context.Background(), artifact.ArtifactID, artifact.Version, ArtifactFinalization{Size: 10, SHA256: "sha-" + suffix, ReceivedAt: at})
+	available, err := store.MarkArtifactAvailable(context.Background(), artifact.ID, artifact.Version, ArtifactFinalization{Size: 10, SHA256: "sha-" + suffix, ReceivedAt: at})
 	if err != nil {
 		t.Fatalf("mark artifact available: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestTransferLifecycleStatusZeroCompletesOnlyAfterFile(t *testing.T) {
 		t.Fatalf("status before file=%s", waiting.Status)
 	}
 	artifact := makeLifecycleArtifactAvailable(t, store, waiting, "status-zero", at.Add(time.Second))
-	if err := lifecycle.OnArtifactAvailable(context.Background(), task.TaskID, artifact.ArtifactID, at.Add(time.Second)); err != nil {
+	if err := lifecycle.OnArtifactAvailable(context.Background(), task.TaskID, artifact.ID, at.Add(time.Second)); err != nil {
 		t.Fatalf("artifact available: %v", err)
 	}
 	var completed model.TransferTask
@@ -94,7 +94,7 @@ func TestTransferLifecycleStatusOneAcceptsTransferCompleteBeforeFile(t *testing.
 		t.Fatalf("task before file=%#v", beforeFile)
 	}
 	artifact := makeLifecycleArtifactAvailable(t, store, beforeFile, "status-one", at.Add(2*time.Second))
-	if err := lifecycle.OnArtifactAvailable(context.Background(), task.TaskID, artifact.ArtifactID, at.Add(2*time.Second)); err != nil {
+	if err := lifecycle.OnArtifactAvailable(context.Background(), task.TaskID, artifact.ID, at.Add(2*time.Second)); err != nil {
 		t.Fatalf("artifact available: %v", err)
 	}
 	var completed model.TransferTask
@@ -115,7 +115,7 @@ func TestTransferLifecycleFaultRetainsAvailableArtifactAndIsIdempotent(t *testin
 	var waiting model.TransferTask
 	db.First(&waiting, "task_id = ?", task.TaskID)
 	artifact := makeLifecycleArtifactAvailable(t, store, waiting, "fault", at.Add(time.Second))
-	if err := lifecycle.OnArtifactAvailable(context.Background(), task.TaskID, artifact.ArtifactID, at.Add(time.Second)); err != nil {
+	if err := lifecycle.OnArtifactAvailable(context.Background(), task.TaskID, artifact.ID, at.Add(time.Second)); err != nil {
 		t.Fatalf("artifact available: %v", err)
 	}
 	if err := lifecycle.OnTransferComplete(context.Background(), *task.CommandKey, 9010, "download failure", at.Add(3*time.Second)); err != nil {
@@ -127,7 +127,7 @@ func TestTransferLifecycleFaultRetainsAvailableArtifactAndIsIdempotent(t *testin
 		t.Fatalf("failed task=%#v", failed)
 	}
 	var retained model.Artifact
-	db.First(&retained, "artifact_id = ?", artifact.ArtifactID)
+	db.First(&retained, "id = ?", artifact.ID)
 	if retained.Status != model.ArtifactStatusAvailable {
 		t.Fatalf("artifact status=%s", retained.Status)
 	}

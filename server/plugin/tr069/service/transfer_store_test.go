@@ -34,13 +34,12 @@ func newTransferStoreTest(t *testing.T) (*TransferStore, *gorm.DB, model.Device)
 func TestTransferStoreCreatesPeriodicReceiveAtomically(t *testing.T) {
 	store, db, device := newTransferStoreTest(t)
 	task, artifact, err := store.CreatePeriodicReceiving(context.Background(), device.ID, "LOG", ReceiveMetadata{
-		TaskID:     "periodic-task-1",
-		ArtifactID: "artifact-1",
-		ObjectKey:  "artifacts/log/1/2026/07/19/artifact-1",
-		Driver:     "minio",
-		SourceIP:   "192.0.2.10",
+		TaskID:        "periodic-task-1",
+		StoragePrefix: "artifacts",
+		Driver:        "minio",
+		SourceIP:      "192.0.2.10",
 	})
-	if err != nil || task.Source != model.TransferSourcePeriodic || artifact.Status != model.ArtifactStatusReceiving {
+	if err != nil || task.Source != model.TransferSourcePeriodic || artifact.Status != model.ArtifactStatusReceiving || artifact.ID == 0 {
 		t.Fatalf("task=%#v artifact=%#v err=%v", task, artifact, err)
 	}
 	var events int64
@@ -86,7 +85,7 @@ func TestTransferStoreEnforcesOneActiveTaskPerCommand(t *testing.T) {
 
 func TestTransferStoreTransitionUsesStatusAndVersion(t *testing.T) {
 	store, _, device := newTransferStoreTest(t)
-	task, _, err := store.CreatePeriodicReceiving(context.Background(), device.ID, "LOG", ReceiveMetadata{TaskID: "transition-task", ArtifactID: "transition-artifact", ObjectKey: "log/transition", Driver: "minio"})
+	task, _, err := store.CreatePeriodicReceiving(context.Background(), device.ID, "LOG", ReceiveMetadata{TaskID: "transition-task", StoragePrefix: "artifacts", Driver: "minio"})
 	if err != nil {
 		t.Fatalf("create receiving task: %v", err)
 	}
@@ -106,7 +105,7 @@ func TestTransferStoreTransitionUsesStatusAndVersion(t *testing.T) {
 	}
 }
 
-func TestTransferStoreListsArtifactsByExactDeviceIDAndHidesObjectKey(t *testing.T) {
+func TestTransferStoreListsAvailableArtifactsByExactSerialNumberAndHidesInternalFields(t *testing.T) {
 	store, db, first := newTransferStoreTest(t)
 	second := model.Device{SerialNumber: "BS-SECOND", OUI: "001122", LastInform: time.Now().UTC()}
 	if err := db.Create(&second).Error; err != nil {
@@ -114,25 +113,26 @@ func TestTransferStoreListsArtifactsByExactDeviceIDAndHidesObjectKey(t *testing.
 	}
 	for index, device := range []model.Device{first, second, first} {
 		taskID := fmt.Sprintf("list-task-%d", index)
-		artifactID := fmt.Sprintf("list-artifact-%d", index)
-		_, artifact, err := store.CreatePeriodicReceiving(context.Background(), device.ID, "LOG", ReceiveMetadata{TaskID: taskID, ArtifactID: artifactID, ObjectKey: "secret/" + artifactID, Driver: "minio"})
+		_, artifact, err := store.CreatePeriodicReceiving(context.Background(), device.ID, "LOG", ReceiveMetadata{TaskID: taskID, StoragePrefix: "artifacts", Driver: "minio"})
 		if err != nil {
 			t.Fatalf("create artifact %d: %v", index, err)
 		}
-		if _, err := store.MarkArtifactAvailable(context.Background(), artifact.ArtifactID, artifact.Version, ArtifactFinalization{Size: int64(index + 1), SHA256: fmt.Sprintf("sha-%d", index), ReceivedAt: time.Now().UTC()}); err != nil {
+		if _, err := store.MarkArtifactAvailable(context.Background(), artifact.ID, artifact.Version, ArtifactFinalization{Size: int64(index + 1), SHA256: fmt.Sprintf("sha-%d", index), ReceivedAt: time.Now().UTC()}); err != nil {
 			t.Fatalf("finalize artifact %d: %v", index, err)
 		}
 	}
 
-	items, total, err := store.ListArtifacts(context.Background(), ArtifactListFilter{DeviceID: first.ID, Limit: 1, Offset: 1})
-	if err != nil || total != 2 || len(items) != 1 || items[0].DeviceID != first.ID || items[0].SerialNumber != first.SerialNumber {
+	items, total, err := store.ListArtifacts(context.Background(), ArtifactListFilter{SerialNumber: first.SerialNumber, Limit: 1, Offset: 1})
+	if err != nil || total != 2 || len(items) != 1 || items[0].FileID == 0 || items[0].SerialNumber != first.SerialNumber {
 		t.Fatalf("items=%#v total=%d err=%v", items, total, err)
 	}
 	raw, err := json.Marshal(items[0])
 	if err != nil {
 		t.Fatalf("marshal artifact: %v", err)
 	}
-	if strings.Contains(string(raw), "objectKey") || strings.Contains(string(raw), "secret/") || strings.Contains(string(raw), "password") {
-		t.Fatalf("private storage data leaked in JSON: %s", raw)
+	for _, hidden := range []string{"objectKey", "password", "deviceId", "oui", "status", "sha256", "artifactId"} {
+		if strings.Contains(string(raw), hidden) {
+			t.Fatalf("internal field %q leaked in JSON: %s", hidden, raw)
+		}
 	}
 }

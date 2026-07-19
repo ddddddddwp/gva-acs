@@ -255,7 +255,7 @@ func (RuntimeFileCredentialProvider) CredentialForRequest(request *http.Request)
 	}
 	runtime := config.CurrentRuntime()
 	for name, channel := range runtime.Settings.FileIngress.Channels {
-		if channel.Enabled && channel.Path == request.URL.Path {
+		if channel.Enabled && fileIngressPathMatches(request, channel.Path) {
 			return FileCredential{
 				Channel: strings.ToUpper(name), Username: runtime.Settings.FileIngress.Authentication.Username,
 				Password: runtime.Settings.FileIngress.Authentication.Password, Realm: runtime.Settings.FileIngress.Authentication.Realm,
@@ -264,4 +264,17 @@ func (RuntimeFileCredentialProvider) CredentialForRequest(request *http.Request)
 		}
 	}
 	return FileCredential{}, ErrFileAuthConfiguration
+}
+
+func fileIngressPathMatches(request *http.Request, channelPath string) bool {
+	basePath := strings.TrimRight(channelPath, "/")
+	requestPath := request.URL.Path
+	if requestPath == basePath || requestPath == basePath+"/" {
+		return true
+	}
+	if request.Method != http.MethodPut || !strings.HasPrefix(requestPath, basePath+"/") {
+		return false
+	}
+	suffix := strings.TrimPrefix(requestPath, basePath+"/")
+	return suffix != "" && !strings.Contains(suffix, "/")
 }

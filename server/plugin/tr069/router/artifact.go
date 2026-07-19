@@ -18,5 +18,5 @@ func NewArtifactRouter(transfers *service.TransferStore, objects service.Artifac
 func (r *ArtifactRouter) InitArtifactRouter(parent *gin.RouterGroup) {
 	artifacts := parent.Group("artifact")
 	artifacts.GET("list", r.api.List)
-	artifacts.GET(":artifactId/download", tr069Middleware.DownloadAudit(), r.api.Download)
+	artifacts.GET(":fileId/download", tr069Middleware.DownloadAudit(), r.api.Download)
 }

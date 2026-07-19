@@ -15,7 +15,7 @@ TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Pa
 - 只接受能够唯一映射到已注册设备的上传，不使用用户名作为设备身份。
 - 支持主动 Upload 与设备周期上传，保留任务、事件、文件和失败原因。
 - 以固定内存流式写入 MinIO，校验大小和 SHA-256，并可恢复跨 MySQL/对象存储的不一致状态。
-- 在 TR-069 菜单增加“日志文件”，支持按设备 ID 查询和受权限保护的下载。
+- 在 TR-069 菜单增加“日志文件”，使用自增文件 ID，支持按设备序列号精确查询和受权限保护的下载。
 - 通过存储接口和通道注册机制为以后 S3/Ceph、PM/MR 文件类型保留扩展点。
 
 **Non-Goals:**
@@ -36,11 +36,11 @@ TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Pa
 | 方法与路由 | 用途 | 中间件链 |
 | --- | --- | --- |
 | `POST /acs` | Inform、RPC Response、TransferComplete | CWMP RawDump、XML 解析、CWMP Handler |
-| `PUT/POST /acs/log` | 压缩日志上传 | 文件认证、设备解析、并发限制、流式接收 |
+| `PUT/POST /acs/log[/*filename]` | 压缩日志上传 | 文件认证、设备解析、并发限制、流式接收 |
 | `PUT/POST /acs/pm` | 预留 | 默认未注册/禁用 |
 | `PUT/POST /acs/mr` | 预留 | 默认未注册/禁用 |
 
-文件通道固定允许 PUT 和 POST，二者共享同一 handler，并把请求体直接视为文件字节流；POST 不启用 multipart/form-data 解析。其他方法返回 `405 Method Not Allowed` 并通过 `Allow: PUT, POST` 声明支持范围。文件路由绝不经过 RawDump、XML 解析或 `io.ReadAll`。选择同端口可简化 BS、防火墙和部署配置；路由隔离仍可让 SOAP 与文件流量使用不同限制。替代方案是独立文件端口，但会增加设备配置和网络暴露，并不能消除存储和认证复杂度。
+文件通道固定允许 PUT 和 POST，二者共享同一 handler。标准 raw PUT/POST 直接把请求体视为文件字节流；为兼容当前 BS 厂商脚本，还接受尾斜杠、`PUT /acs/log/<filename>` 和 `POST /acs/log/` 的 multipart `file` 字段。multipart 要求第一个 part 就是 `file`，使用 `MultipartReader` 只流式读取该 part，不调用 `ParseMultipartForm`、不产生 `multipart.FileHeader`、临时文件或整包缓冲；此前放置其他字段会立即拒绝，避免在并发准入前排空大字段。其他方法返回 `405 Method Not Allowed` 并通过 `Allow: PUT, POST` 声明支持范围。文件名后缀只允许 PUT 使用单个路径段。文件路由绝不经过 RawDump、XML 解析或 `io.ReadAll`。选择同端口可简化 BS、防火墙和部署配置；路由隔离仍可让 SOAP 与文件流量使用不同限制。替代方案是独立文件端口，但会增加设备配置和网络暴露，并不能消除存储和认证复杂度。
 
 ### 2. 通道配置和启动校验
 
@@ -127,14 +127,15 @@ tr069:file-ingress:ip:<normalized-ip>
 
 ### 6. 流式接收和资源保护
 
-接收顺序为：认证、设备解析、获取全局/通道/设备并发令牌、创建 `RECEIVING` 记录、开始对象写入、限长复制并同步计算 SHA-256、提交对象、条件更新数据库为 `AVAILABLE`、更新任务、返回 `204 No Content`。
+接收顺序为：认证、设备解析、解析有限的 multipart 头（若有）、获取全局/通道/设备并发令牌、创建 `RECEIVING` 记录、开始对象写入、限长复制并同步计算 SHA-256、提交对象、条件更新数据库为 `AVAILABLE`、更新任务、返回 `201 Created`。使用 201 是为了兼容当前 BS 上传脚本只把 HTTP 200/201 视为成功的行为。
 
 - 请求 `Content-Length` 已超过限制时立即返回 `413`；未知长度使用 `MaxBytesReader`/限长 reader 在流中强制上限。
+- multipart 总请求允许固定 1 MiB 协议封装余量，声明长度超过“文件上限 + 1 MiB”时在读取 part 前返回 `413`。
 - 使用固定大小缓冲池，文件内容不进入 Zap、RawDump、Trace 或数据库。
 - 全局或设备并发已满返回 `503` 和 `Retry-After`。
 - 请求上下文取消、上传超时、大小超限或客户端断开都会 Abort multipart upload 并把制品标记为失败。
 - 同一任务通过 PUT、POST 或两种方法交叉重复上传相同 SHA-256 和大小时返回幂等成功；内容不同则新增冲突事件并拒绝覆盖。
-- 日志只记录 deviceId、taskId、artifactId、大小、SHA-256、耗时、来源 IP 摘要和失败阶段。
+- 日志只记录 deviceId、taskId、数值 fileId、大小、SHA-256、耗时、来源 IP 摘要和失败阶段。
 
 ### 7. 独立制品存储接口和一致性
 
@@ -150,7 +151,7 @@ ArtifactStore.Stat(ctx, objectKey)
 ArtifactStore.Delete(ctx, objectKey)
 ```
 
-第一阶段生产驱动为 MinIO/S3 兼容实现，测试提供内存或临时目录实现。Ceph RGW 可通过相同 S3 驱动接入；若未来使用原生 Ceph，只新增 Store 实现。对象键由服务端生成：`<prefix>/log/<device-id>/<YYYY>/<MM>/<DD>/<artifact-id>`，原始文件名只作为经过清洗的元数据保存。
+第一阶段生产驱动为 MinIO/S3 兼容实现，测试提供内存或临时目录实现。Ceph RGW 可通过相同 S3 驱动接入；若未来使用原生 Ceph，只新增 Store 实现。文件元数据先在事务中插入，MySQL 分配自增 `fileId` 后，服务端在同一事务内生成对象键：`<prefix>/log/<device-id>/<YYYY>/<MM>/<DD>/<file-id>`。原始文件名只作为经过清洗的元数据保存，文件不再生成独立 artifact UUID。
 
 MySQL 和对象存储无法形成单事务，数据库使用以下状态处理一致性：
 
@@ -166,8 +167,8 @@ MySQL 和对象存储无法形成单事务，数据库使用以下状态处理�
 新增三张独立表：
 
 - `tr069_transfer_tasks`：UUID、device_id、channel、source、关联 command_id/command_key、状态、UploadResponse 状态、TransferComplete 状态、错误码、时间戳。
-- `tr069_artifacts`：UUID、task_id、device_id、channel、状态、storage_driver、object_key、原始文件名、content_type、size、sha256、source_ip、received_at、删除时间。
-- `tr069_transfer_events`：task_id、artifact_id、事件码、阶段、前后状态、非敏感消息和结构化元数据、时间戳。
+- `tr069_artifacts`：自增 `id` 主键、task_id、device_id、channel、状态、storage_driver、object_key、原始文件名、content_type、size、sha256、source_ip、received_at、删除时间；不保留文件 UUID。
+- `tr069_transfer_events`：task_id、数值 `file_id`、事件码、阶段、前后状态、非敏感消息和结构化元数据、时间戳。
 
 `device_id + received_at`、`task_id`、`state + updated_at`、`sha256` 建立必要索引。共享认证来自配置文件，因此不创建 `tr069_upload_credentials`；GVA 不管理 `Device.LogMgmt.*`，因此不创建日志策略表。
 
@@ -178,11 +179,11 @@ TR-069 一级菜单下新增“日志文件”，路由 `logFiles`，组件 `plu
 首版查询接口：
 
 ```text
-GET /tr069/artifact/list?page=1&pageSize=10&deviceId=<id>
-GET /tr069/artifact/:artifactId/download
+GET /tr069/artifact/list?page=1&pageSize=10&serialNumber=<完整设备序列号>
+GET /tr069/artifact/:fileId/download
 ```
 
-列表支持分页和设备 ID 精确过滤，返回接收时间、设备 ID、SerialNumber/OUI、原始文件名、大小、SHA-256、来源、状态和可下载标识。后端始终再次校验 JWT、Casbin、设备数据权限和 `AVAILABLE` 状态，不能依赖前端隐藏按钮。下载由 GVA 后端从 Store 流式转发并写入操作审计；第一阶段不直接向前端暴露 MinIO 预签名地址。
+列表支持分页和完整 SerialNumber 等值过滤，且固定只返回 `AVAILABLE` 的 LOG 文件。返回字段仅包含自增 `fileId`、SerialNumber、原始文件名、大小、来源和接收时间；状态、SHA-256、OUI、数据库设备 ID、对象键和驱动不向列表暴露。后端始终再次校验 JWT、Casbin、设备数据权限和 `AVAILABLE` 状态。下载以数值 `fileId` 定位，由 GVA 后端从 Store 流式转发并写入操作审计。
 
 ### 10. 状态与事实来源
 
@@ -200,8 +201,8 @@ MySQL 是任务、事件和制品元数据的事实来源。Redis 只保存有 T
 
 ## Migration Plan
 
-1. 停止 TR-069 插件文件入口，部署数据库模型、MinIO bucket/凭据和配置校验。
-2. 运行 AutoMigrate 创建三张新表，初始化日志菜单、API 与 Casbin 权限。
+1. 停止 TR-069 插件文件入口和 BS 上传，清空开发环境 `tr069_transfer_events`、`tr069_artifacts`、`tr069_transfer_tasks` 以及 MinIO 日志对象。
+2. 部署最终数据库模型并运行 AutoMigrate，以自增文件 ID 重新创建三张表，初始化日志菜单、API 与 Casbin 权限。
 3. 启动后端，先验证 `/acs` CWMP 回归，再用测试客户端验证 Basic/Digest、限长和 MinIO。
 4. 在单台 BS 上由用户配置 `Device.LogMgmt.URL/Username/Password`，验证 Inform 后周期上传和按设备 ID 查询下载。
 5. 分别验证主动 Upload、UploadResponse、文件 PUT/POST 和 TransferComplete 的乱序组合。

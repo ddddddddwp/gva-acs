@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,10 +43,13 @@ type recordingTransferReceiver struct {
 
 func (r *recordingTransferReceiver) Receive(_ context.Context, request service.ReceiveRequest) (model.Artifact, error) {
 	r.request = request
+	if r.err != nil {
+		return model.Artifact{}, r.err
+	}
 	if request.Body != nil {
 		r.payload, _ = io.ReadAll(request.Body)
 	}
-	return model.Artifact{ArtifactID: "artifact-1"}, r.err
+	return model.Artifact{ID: 1}, nil
 }
 
 type staticFileIngressChannelProvider struct {
@@ -60,11 +64,14 @@ func (p staticFileIngressChannelProvider) Channel(string) (FileIngressChannel, b
 type countingRequestBody struct {
 	reader io.Reader
 	reads  int
+	bytes  int
 }
 
 func (b *countingRequestBody) Read(data []byte) (int, error) {
 	b.reads++
-	return b.reader.Read(data)
+	n, err := b.reader.Read(data)
+	b.bytes += n
+	return n, err
 }
 
 func (b *countingRequestBody) Close() error { return nil }
@@ -76,7 +83,9 @@ func newFileIngressTestEngine(auth FileRequestAuthenticator, resolver UploadDevi
 		Name: "LOG", MaxFileSize: 1024, MaxConcurrent: 4, MaxConcurrentPerDevice: 1,
 		UploadTimeout: time.Minute, RetentionDays: 30, StoragePrefix: "artifacts", Driver: "memory",
 	}
-	engine.Any("/acs/log", NewFileIngressHandler(auth, resolver, receiver, staticFileIngressChannelProvider{channel: channel, ok: true}))
+	handler := NewFileIngressHandler(auth, resolver, receiver, staticFileIngressChannelProvider{channel: channel, ok: true})
+	engine.Any("/acs/log", handler)
+	engine.Any("/acs/log/*filename", handler)
 	return engine
 }
 
@@ -93,8 +102,165 @@ func TestFileIngressPutAndPostUseSameRawBodyPipeline(t *testing.T) {
 			request.RemoteAddr = "192.0.2.10:1234"
 			response := httptest.NewRecorder()
 			engine.ServeHTTP(response, request)
-			if response.Code != http.StatusNoContent || string(receiver.payload) != "raw-log-archive" || receiver.request.Channel != "LOG" {
+			if response.Code != http.StatusCreated || string(receiver.payload) != "raw-log-archive" || receiver.request.Channel != "LOG" {
 				t.Fatalf("status=%d payload=%q request=%#v", response.Code, receiver.payload, receiver.request)
+			}
+		})
+	}
+}
+
+func TestFileIngressAcceptsVendorPutFilenameSuffix(t *testing.T) {
+	receiver := new(recordingTransferReceiver)
+	engine := newFileIngressTestEngine(
+		fakeFileRequestAuthenticator{channel: "LOG"},
+		fakeUploadDeviceResolver{device: service.UploadDeviceIdentity{DeviceID: 1, SerialNumber: "BS-1", OUI: "8CE468"}},
+		receiver,
+	)
+	request := httptest.NewRequest(http.MethodPut, "/acs/log/Log_20260719.tar.gz", bytes.NewReader([]byte("vendor-put-log")))
+	request.RemoteAddr = "192.0.2.10:1234"
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+	if string(receiver.payload) != "vendor-put-log" || receiver.request.OriginalName != "Log_20260719.tar.gz" {
+		t.Fatalf("payload=%q originalName=%q", receiver.payload, receiver.request.OriginalName)
+	}
+}
+
+func TestFileIngressStreamsVendorMultipartPost(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "Log_20260719.tar.gz")
+	if err != nil {
+		t.Fatalf("create multipart file: %v", err)
+	}
+	if _, err := part.Write([]byte("vendor-post-log")); err != nil {
+		t.Fatalf("write multipart file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart body: %v", err)
+	}
+
+	receiver := new(recordingTransferReceiver)
+	engine := newFileIngressTestEngine(
+		fakeFileRequestAuthenticator{channel: "LOG"},
+		fakeUploadDeviceResolver{device: service.UploadDeviceIdentity{DeviceID: 1, SerialNumber: "BS-1", OUI: "8CE468"}},
+		receiver,
+	)
+	request := httptest.NewRequest(http.MethodPost, "/acs/log/", bytes.NewReader(body.Bytes()))
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.RemoteAddr = "192.0.2.10:1234"
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+	if string(receiver.payload) != "vendor-post-log" || receiver.request.OriginalName != "Log_20260719.tar.gz" {
+		t.Fatalf("payload=%q originalName=%q", receiver.payload, receiver.request.OriginalName)
+	}
+}
+
+func TestFileIngressMultipartBusyDoesNotDrainFileBody(t *testing.T) {
+	const boundary = "gva-tr069-boundary"
+	prefix := "--" + boundary + "\r\n" +
+		`Content-Disposition: form-data; name="file"; filename="large.tar.gz"` + "\r\n" +
+		"Content-Type: application/gzip\r\n\r\n"
+	bodyBytes := []byte(prefix + string(bytes.Repeat([]byte("x"), 128<<10)) + "\r\n--" + boundary + "--\r\n")
+	body := &countingRequestBody{reader: bytes.NewReader(bodyBytes)}
+	receiver := &recordingTransferReceiver{err: service.ErrTransferBusy}
+	engine := newFileIngressTestEngine(
+		fakeFileRequestAuthenticator{channel: "LOG"},
+		fakeUploadDeviceResolver{device: service.UploadDeviceIdentity{DeviceID: 1, SerialNumber: "BS-1", OUI: "8CE468"}},
+		receiver,
+	)
+	request := httptest.NewRequest(http.MethodPost, "/acs/log/", nil)
+	request.Body = body
+	request.ContentLength = -1
+	request.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	request.RemoteAddr = "192.0.2.10:1234"
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d", response.Code)
+	}
+	if body.bytes >= len(bodyBytes)/2 {
+		t.Fatalf("busy upload drained %d of %d bytes", body.bytes, len(bodyBytes))
+	}
+}
+
+func TestFileIngressRejectsMultipartFieldsBeforeFileWithoutDraining(t *testing.T) {
+	const boundary = "gva-tr069-boundary"
+	bodyBytes := []byte("--" + boundary + "\r\n" +
+		`Content-Disposition: form-data; name="metadata"` + "\r\n\r\n" +
+		string(bytes.Repeat([]byte("x"), 128<<10)) + "\r\n" +
+		"--" + boundary + "\r\n" +
+		`Content-Disposition: form-data; name="file"; filename="log.tar.gz"` + "\r\n\r\nlog\r\n" +
+		"--" + boundary + "--\r\n")
+	body := &countingRequestBody{reader: bytes.NewReader(bodyBytes)}
+	engine := newFileIngressTestEngine(
+		fakeFileRequestAuthenticator{channel: "LOG"},
+		fakeUploadDeviceResolver{device: service.UploadDeviceIdentity{DeviceID: 1, SerialNumber: "BS-1", OUI: "8CE468"}},
+		new(recordingTransferReceiver),
+	)
+	request := httptest.NewRequest(http.MethodPost, "/acs/log/", nil)
+	request.Body = body
+	request.ContentLength = -1
+	request.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	request.RemoteAddr = "192.0.2.10:1234"
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d", response.Code)
+	}
+	if body.bytes >= len(bodyBytes)/2 {
+		t.Fatalf("invalid multipart drained %d of %d bytes", body.bytes, len(bodyBytes))
+	}
+}
+
+func TestFileIngressRejectsDeclaredOversizeMultipartBeforeReading(t *testing.T) {
+	body := &countingRequestBody{reader: bytes.NewReader([]byte("must-not-be-read"))}
+	engine := newFileIngressTestEngine(
+		fakeFileRequestAuthenticator{channel: "LOG"},
+		fakeUploadDeviceResolver{device: service.UploadDeviceIdentity{DeviceID: 1, SerialNumber: "BS-1", OUI: "8CE468"}},
+		new(recordingTransferReceiver),
+	)
+	request := httptest.NewRequest(http.MethodPost, "/acs/log/", nil)
+	request.Body = body
+	request.ContentLength = 1024 + (1 << 20) + 1
+	request.Header.Set("Content-Type", "multipart/form-data; boundary=oversize")
+	request.RemoteAddr = "192.0.2.10:1234"
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusRequestEntityTooLarge || body.reads != 0 {
+		t.Fatalf("status=%d reads=%d", response.Code, body.reads)
+	}
+}
+
+func TestFileIngressRejectsUnsupportedVendorSuffixForms(t *testing.T) {
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/acs/log/log.tar.gz"},
+		{method: http.MethodPut, path: "/acs/log/nested/log.tar.gz"},
+	} {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			engine := newFileIngressTestEngine(
+				fakeFileRequestAuthenticator{channel: "LOG"},
+				fakeUploadDeviceResolver{device: service.UploadDeviceIdentity{DeviceID: 1, SerialNumber: "BS-1", OUI: "8CE468"}},
+				new(recordingTransferReceiver),
+			)
+			request := httptest.NewRequest(test.method, test.path, bytes.NewReader([]byte("log")))
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, request)
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status=%d", response.Code)
 			}
 		})
 	}

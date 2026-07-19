@@ -6,8 +6,8 @@ export const getLogArtifactList = (params) => service({
   params
 })
 
-export const downloadLogArtifact = (artifactId) => service({
-  url: `/tr069/artifact/${encodeURIComponent(artifactId)}/download`,
+export const downloadLogArtifact = (fileId) => service({
+  url: `/tr069/artifact/${encodeURIComponent(fileId)}/download`,
   method: 'get',
   responseType: 'blob',
   donNotShowLoading: true

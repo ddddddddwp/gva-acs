@@ -7,27 +7,12 @@ export const formatBytes = (value) => {
   return `${Number(amount.toFixed(index === 0 ? 0 : 2))} ${units[index]}`
 }
 
-export const shortSHA256 = (value) => {
-  const digest = String(value || '')
-  if (!digest) return '-'
-  if (digest.length <= 13) return digest
-  return `${digest.slice(0, 8)}…${digest.slice(-4)}`
-}
-
 export const sourceView = (source) => ({
   ACTIVE: { label: '主动采集', type: 'primary' },
   PERIODIC: { label: '周期上传', type: 'success' }
 }[source] || { label: source || '未知', type: 'info' })
 
-export const statusView = (status) => ({
-  AVAILABLE: { label: '可下载', type: 'success' },
-  RECEIVING: { label: '接收中', type: 'primary' },
-  FAILED: { label: '接收失败', type: 'danger' },
-  DELETING: { label: '清理中', type: 'warning' },
-  DELETED: { label: '已清理', type: 'info' }
-}[status] || { label: status || '未知', type: 'info' })
-
-export const canDownload = row => row?.status === 'AVAILABLE'
+export const canDownload = row => Number.isSafeInteger(Number(row?.fileId)) && Number(row.fileId) > 0
 
 export const filenameFromDisposition = (disposition, fallback = 'artifact.bin') => {
   const value = String(disposition || '')

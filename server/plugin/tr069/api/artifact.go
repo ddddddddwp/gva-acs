@@ -65,8 +65,7 @@ func (a *ArtifactApi) List(c *gin.Context) {
 		return
 	}
 	items, total, err := a.transfers.ListArtifacts(c.Request.Context(), service.ArtifactListFilter{
-		DeviceID: in.DeviceID, Channel: strings.ToUpper(strings.TrimSpace(in.Channel)),
-		Status: strings.ToUpper(strings.TrimSpace(in.Status)), CreatedFrom: createdFrom, CreatedTo: createdTo,
+		SerialNumber: strings.TrimSpace(in.SerialNumber), CreatedFrom: createdFrom, CreatedTo: createdTo,
 		Offset: (in.Page - 1) * in.PageSize, Limit: in.PageSize,
 	})
 	if err != nil {
@@ -76,11 +75,8 @@ func (a *ArtifactApi) List(c *gin.Context) {
 	list := make([]artifactResponse.ArtifactSummary, 0, len(items))
 	for _, item := range items {
 		list = append(list, artifactResponse.ArtifactSummary{
-			ArtifactID: item.ArtifactID, TaskID: item.TaskID, DeviceID: item.DeviceID,
-			SerialNumber: item.SerialNumber, OUI: item.OUI, Channel: item.Channel,
-			Source: item.Source, Status: item.Status, OriginalName: item.OriginalName,
-			ContentType: item.ContentType, Size: item.Size, SHA256: item.SHA256,
-			ReceivedAt: item.ReceivedAt, CreatedAt: item.CreatedAt,
+			FileID: item.FileID, SerialNumber: item.SerialNumber, Source: item.Source,
+			OriginalName: item.OriginalName, Size: item.Size, ReceivedAt: item.ReceivedAt,
 		})
 	}
 	response.OkWithDetailed(response.PageResult{List: list, Total: total, Page: in.Page, PageSize: in.PageSize}, "获取成功", c)
@@ -88,12 +84,12 @@ func (a *ArtifactApi) List(c *gin.Context) {
 
 // Download streams an available artifact through the protected GVA API.
 func (a *ArtifactApi) Download(c *gin.Context) {
-	artifactID := strings.TrimSpace(c.Param("artifactId"))
-	if artifactID == "" || len(artifactID) > 64 || a == nil || a.transfers == nil {
+	fileID, err := strconv.ParseUint(strings.TrimSpace(c.Param("fileId")), 10, 64)
+	if err != nil || fileID == 0 || a == nil || a.transfers == nil {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	artifact, err := a.transfers.GetAvailableArtifact(c.Request.Context(), artifactID)
+	artifact, err := a.transfers.GetAvailableArtifact(c.Request.Context(), fileID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.Status(http.StatusNotFound)
@@ -103,8 +99,8 @@ func (a *ArtifactApi) Download(c *gin.Context) {
 		return
 	}
 	tr069Middleware.SetDownloadAuditMetadata(c, tr069Middleware.DownloadAuditMetadata{
-		ArtifactID: artifact.ArtifactID,
-		DeviceID:   artifact.DeviceID,
+		FileID:   artifact.ID,
+		DeviceID: artifact.DeviceID,
 	})
 	if a.objects == nil {
 		c.Status(http.StatusServiceUnavailable)
@@ -123,7 +119,7 @@ func (a *ArtifactApi) Download(c *gin.Context) {
 
 	filename := service.SanitizeArtifactOriginalName(artifact.OriginalName)
 	if filename == "" {
-		filename = artifact.ArtifactID + ".bin"
+		filename = strconv.FormatUint(artifact.ID, 10) + ".bin"
 	}
 	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
 	if disposition == "" {

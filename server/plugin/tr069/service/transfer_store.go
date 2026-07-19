@@ -21,15 +21,14 @@ var (
 )
 
 type ReceiveMetadata struct {
-	TaskID       string
-	ArtifactID   string
-	ObjectKey    string
-	Driver       string
-	OriginalName string
-	ContentType  string
-	SourceIP     string
-	DeleteAt     *time.Time
-	CreatedAt    time.Time
+	TaskID        string
+	StoragePrefix string
+	Driver        string
+	OriginalName  string
+	ContentType   string
+	SourceIP      string
+	DeleteAt      *time.Time
+	CreatedAt     time.Time
 }
 
 type ArtifactFinalization struct {
@@ -51,30 +50,20 @@ type TransferTransition struct {
 }
 
 type ArtifactListFilter struct {
-	DeviceID    uint
-	Channel     string
-	Status      string
-	CreatedFrom *time.Time
-	CreatedTo   *time.Time
-	Offset      int
-	Limit       int
+	SerialNumber string
+	CreatedFrom  *time.Time
+	CreatedTo    *time.Time
+	Offset       int
+	Limit        int
 }
 
 type ArtifactListItem struct {
-	ArtifactID   string     `json:"artifactId"`
-	TaskID       string     `json:"taskId"`
-	DeviceID     uint       `json:"deviceId"`
+	FileID       uint64     `json:"fileId"`
 	SerialNumber string     `json:"serialNumber"`
-	OUI          string     `json:"oui"`
-	Channel      string     `json:"channel"`
 	Source       string     `json:"source"`
-	Status       string     `json:"status"`
 	OriginalName string     `json:"originalName"`
-	ContentType  string     `json:"contentType"`
 	Size         int64      `json:"size"`
-	SHA256       string     `json:"sha256"`
 	ReceivedAt   *time.Time `json:"receivedAt"`
-	CreatedAt    time.Time  `json:"createdAt"`
 }
 
 type TransferStore struct {
@@ -160,16 +149,13 @@ func (s *TransferStore) CreatePeriodicReceiving(ctx context.Context, deviceID ui
 	if metadata.TaskID == "" {
 		metadata.TaskID = uuid.NewString()
 	}
-	if metadata.ArtifactID == "" {
-		metadata.ArtifactID = uuid.NewString()
-	}
 	task := model.TransferTask{
 		TaskID: metadata.TaskID, DeviceID: deviceID, Channel: channel,
 		Source: model.TransferSourcePeriodic, Status: model.TransferStatusReceiving, CreatedAt: now, UpdatedAt: now,
 	}
 	artifact := model.Artifact{
-		ArtifactID: metadata.ArtifactID, TaskID: task.TaskID, DeviceID: deviceID, Channel: channel,
-		Status: model.ArtifactStatusReceiving, Driver: metadata.Driver, ObjectKey: metadata.ObjectKey,
+		TaskID: task.TaskID, DeviceID: deviceID, Channel: channel,
+		Status: model.ArtifactStatusReceiving, Driver: metadata.Driver, ObjectKey: "pending/" + task.TaskID,
 		OriginalName: metadata.OriginalName, ContentType: metadata.ContentType, SourceIP: metadata.SourceIP,
 		DeleteAt: metadata.DeleteAt, CreatedAt: now, UpdatedAt: now,
 	}
@@ -180,8 +166,16 @@ func (s *TransferStore) CreatePeriodicReceiving(ctx context.Context, deviceID ui
 		if err := tx.Create(&artifact).Error; err != nil {
 			return err
 		}
+		objectKey, err := ArtifactObjectKey(metadata.StoragePrefix, artifact.Channel, artifact.DeviceID, now, artifact.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&artifact).Update("object_key", objectKey).Error; err != nil {
+			return err
+		}
+		artifact.ObjectKey = objectKey
 		return tx.Create(&model.TransferEvent{
-			TaskID: task.TaskID, ArtifactID: artifact.ArtifactID, Code: "RECEIVING_STARTED",
+			TaskID: task.TaskID, FileID: artifact.ID, Code: "RECEIVING_STARTED",
 			Phase: "ingress.receive", ToStatus: task.Status, CreatedAt: now,
 		}).Error
 	})
@@ -196,12 +190,9 @@ func (s *TransferStore) CreateActiveReceiving(ctx context.Context, task model.Tr
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	if metadata.ArtifactID == "" {
-		metadata.ArtifactID = uuid.NewString()
-	}
 	artifact := model.Artifact{
-		ArtifactID: metadata.ArtifactID, TaskID: task.TaskID, DeviceID: task.DeviceID, Channel: task.Channel,
-		Status: model.ArtifactStatusReceiving, Driver: metadata.Driver, ObjectKey: metadata.ObjectKey,
+		TaskID: task.TaskID, DeviceID: task.DeviceID, Channel: task.Channel,
+		Status: model.ArtifactStatusReceiving, Driver: metadata.Driver, ObjectKey: "pending/" + task.TaskID,
 		OriginalName: metadata.OriginalName, ContentType: metadata.ContentType, SourceIP: metadata.SourceIP,
 		DeleteAt: metadata.DeleteAt, CreatedAt: now, UpdatedAt: now,
 	}
@@ -219,8 +210,16 @@ func (s *TransferStore) CreateActiveReceiving(ctx context.Context, task model.Tr
 		if err := tx.Create(&artifact).Error; err != nil {
 			return err
 		}
+		objectKey, err := ArtifactObjectKey(metadata.StoragePrefix, artifact.Channel, artifact.DeviceID, now, artifact.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&artifact).Update("object_key", objectKey).Error; err != nil {
+			return err
+		}
+		artifact.ObjectKey = objectKey
 		if err := tx.Create(&model.TransferEvent{
-			TaskID: task.TaskID, ArtifactID: artifact.ArtifactID, Code: "RECEIVING_STARTED", Phase: "ingress.receive",
+			TaskID: task.TaskID, FileID: artifact.ID, Code: "RECEIVING_STARTED", Phase: "ingress.receive",
 			FromStatus: task.Status, ToStatus: model.TransferStatusReceiving, CreatedAt: now,
 		}).Error; err != nil {
 			return err
@@ -264,7 +263,7 @@ func (s *TransferStore) AppendTransferEvent(ctx context.Context, event model.Tra
 	return s.db.WithContext(ctx).Create(&event).Error
 }
 
-func (s *TransferStore) MarkArtifactAvailable(ctx context.Context, artifactID string, expectedVersion uint, final ArtifactFinalization) (model.Artifact, error) {
+func (s *TransferStore) MarkArtifactAvailable(ctx context.Context, fileID uint64, expectedVersion uint, final ArtifactFinalization) (model.Artifact, error) {
 	receivedAt := final.ReceivedAt.UTC()
 	if receivedAt.IsZero() {
 		receivedAt = time.Now().UTC()
@@ -272,7 +271,7 @@ func (s *TransferStore) MarkArtifactAvailable(ctx context.Context, artifactID st
 	var artifact model.Artifact
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(new(model.Artifact)).
-			Where("artifact_id = ? AND status = ? AND version = ?", artifactID, model.ArtifactStatusReceiving, expectedVersion).
+			Where("id = ? AND status = ? AND version = ?", fileID, model.ArtifactStatusReceiving, expectedVersion).
 			Updates(map[string]any{
 				"status": model.ArtifactStatusAvailable, "size": final.Size, "sha256": final.SHA256,
 				"received_at": receivedAt, "version": gorm.Expr("version + 1"), "updated_at": receivedAt,
@@ -283,14 +282,14 @@ func (s *TransferStore) MarkArtifactAvailable(ctx context.Context, artifactID st
 		if result.RowsAffected != 1 {
 			return ErrArtifactTransitionConflict
 		}
-		return tx.Where("artifact_id = ?", artifactID).First(&artifact).Error
+		return tx.Where("id = ?", fileID).First(&artifact).Error
 	})
 	return artifact, err
 }
 
-func (s *TransferStore) MarkArtifactFailed(ctx context.Context, artifactID string, expectedVersion uint) error {
+func (s *TransferStore) MarkArtifactFailed(ctx context.Context, fileID uint64, expectedVersion uint) error {
 	result := s.db.WithContext(ctx).Model(new(model.Artifact)).
-		Where("artifact_id = ? AND status = ? AND version = ?", artifactID, model.ArtifactStatusReceiving, expectedVersion).
+		Where("id = ? AND status = ? AND version = ?", fileID, model.ArtifactStatusReceiving, expectedVersion).
 		Updates(map[string]any{"status": model.ArtifactStatusFailed, "version": gorm.Expr("version + 1"), "updated_at": time.Now().UTC()})
 	if result.Error != nil {
 		return result.Error
@@ -351,15 +350,10 @@ func (s *TransferStore) TransitionTask(ctx context.Context, transition TransferT
 func (s *TransferStore) ListArtifacts(ctx context.Context, filter ArtifactListFilter) ([]ArtifactListItem, int64, error) {
 	query := s.db.WithContext(ctx).Table("tr069_artifacts AS artifacts").
 		Joins("JOIN tr069_transfer_tasks AS tasks ON tasks.task_id = artifacts.task_id").
-		Joins("JOIN tr069_devices AS devices ON devices.id = artifacts.device_id")
-	if filter.DeviceID != 0 {
-		query = query.Where("artifacts.device_id = ?", filter.DeviceID)
-	}
-	if filter.Channel != "" {
-		query = query.Where("artifacts.channel = ?", filter.Channel)
-	}
-	if filter.Status != "" {
-		query = query.Where("artifacts.status = ?", filter.Status)
+		Joins("JOIN tr069_devices AS devices ON devices.id = artifacts.device_id").
+		Where("artifacts.channel = ? AND artifacts.status = ?", "LOG", model.ArtifactStatusAvailable)
+	if filter.SerialNumber != "" {
+		query = query.Where("devices.serial_number = ?", filter.SerialNumber)
 	}
 	if filter.CreatedFrom != nil {
 		query = query.Where("artifacts.created_at >= ?", *filter.CreatedFrom)
@@ -382,18 +376,16 @@ func (s *TransferStore) ListArtifacts(ctx context.Context, filter ArtifactListFi
 		offset = 0
 	}
 	var items []ArtifactListItem
-	err := query.Select(`artifacts.artifact_id, artifacts.task_id, artifacts.device_id,
-		devices.serial_number, devices.oui, artifacts.channel, tasks.source, artifacts.status,
-		artifacts.original_name, artifacts.content_type, artifacts.size, artifacts.sha256,
-		artifacts.received_at, artifacts.created_at`).
-		Order("artifacts.created_at DESC").Order("artifacts.artifact_id DESC").
+	err := query.Select(`artifacts.id AS file_id, devices.serial_number, tasks.source,
+		artifacts.original_name, artifacts.size, artifacts.received_at`).
+		Order("artifacts.created_at DESC").Order("artifacts.id DESC").
 		Offset(offset).Limit(limit).Scan(&items).Error
 	return items, total, err
 }
 
-func (s *TransferStore) GetAvailableArtifact(ctx context.Context, artifactID string) (model.Artifact, error) {
+func (s *TransferStore) GetAvailableArtifact(ctx context.Context, fileID uint64) (model.Artifact, error) {
 	var artifact model.Artifact
-	err := s.db.WithContext(ctx).Where("artifact_id = ? AND status = ?", artifactID, model.ArtifactStatusAvailable).First(&artifact).Error
+	err := s.db.WithContext(ctx).Where("id = ? AND status = ?", fileID, model.ArtifactStatusAvailable).First(&artifact).Error
 	return artifact, err
 }
 

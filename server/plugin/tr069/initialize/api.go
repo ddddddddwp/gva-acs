@@ -45,7 +45,7 @@ func Api(ctx context.Context) {
 
 		// Log artifact APIs
 		{Path: "/tr069/artifact/list", Description: "获取基站日志文件列表", ApiGroup: "TR069", Method: "GET"},
-		{Path: "/tr069/artifact/:artifactId/download", Description: "下载基站日志文件", ApiGroup: "TR069", Method: "GET"},
+		{Path: "/tr069/artifact/:fileId/download", Description: "下载基站日志文件", ApiGroup: "TR069", Method: "GET"},
 
 		// DataModel APIs
 		{Path: "/tr069/datamodel/:deviceId/sync", Description: "全量同步数据模型", ApiGroup: "TR069", Method: "POST"},

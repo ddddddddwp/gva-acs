@@ -3,20 +3,11 @@
     <div class="gva-search-box">
       <el-form :inline="true" :model="searchInfo">
         <el-form-item label="设备 ID">
-          <el-input-number
-            v-model="searchInfo.deviceId"
-            :min="1"
-            :controls="false"
-            placeholder="精确设备 ID"
+          <el-input
+            v-model.trim="searchInfo.serialNumber"
+            placeholder="请输入完整设备序列号"
             clearable
           />
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-select v-model="searchInfo.status" placeholder="全部状态" clearable style="width: 140px">
-            <el-option label="可下载" value="AVAILABLE" />
-            <el-option label="接收中" value="RECEIVING" />
-            <el-option label="接收失败" value="FAILED" />
-          </el-select>
         </el-form-item>
         <el-form-item label="接收时间">
           <el-date-picker
@@ -40,38 +31,24 @@
         <span class="toolbar-hint">基站上传的 LOG 制品</span>
         <el-button :icon="Refresh" :loading="loading" @click="getTableData">刷新</el-button>
       </div>
-      <el-table v-loading="loading" :data="tableData" row-key="artifactId">
-        <el-table-column label="设备" min-width="170">
-          <template #default="scope">
-            <div>{{ scope.row.serialNumber || '-' }}</div>
-            <div class="cell-secondary">ID {{ scope.row.deviceId }} · OUI {{ scope.row.oui || '-' }}</div>
-          </template>
+      <el-table v-loading="loading" :data="tableData" row-key="fileId">
+        <el-table-column prop="fileId" label="文件 ID" width="100" align="center" />
+        <el-table-column label="设备 ID" min-width="160">
+          <template #default="scope">{{ scope.row.serialNumber || '-' }}</template>
         </el-table-column>
         <el-table-column prop="originalName" label="文件名" min-width="200" show-overflow-tooltip>
-          <template #default="scope">{{ scope.row.originalName || `${scope.row.artifactId}.bin` }}</template>
+          <template #default="scope">{{ scope.row.originalName || `${scope.row.fileId}.bin` }}</template>
         </el-table-column>
         <el-table-column label="来源" width="110" align="center">
           <template #default="scope">
             <el-tag :type="sourceView(scope.row.source).type">{{ sourceView(scope.row.source).label }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110" align="center">
-          <template #default="scope">
-            <el-tag :type="statusView(scope.row.status).type">{{ statusView(scope.row.status).label }}</el-tag>
-          </template>
-        </el-table-column>
         <el-table-column label="大小" width="100" align="right">
           <template #default="scope">{{ formatBytes(scope.row.size) }}</template>
         </el-table-column>
-        <el-table-column label="SHA-256" width="150">
-          <template #default="scope">
-            <el-tooltip :content="scope.row.sha256 || '-'" placement="top">
-              <span class="digest">{{ shortSHA256(scope.row.sha256) }}</span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
         <el-table-column label="接收完成时间" width="180">
-          <template #default="scope">{{ formatTime(scope.row.receivedAt || scope.row.createdAt) }}</template>
+          <template #default="scope">{{ formatTime(scope.row.receivedAt) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="100" fixed="right" align="center">
           <template #default="scope">
@@ -80,7 +57,7 @@
               link
               :icon="Download"
               :disabled="!canDownload(scope.row)"
-              :loading="downloadingId === scope.row.artifactId"
+              :loading="downloadingId === scope.row.fileId"
               @click="download(scope.row)"
             >下载</el-button>
           </template>
@@ -111,21 +88,19 @@ import {
   canDownload,
   filenameFromDisposition,
   formatBytes,
-  shortSHA256,
   sourceView,
-  statusView,
   triggerBlobDownload
 } from './log-file-view'
 
 defineOptions({ name: 'Tr069LogFiles' })
 
 const loading = ref(false)
-const downloadingId = ref('')
+const downloadingId = ref(0)
 const tableData = ref([])
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
-const searchInfo = reactive({ deviceId: undefined, status: '', createdRange: [] })
+const searchInfo = reactive({ serialNumber: '', createdRange: [] })
 
 const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 
@@ -135,9 +110,7 @@ const getTableData = async () => {
     const res = await getLogArtifactList({
       page: page.value,
       pageSize: pageSize.value,
-      deviceId: searchInfo.deviceId,
-      channel: 'LOG',
-      status: searchInfo.status,
+      serialNumber: searchInfo.serialNumber,
       createdFrom: searchInfo.createdRange?.[0] || '',
       createdTo: searchInfo.createdRange?.[1] || ''
     })
@@ -160,26 +133,26 @@ const onSearch = () => {
 }
 
 const onReset = () => {
-  Object.assign(searchInfo, { deviceId: undefined, status: '', createdRange: [] })
+  Object.assign(searchInfo, { serialNumber: '', createdRange: [] })
   page.value = 1
   getTableData()
 }
 
 const download = async row => {
   if (!canDownload(row) || downloadingId.value) return
-  downloadingId.value = row.artifactId
+  downloadingId.value = row.fileId
   try {
-    const res = await downloadLogArtifact(row.artifactId)
+    const res = await downloadLogArtifact(row.fileId)
     const blob = res?.data instanceof Blob ? res.data : res
     if (!(blob instanceof Blob)) throw new Error('invalid artifact response')
     const disposition = res?.headers?.['content-disposition'] || ''
-    const fallback = row.originalName || `${row.artifactId}.bin`
+    const fallback = row.originalName || `${row.fileId}.bin`
     triggerBlobDownload(blob, filenameFromDisposition(disposition, fallback))
     ElMessage.success('下载成功')
   } catch {
     ElMessage.error('日志文件下载失败')
   } finally {
-    downloadingId.value = ''
+    downloadingId.value = 0
   }
 }
 
@@ -194,15 +167,8 @@ onMounted(getTableData)
   margin-bottom: 12px;
 }
 
-.toolbar-hint,
-.cell-secondary {
+.toolbar-hint {
   color: var(--el-text-color-secondary);
   font-size: 12px;
-}
-
-.digest {
-  color: var(--el-text-color-regular);
-  cursor: help;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 </style>

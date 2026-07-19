@@ -115,6 +115,26 @@ func TestFileIngressRouteDoesNotEnterRawDumpMiddleware(t *testing.T) {
 	}
 }
 
+func TestFileIngressVendorPathsDoNotRedirect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := setupEngine(map[string]gin.HandlerFunc{
+		"/acs/log": func(c *gin.Context) {
+			c.Status(http.StatusCreated)
+		},
+	})
+
+	for _, target := range []string{"/acs/log/", "/acs/log/Log_20260719.tar.gz"} {
+		t.Run(target, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPut, target, strings.NewReader("log"))
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, request)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("%s status=%d location=%q", target, response.Code, response.Header().Get("Location"))
+			}
+		})
+	}
+}
+
 func readRuntimeInfoLog(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, time.Now().Format("2006-01-02"), "tr069info.log")

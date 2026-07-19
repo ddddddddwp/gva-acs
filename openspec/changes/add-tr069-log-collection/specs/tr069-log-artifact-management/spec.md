@@ -3,6 +3,12 @@
 ### Requirement: Independent transfer metadata
 The system SHALL persist TR-069 transfer tasks, artifacts, and transfer events in plugin-owned tables rather than the GVA generic attachment table.
 
+Each artifact SHALL use a database-generated unsigned integer `fileId` as its sole file identifier. The system SHALL NOT create or expose a separate artifact UUID. Transfer task and command identifiers remain independent protocol and workflow identifiers.
+
+#### Scenario: Artifact record is created
+- **WHEN** an upload is admitted and its `RECEIVING` artifact metadata is inserted
+- **THEN** MySQL SHALL allocate a non-reusable auto-increment `fileId` and subsequent storage, events, reconciliation, audit, query, and download operations SHALL reference that numeric file ID
+
 #### Scenario: Upload receive begins
 - **WHEN** an authenticated upload has been uniquely resolved and admitted
 - **THEN** the system SHALL create auditable task/artifact metadata in `RECEIVING` state before making a file downloadable
@@ -34,14 +40,14 @@ The system SHALL reconcile incomplete MySQL/object-storage operations and SHALL 
 - **THEN** the reconciler SHALL abort or delete residual storage and mark the artifact failed
 
 ### Requirement: Log artifact query API
-The system SHALL provide a JWT/Casbin-protected paginated management API that supports exact filtering by device ID.
+The system SHALL provide a JWT/Casbin-protected paginated management API that exposes only `AVAILABLE` LOG artifacts and supports exact filtering by the device SerialNumber business identifier.
 
 #### Scenario: User filters by device ID
-- **WHEN** an authorized user requests the artifact list with a device ID
-- **THEN** the system SHALL return only LOG artifacts belonging to that device and permitted by the user's device data scope
+- **WHEN** an authorized user requests the artifact list with a complete alphanumeric `serialNumber`
+- **THEN** the system SHALL use an equality filter and return only available LOG artifacts belonging to that SerialNumber and permitted by the user's device data scope
 
 #### Scenario: User does not provide device ID
-- **WHEN** an authorized user requests the artifact list without a device ID
+- **WHEN** an authorized user requests the artifact list without a SerialNumber
 - **THEN** the system SHALL return a paginated list limited to devices within that user's data scope
 
 #### Scenario: Unauthorized list access
@@ -52,7 +58,7 @@ The system SHALL provide a JWT/Casbin-protected paginated management API that su
 The system SHALL stream an available artifact to an authorized GVA user only after revalidating JWT, Casbin, device data permission, and artifact state.
 
 #### Scenario: Authorized user downloads available artifact
-- **WHEN** a user with access to the artifact's device requests its download and the artifact is `AVAILABLE`
+- **WHEN** a user with access to the artifact's device requests its numeric `fileId` and the artifact is `AVAILABLE`
 - **THEN** the backend SHALL stream the object with a safe filename and SHALL record a GVA operation audit entry
 
 #### Scenario: User lacks device access
@@ -68,7 +74,7 @@ The system SHALL add a “日志文件” page under the TR-069 menu that follow
 
 #### Scenario: User opens the page
 - **WHEN** an authorized user opens the TR-069 “日志文件” menu
-- **THEN** the page SHALL show a GVA-styled search area, paginated table, device ID filter, artifact metadata, status, and permitted download action
+- **THEN** the page SHALL show a GVA-styled search area, paginated table, text device-ID filter backed by SerialNumber, numeric file ID, filename, source, human-readable size, receive time, and permitted download action
 
 #### Scenario: User changes GVA theme
 - **WHEN** the application switches between supported light and dark themes
@@ -83,7 +89,7 @@ The system SHALL not expose shared upload credentials, storage credentials, inte
 
 #### Scenario: Artifact list is returned
 - **WHEN** the management API serializes an artifact row
-- **THEN** it SHALL include business metadata such as device ID, identity, filename, size, checksum, source, status, and receive time but SHALL omit secret and provider-internal fields
+- **THEN** it SHALL include only numeric `fileId`, SerialNumber, filename, size, source, and receive time and SHALL omit status, SHA-256, OUI, database device ID, secret fields, and provider-internal fields
 
 ### Requirement: Retention cleanup
 The system SHALL apply the configured LOG retention period with idempotent delete states while preserving task/event audit metadata.

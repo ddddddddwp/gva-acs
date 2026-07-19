@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,7 +122,13 @@ func setupEngine(fileIngressRoutes map[string]gin.HandlerFunc) *gin.Engine {
 	cwmp.POST("/acs", handler.CWMPHandler)
 
 	for routePath, routeHandler := range fileIngressRoutes {
-		engine.Any(routePath, routeHandler)
+		basePath := strings.TrimRight(routePath, "/")
+		engine.Any(basePath, routeHandler)
+		// Some CPE implementations append the uploaded filename to the
+		// configured URL or retain a trailing slash. Mount a catch-all route so
+		// those requests enter the same file-only middleware chain without a
+		// Gin redirect.
+		engine.Any(basePath+"/*filename", routeHandler)
 	}
 
 	return engine

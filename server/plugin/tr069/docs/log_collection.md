@@ -7,11 +7,11 @@ TR-069 ACS 与文件上传共用 `7458` 端口，但使用独立路由和中间�
 | 方法与路由 | 用途 | 默认状态 |
 | --- | --- | --- |
 | `POST /acs` | CWMP Inform、RPC Response、TransferComplete | 启用 |
-| `PUT/POST /acs/log` | LOG 原始文件流上传 | 由 `fileIngress` 控制 |
+| `PUT/POST /acs/log`、`PUT /acs/log/<filename>` | LOG 文件流上传；POST 同时兼容 multipart `file` | 由 `fileIngress` 控制，成功返回 201 |
 | `PUT/POST /acs/pm` | PM 文件流上传 | 禁用 |
 | `PUT/POST /acs/mr` | MR 文件流上传 | 禁用 |
 
-文件入口不接受 multipart，不进入 CWMP XML 解析和 RawDump。请求体必须直接是压缩日志字节；服务端以固定缓冲流式写入对象存储，并在传输过程中计算 SHA-256。
+文件入口不进入 CWMP XML 解析和 RawDump。标准 PUT/POST 请求体直接作为压缩日志字节；兼容 POST multipart 时要求第一个 part 是 `file`，并只通过 `MultipartReader` 流式读取该字段，不缓存整个请求、不创建临时上传文件。multipart 声明长度超过“文件上限 + 1 MiB”会提前拒绝。服务端以固定缓冲流式写入对象存储，并在传输过程中计算 SHA-256。
 
 ## GVA 配置
 
@@ -90,7 +90,7 @@ Device.LogMgmt.Password = <tr069.fileIngress.authentication.password>
 
 | 状态码 | 含义 |
 | --- | --- |
-| `204` | 文件接收、校验和对象提交成功；重复的相同内容也幂等成功 |
+| `201` | 文件接收、校验和对象提交成功；重复的相同内容也幂等成功 |
 | `401` | Basic/Digest 缺失、错误、过期或 Digest 重放 |
 | `403` | 设备未完成 Inform 注册、身份过期或来源匹配不唯一 |
 | `405` | 非 PUT/POST 方法，响应包含 `Allow: PUT, POST` |
@@ -109,7 +109,7 @@ Device.LogMgmt.Password = <tr069.fileIngress.authentication.password>
 
 MinIO 容器使用 `restart: "no"`，不会随 Docker/Windows 自动拉起。根账号来自 `GVA_MINIO_ROOT_USER` 和 `GVA_MINIO_ROOT_PASSWORD`；Compose 默认值仅供隔离开发环境，使用前应修改。GVA 启动文件入口时会检查并创建缺失 bucket。
 
-用户从 GVA 管理端“TR069管理 → 日志文件”按精确设备 ID 查询，并通过受 JWT/Casbin 保护的 `/tr069/artifact/:artifactId/download` 流式下载。API 不返回对象键、驱动、来源 IP 或凭据；下载审计只记录用户、设备 ID、制品 ID、结果和耗时，不缓存文件响应体。
+用户从 GVA 管理端“TR069管理 → 日志文件”按完整设备序列号精确查询，并通过受 JWT/Casbin 保护的 `/tr069/artifact/:fileId/download` 流式下载。文件使用 MySQL 自增 `fileId`，不生成文件 UUID。列表不返回状态、SHA-256、OUI、数据库设备 ID、对象键、驱动、来源 IP 或凭据；下载审计只记录用户、设备 ID、文件 ID、结果和耗时，不缓存文件响应体。
 
 到达 `retentionDays` 后，后台任务先将记录条件更新为 `DELETING`，删除对象成功后再标记 `DELETED`。删除失败保留记录并重试，任务、校验和及事件时间线继续用于审计。
 

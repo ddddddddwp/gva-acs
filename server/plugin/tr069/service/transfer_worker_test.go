@@ -35,7 +35,7 @@ func TestTransferWorkerReconcilesCommittedStaleReceivingObject(t *testing.T) {
 	objects := newMemoryArtifactStore()
 	now := time.Date(2026, 7, 19, 9, 0, 0, 0, time.UTC)
 	task, artifact, err := store.CreatePeriodicReceiving(context.Background(), device.ID, "LOG", ReceiveMetadata{
-		TaskID: "reconcile-task", ArtifactID: "reconcile-artifact", ObjectKey: "artifacts/log/reconcile", Driver: "memory", CreatedAt: now.Add(-time.Minute),
+		TaskID: "reconcile-task", StoragePrefix: "artifacts", Driver: "memory", CreatedAt: now.Add(-time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("create receiving metadata: %v", err)
@@ -51,7 +51,7 @@ func TestTransferWorkerReconcilesCommittedStaleReceivingObject(t *testing.T) {
 		t.Fatalf("run once: %v", err)
 	}
 	var recovered model.Artifact
-	db.First(&recovered, "artifact_id = ?", artifact.ArtifactID)
+	db.First(&recovered, "id = ?", artifact.ID)
 	if recovered.Status != model.ArtifactStatusAvailable || recovered.Size != int64(len("recovered-log")) || recovered.SHA256 == "" {
 		t.Fatalf("recovered artifact=%#v", recovered)
 	}
@@ -68,7 +68,7 @@ func TestTransferWorkerFailsStaleReceivingWithoutObjectAndTimesOutTask(t *testin
 	objects := newMemoryArtifactStore()
 	now := time.Date(2026, 7, 19, 9, 5, 0, 0, time.UTC)
 	task, artifact, err := store.CreatePeriodicReceiving(context.Background(), device.ID, "LOG", ReceiveMetadata{
-		TaskID: "missing-task", ArtifactID: "missing-artifact", ObjectKey: "artifacts/log/missing", Driver: "memory", CreatedAt: now.Add(-time.Minute),
+		TaskID: "missing-task", StoragePrefix: "artifacts", Driver: "memory", CreatedAt: now.Add(-time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("create missing metadata: %v", err)
@@ -83,7 +83,7 @@ func TestTransferWorkerFailsStaleReceivingWithoutObjectAndTimesOutTask(t *testin
 		t.Fatalf("run once: %v", err)
 	}
 	var failedArtifact model.Artifact
-	db.First(&failedArtifact, "artifact_id = ?", artifact.ArtifactID)
+	db.First(&failedArtifact, "id = ?", artifact.ID)
 	if failedArtifact.Status != model.ArtifactStatusFailed {
 		t.Fatalf("artifact status=%s", failedArtifact.Status)
 	}
@@ -100,7 +100,7 @@ func TestTransferWorkerRetentionDeletesAndRetriesFailures(t *testing.T) {
 	objects := newMemoryArtifactStore()
 	now := time.Date(2026, 7, 19, 9, 10, 0, 0, time.UTC)
 	task, artifact, err := store.CreatePeriodicReceiving(context.Background(), device.ID, "LOG", ReceiveMetadata{
-		TaskID: "retention-task", ArtifactID: "retention-artifact", ObjectKey: "artifacts/log/retention", Driver: "memory", CreatedAt: now.Add(-time.Hour),
+		TaskID: "retention-task", StoragePrefix: "artifacts", Driver: "memory", CreatedAt: now.Add(-time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("create retention metadata: %v", err)
@@ -108,14 +108,14 @@ func TestTransferWorkerRetentionDeletesAndRetriesFailures(t *testing.T) {
 	w, _ := objects.Begin(context.Background(), ObjectSpec{Key: artifact.ObjectKey})
 	_, _ = w.Write([]byte("retained"))
 	_, _ = w.Commit(context.Background())
-	available, err := store.MarkArtifactAvailable(context.Background(), artifact.ArtifactID, artifact.Version, ArtifactFinalization{Size: 8, SHA256: "sha", ReceivedAt: now.Add(-time.Hour)})
+	available, err := store.MarkArtifactAvailable(context.Background(), artifact.ID, artifact.Version, ArtifactFinalization{Size: 8, SHA256: "sha", ReceivedAt: now.Add(-time.Hour)})
 	if err != nil {
 		t.Fatalf("mark available: %v", err)
 	}
-	if err := NewTransferLifecycle(db).OnArtifactAvailable(context.Background(), task.TaskID, artifact.ArtifactID, now.Add(-time.Hour)); err != nil {
+	if err := NewTransferLifecycle(db).OnArtifactAvailable(context.Background(), task.TaskID, artifact.ID, now.Add(-time.Hour)); err != nil {
 		t.Fatalf("record available: %v", err)
 	}
-	if err := db.Model(new(model.Artifact)).Where("artifact_id = ?", artifact.ArtifactID).Update("delete_at", now.Add(-time.Second)).Error; err != nil {
+	if err := db.Model(new(model.Artifact)).Where("id = ?", artifact.ID).Update("delete_at", now.Add(-time.Second)).Error; err != nil {
 		t.Fatalf("set retention deadline: %v", err)
 	}
 	injected := errors.New("delete unavailable")
@@ -125,7 +125,7 @@ func TestTransferWorkerRetentionDeletesAndRetriesFailures(t *testing.T) {
 		t.Fatal("delete failure was not reported")
 	}
 	var deleting model.Artifact
-	db.First(&deleting, "artifact_id = ?", available.ArtifactID)
+	db.First(&deleting, "id = ?", available.ID)
 	if deleting.Status != model.ArtifactStatusDeleting {
 		t.Fatalf("status after failed delete=%s", deleting.Status)
 	}
@@ -136,7 +136,7 @@ func TestTransferWorkerRetentionDeletesAndRetriesFailures(t *testing.T) {
 		t.Fatalf("retry retention: %v", err)
 	}
 	var deleted model.Artifact
-	db.First(&deleted, "artifact_id = ?", artifact.ArtifactID)
+	db.First(&deleted, "id = ?", artifact.ID)
 	if deleted.Status != model.ArtifactStatusDeleted || deleted.DeletedAt == nil {
 		t.Fatalf("deleted artifact=%#v", deleted)
 	}

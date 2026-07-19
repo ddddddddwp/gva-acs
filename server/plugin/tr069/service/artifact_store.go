@@ -46,7 +46,7 @@ type ArtifactWriter interface {
 	Abort(context.Context) error
 }
 
-func ArtifactObjectKey(prefix, channel string, deviceID uint, receivedAt time.Time, artifactID string) (string, error) {
+func ArtifactObjectKey(prefix, channel string, deviceID uint, receivedAt time.Time, fileID uint64) (string, error) {
 	prefix = strings.Trim(prefix, "/")
 	if prefix == "" || !isSafeObjectPath(prefix) {
 		return "", errors.New("invalid artifact storage prefix")
@@ -58,13 +58,13 @@ func ArtifactObjectKey(prefix, channel string, deviceID uint, receivedAt time.Ti
 	if deviceID == 0 {
 		return "", errors.New("artifact device ID is required")
 	}
-	if !isSafeObjectSegment(artifactID) {
-		return "", errors.New("invalid artifact ID")
+	if fileID == 0 {
+		return "", errors.New("file ID is required")
 	}
 	if receivedAt.IsZero() {
 		return "", errors.New("artifact receive time is required")
 	}
-	return path.Join(prefix, channel, strconv.FormatUint(uint64(deviceID), 10), receivedAt.UTC().Format("2006/01/02"), artifactID), nil
+	return path.Join(prefix, channel, strconv.FormatUint(uint64(deviceID), 10), receivedAt.UTC().Format("2006/01/02"), strconv.FormatUint(fileID, 10)), nil
 }
 
 func isSafeObjectPath(value string) bool {

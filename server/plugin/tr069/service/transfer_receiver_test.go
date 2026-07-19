@@ -113,7 +113,7 @@ func TestTransferReceiverMakesActiveUploadRetriesIdempotentByContent(t *testing.
 		t.Fatalf("first receive: %v", err)
 	}
 	duplicate, err := receiver.Receive(context.Background(), request(payload))
-	if err != nil || duplicate.ArtifactID != first.ArtifactID {
+	if err != nil || duplicate.ID != first.ID {
 		t.Fatalf("same-content retry artifact=%#v err=%v", duplicate, err)
 	}
 	if _, err := receiver.Receive(context.Background(), request([]byte("different-active-log"))); !errors.Is(err, ErrTransferContentConflict) {

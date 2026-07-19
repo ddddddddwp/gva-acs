@@ -5,7 +5,7 @@ OpenSpec change：`add-tr069-log-collection`
 
 ## 1. 目标
 
-在现有 GVA TR-069 插件中增加独立的基站日志采集能力：BS 继续统一访问 7458，通过 `PUT/POST /acs/log` 流式上传压缩日志；GVA 将文件写入 MinIO，并在 TR-069 菜单提供“日志文件”页面，支持按设备 ID 查询和下载。
+在现有 GVA TR-069 插件中增加独立的基站日志采集能力：BS 继续统一访问 7458，通过 `PUT/POST /acs/log` 流式上传压缩日志；GVA 将文件写入 MinIO，并在 TR-069 菜单提供“日志文件”页面，以自增文件 ID 管理文件并按设备序列号精确查询和下载。
 
 本设计确认以下前提：
 
@@ -47,7 +47,7 @@ GVA Web :18080
 | 方法与路由 | 首期行为 |
 | --- | --- |
 | `POST /acs` | 保持当前 CWMP 会话行为 |
-| `PUT/POST /acs/log` | 启用 LOG 文件上传 |
+| `PUT/POST /acs/log[/*filename]` | 启用 LOG 文件上传，兼容尾斜杠和 PUT 文件名后缀 |
 | `PUT/POST /acs/pm` | 保留通道定义，默认禁用 |
 | `PUT/POST /acs/mr` | 保留通道定义，默认禁用 |
 
@@ -57,7 +57,7 @@ URL 不包含设备 ID、任务 ID、用户名或密码：
 http://<GVA可达地址>:7458/acs/log
 ```
 
-TR-069 标准文件传输使用 PUT；为兼容 BS 厂商实现，文件通道同时接受 POST。PUT 和 POST 共用完全相同的认证、设备识别、限流、流式存储和任务状态处理。两种方法的请求体都直接视为压缩文件字节流，POST 不要求也不解析 multipart/form-data；其他 HTTP 方法返回 `405` 和 `Allow: PUT, POST`。
+TR-069 标准文件传输使用 PUT；为兼容 BS 厂商实现，文件通道同时接受 POST、尾斜杠和单层 PUT 文件名后缀。PUT 和 POST 共用完全相同的认证、设备识别、限流、流式存储和任务状态处理。raw 请求体直接视为压缩文件字节流；POST multipart 要求第一个 part 是 `file`，使用流式 `MultipartReader` 只读取该字段，不缓存整个请求，也不使用 `multipart.FileHeader`。其他 HTTP 方法返回 `405` 和 `Allow: PUT, POST`。
 
 主动 Upload RPC 中的 URL、Username 和 Password 由 GVA 配置提供；周期上传时由用户在 BS 的 `Device.LogMgmt.*` 中配置相同值。
 
@@ -147,7 +147,7 @@ tr069:file-ingress:ip:<normalized-ip>
   -> Commit object
   -> MySQL 条件更新 AVAILABLE
   -> 更新任务和事件
-  -> 204 No Content
+  -> 201 Created
 ```
 
 必须满足：
@@ -180,7 +180,7 @@ ArtifactWriter
 首期实现为 MinIO/S3-compatible Store；测试使用内存或临时目录 Store。对象键由 GVA 生成：
 
 ```text
-artifacts/log/<device-id>/<YYYY>/<MM>/<DD>/<artifact-id>
+artifacts/log/<device-id>/<YYYY>/<MM>/<DD>/<file-id>
 ```
 
 原始文件名只作为清洗后的元数据，不能决定对象路径。
@@ -201,8 +201,8 @@ MySQL 和 MinIO 不是分布式事务，制品状态分为：
 | 表 | 主要职责 |
 | --- | --- |
 | `tr069_transfer_tasks` | 设备、通道、ACTIVE/PERIODIC、CommandKey、状态和超时 |
-| `tr069_artifacts` | 任务、设备、存储对象、文件名、大小、SHA-256、状态和接收时间 |
-| `tr069_transfer_events` | 状态时间线、阶段和非敏感错误 |
+| `tr069_artifacts` | 自增文件 ID、任务、设备、存储对象、文件名、大小、SHA-256、状态和接收时间；不保留文件 UUID |
+| `tr069_transfer_events` | 关联数值文件 ID 的状态时间线、阶段和非敏感错误 |
 
 共享凭据来自配置文件，不创建凭据表。GVA 不管理 `Device.LogMgmt.*`，不创建日志策略表。
 
@@ -212,16 +212,16 @@ TR-069 菜单新增“日志文件”，排在“RPC 记录”之后、“告警
 
 首版页面功能：
 
-- 按设备 ID 精确过滤；
+- 使用支持英文的普通文本输入框，按完整 SerialNumber 精确过滤；
 - 分页和重置；
-- 显示接收时间、设备 ID、SerialNumber/OUI、原始文件名、大小、SHA-256、来源、状态；
+- 显示文件 ID、SerialNumber、原始文件名、自动换算为 B/KB/MB/GB 的大小、来源和接收时间；不显示状态、SHA-256、OUI 或数据库设备 ID；
 - 对 `AVAILABLE` 文件提供“下载”。
 
 管理 API：
 
 ```text
-GET /tr069/artifact/list?page=1&pageSize=10&deviceId=<id>
-GET /tr069/artifact/:artifactId/download
+GET /tr069/artifact/list?page=1&pageSize=10&serialNumber=<完整设备序列号>
+GET /tr069/artifact/:fileId/download
 ```
 
 两个接口都经过 JWT、Casbin 和设备数据权限校验。下载由 GVA 后端流式转发并记录操作审计，前端看不到 MinIO 凭据、原始对象键或服务器路径。
@@ -273,7 +273,7 @@ tr069:
 | 文件超限 | 413 | Abort，记录大小限制事件 |
 | 并发已满 | 503 | 带 `Retry-After` |
 | 存储暂时失败 | 503 | 任务保留失败阶段，可重试/协调 |
-| 上传成功 | 204 | 无响应正文 |
+| 上传成功 | 201 | 无响应正文；兼容当前 BS 只接受 HTTP 200/201 的脚本 |
 
 每个任务和文件都有事件时间线，记录认证后阶段、设备解析、接收开始、对象提交、状态完成和失败原因。共享密码、Authorization、文件正文和 MinIO 密钥禁止进入事件。
 

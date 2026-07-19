@@ -21,7 +21,7 @@ func NewTransferLifecycle(db *gorm.DB) *TransferLifecycle {
 }
 
 func (l *TransferLifecycle) OnUploadResponse(ctx context.Context, commandID string, status int, at time.Time) error {
-	return l.mutate(ctx, "command_id = ?", commandID, "UPLOAD_RESPONSE", "rpc.response", "", at,
+	return l.mutate(ctx, "command_id = ?", commandID, "UPLOAD_RESPONSE", "rpc.response", 0, at,
 		func(task *model.TransferTask, updates map[string]any) bool {
 			if task.UploadResponseStatus != nil && *task.UploadResponseStatus == status {
 				return false
@@ -41,7 +41,7 @@ func (l *TransferLifecycle) OnUploadResponse(ctx context.Context, commandID stri
 }
 
 func (l *TransferLifecycle) OnTransferComplete(ctx context.Context, commandKey string, faultCode int, faultString string, at time.Time) error {
-	return l.mutate(ctx, "command_key = ?", commandKey, "TRANSFER_COMPLETE", "transfer.complete", "", at,
+	return l.mutate(ctx, "command_key = ?", commandKey, "TRANSFER_COMPLETE", "transfer.complete", 0, at,
 		func(task *model.TransferTask, updates map[string]any) bool {
 			failureCode := ""
 			if faultCode != 0 {
@@ -64,15 +64,15 @@ func (l *TransferLifecycle) OnTransferComplete(ctx context.Context, commandKey s
 		})
 }
 
-func (l *TransferLifecycle) OnArtifactAvailable(ctx context.Context, taskID, artifactID string, at time.Time) error {
+func (l *TransferLifecycle) OnArtifactAvailable(ctx context.Context, taskID string, fileID uint64, at time.Time) error {
 	if l == nil || l.db == nil {
 		return errors.New("transfer lifecycle database is required")
 	}
 	var artifact model.Artifact
-	if err := l.db.WithContext(ctx).Where("artifact_id = ? AND task_id = ? AND status = ?", artifactID, taskID, model.ArtifactStatusAvailable).First(&artifact).Error; err != nil {
+	if err := l.db.WithContext(ctx).Where("id = ? AND task_id = ? AND status = ?", fileID, taskID, model.ArtifactStatusAvailable).First(&artifact).Error; err != nil {
 		return err
 	}
-	return l.mutate(ctx, "task_id = ?", taskID, "ARTIFACT_AVAILABLE", "storage.commit", artifactID, at,
+	return l.mutate(ctx, "task_id = ?", taskID, "ARTIFACT_AVAILABLE", "storage.commit", fileID, at,
 		func(task *model.TransferTask, updates map[string]any) bool {
 			if task.FileReceivedAt != nil {
 				return false
@@ -85,7 +85,7 @@ func (l *TransferLifecycle) OnArtifactAvailable(ctx context.Context, taskID, art
 
 type transferFactMutation func(*model.TransferTask, map[string]any) bool
 
-func (l *TransferLifecycle) mutate(ctx context.Context, where string, value any, eventCode, phase, artifactID string, at time.Time, apply transferFactMutation) error {
+func (l *TransferLifecycle) mutate(ctx context.Context, where string, value any, eventCode, phase string, fileID uint64, at time.Time, apply transferFactMutation) error {
 	if l == nil || l.db == nil {
 		return errors.New("transfer lifecycle database is required")
 	}
@@ -130,7 +130,7 @@ func (l *TransferLifecycle) mutate(ctx context.Context, where string, value any,
 			return ErrTransferTransitionConflict
 		}
 		if err := tx.Create(&model.TransferEvent{
-			TaskID: task.TaskID, ArtifactID: artifactID, Code: eventCode, Phase: phase,
+			TaskID: task.TaskID, FileID: fileID, Code: eventCode, Phase: phase,
 			FromStatus: fromStatus, ToStatus: target, CreatedAt: at,
 		}).Error; err != nil {
 			return err

@@ -4,9 +4,7 @@ import {
   canDownload,
   filenameFromDisposition,
   formatBytes,
-  shortSHA256,
   sourceView,
-  statusView,
   triggerBlobDownload
 } from './log-file-view.js'
 
@@ -14,12 +12,11 @@ test('log file view formats metadata and download state', () => {
   assert.equal(formatBytes(0), '0 B')
   assert.equal(formatBytes(1024), '1 KB')
   assert.equal(formatBytes(20 * 1024 * 1024), '20 MB')
-  assert.equal(shortSHA256('0123456789abcdef'), '01234567…cdef')
+  assert.equal(formatBytes(Math.round(20.35 * 1024 * 1024)), '20.35 MB')
   assert.deepEqual(sourceView('ACTIVE'), { label: '主动采集', type: 'primary' })
   assert.deepEqual(sourceView('PERIODIC'), { label: '周期上传', type: 'success' })
-  assert.deepEqual(statusView('AVAILABLE'), { label: '可下载', type: 'success' })
-  assert.equal(canDownload({ status: 'AVAILABLE' }), true)
-  assert.equal(canDownload({ status: 'RECEIVING' }), false)
+  assert.equal(canDownload({ fileId: 101 }), true)
+  assert.equal(canDownload({ fileId: 0 }), false)
 })
 
 test('download helpers use server filename and always revoke object URL', () => {

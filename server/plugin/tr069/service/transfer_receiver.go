@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 
@@ -92,18 +93,13 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 		return r.compareActiveRetry(receiveCtx, request, existing)
 	}
 	receivedAt := r.now().UTC()
-	artifactID := uuid.NewString()
-	objectKey, err := ArtifactObjectKey(request.StoragePrefix, request.Channel, request.Device.DeviceID, receivedAt, artifactID)
-	if err != nil {
-		return model.Artifact{}, err
-	}
 	var deleteAt *time.Time
 	if request.RetentionDays > 0 {
 		value := receivedAt.Add(time.Duration(request.RetentionDays) * 24 * time.Hour)
 		deleteAt = &value
 	}
 	metadata := ReceiveMetadata{
-		ArtifactID: artifactID, ObjectKey: objectKey, Driver: request.Driver,
+		StoragePrefix: request.StoragePrefix, Driver: request.Driver,
 		OriginalName: SanitizeArtifactOriginalName(request.OriginalName), ContentType: request.ContentType,
 		SourceIP: request.SourceIP, DeleteAt: deleteAt, CreatedAt: receivedAt,
 	}
@@ -112,7 +108,8 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 	if err != nil {
 		return model.Artifact{}, err
 	}
-	w, err := r.objects.Begin(receiveCtx, ObjectSpec{Key: objectKey, ContentType: request.ContentType, Metadata: map[string]string{"artifact-id": artifact.ArtifactID}})
+	objectKey := artifact.ObjectKey
+	w, err := r.objects.Begin(receiveCtx, ObjectSpec{Key: objectKey, ContentType: request.ContentType, Metadata: map[string]string{"file-id": strconv.FormatUint(artifact.ID, 10)}})
 	if err != nil {
 		r.failReceiving(receiveCtx, task, artifact, "storage.begin", "STORE_BEGIN_FAILED", err)
 		return model.Artifact{}, err
@@ -144,7 +141,7 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 		r.failReceiving(context.Background(), task, artifact, "storage.verify", "SIZE_MISMATCH", ErrTransferSizeMismatch)
 		return model.Artifact{}, ErrTransferSizeMismatch
 	}
-	artifact, err = r.transfers.MarkArtifactAvailable(receiveCtx, artifact.ArtifactID, artifact.Version, ArtifactFinalization{
+	artifact, err = r.transfers.MarkArtifactAvailable(receiveCtx, artifact.ID, artifact.Version, ArtifactFinalization{
 		Size: written, SHA256: hex.EncodeToString(hasher.Sum(nil)), ReceivedAt: receivedAt,
 	})
 	if err != nil {
@@ -153,7 +150,7 @@ func (r *TransferReceiver) Receive(ctx context.Context, request ReceiveRequest) 
 	if r.lifecycle == nil {
 		return model.Artifact{}, errors.New("transfer lifecycle is required")
 	}
-	if err := r.lifecycle.OnArtifactAvailable(receiveCtx, task.TaskID, artifact.ArtifactID, receivedAt); err != nil {
+	if err := r.lifecycle.OnArtifactAvailable(receiveCtx, task.TaskID, artifact.ID, receivedAt); err != nil {
 		return model.Artifact{}, err
 	}
 	return artifact, nil
@@ -201,7 +198,7 @@ func (r *TransferReceiver) compareActiveRetry(ctx context.Context, request Recei
 	digest := hex.EncodeToString(hasher.Sum(nil))
 	if written != existing.Size || digest != existing.SHA256 {
 		if err := r.transfers.AppendTransferEvent(ctx, model.TransferEvent{
-			TaskID: existing.TaskID, ArtifactID: existing.ArtifactID, Code: "DUPLICATE_CONTENT_CONFLICT",
+			TaskID: existing.TaskID, FileID: existing.ID, Code: "DUPLICATE_CONTENT_CONFLICT",
 			Phase: "ingress.idempotency", Message: "active upload retry content differs", CreatedAt: r.now().UTC(),
 		}); err != nil {
 			return model.Artifact{}, err
@@ -209,7 +206,7 @@ func (r *TransferReceiver) compareActiveRetry(ctx context.Context, request Recei
 		return model.Artifact{}, ErrTransferContentConflict
 	}
 	if err := r.transfers.AppendTransferEvent(ctx, model.TransferEvent{
-		TaskID: existing.TaskID, ArtifactID: existing.ArtifactID, Code: "DUPLICATE_ACCEPTED",
+		TaskID: existing.TaskID, FileID: existing.ID, Code: "DUPLICATE_ACCEPTED",
 		Phase: "ingress.idempotency", Message: "active upload retry matched existing artifact", CreatedAt: r.now().UTC(),
 	}); err != nil {
 		return model.Artifact{}, err
@@ -230,7 +227,7 @@ func (r *TransferReceiver) createReceivingMetadata(ctx context.Context, request 
 }
 
 func (r *TransferReceiver) failReceiving(ctx context.Context, task model.TransferTask, artifact model.Artifact, stage, code string, cause error) {
-	_ = r.transfers.MarkArtifactFailed(ctx, artifact.ArtifactID, artifact.Version)
+	_ = r.transfers.MarkArtifactFailed(ctx, artifact.ID, artifact.Version)
 	_, _ = r.transfers.TransitionTask(ctx, TransferTransition{
 		TaskID: task.TaskID, FromStatuses: []string{model.TransferStatusReceiving}, ToStatus: model.TransferStatusFailed,
 		ExpectedVersion: task.Version, EventCode: code, Phase: stage, Message: fmt.Sprint(cause),

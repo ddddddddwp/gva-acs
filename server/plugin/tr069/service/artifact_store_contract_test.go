@@ -163,15 +163,15 @@ func TestArtifactStoreContract(t *testing.T) {
 }
 
 func TestArtifactObjectKeyAndOriginalNameSanitization(t *testing.T) {
-	key, err := ArtifactObjectKey("artifacts", "LOG", 42, time.Date(2026, 7, 19, 4, 5, 6, 0, time.FixedZone("local", 8*60*60)), "artifact-id")
+	key, err := ArtifactObjectKey("artifacts", "LOG", 42, time.Date(2026, 7, 19, 4, 5, 6, 0, time.FixedZone("local", 8*60*60)), 101)
 	if err != nil {
 		t.Fatalf("object key: %v", err)
 	}
-	if key != "artifacts/log/42/2026/07/18/artifact-id" {
+	if key != "artifacts/log/42/2026/07/18/101" {
 		t.Fatalf("key=%q", key)
 	}
-	if _, err := ArtifactObjectKey("artifacts", "LOG", 42, time.Now(), "../escape"); err == nil {
-		t.Fatal("path traversal artifact ID accepted")
+	if _, err := ArtifactObjectKey("artifacts", "LOG", 42, time.Now(), 0); err == nil {
+		t.Fatal("zero file ID accepted")
 	}
 	if got := SanitizeArtifactOriginalName("../bad\x00\nname.tar.gz"); got != "badname.tar.gz" {
 		t.Fatalf("sanitized name=%q", got)

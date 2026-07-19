@@ -44,7 +44,7 @@ type TransferTask struct {
 func (TransferTask) TableName() string { return "tr069_transfer_tasks" }
 
 type Artifact struct {
-	ArtifactID   string     `json:"artifactId" gorm:"primaryKey;size:64"`
+	ID           uint64     `json:"fileId" gorm:"primaryKey;autoIncrement"`
 	TaskID       string     `json:"taskId" gorm:"size:64;uniqueIndex"`
 	DeviceID     uint       `json:"deviceId" gorm:"index"`
 	Channel      string     `json:"channel" gorm:"size:24;index"`
@@ -69,7 +69,7 @@ func (Artifact) TableName() string { return "tr069_artifacts" }
 type TransferEvent struct {
 	ID           uint64       `json:"id" gorm:"primaryKey"`
 	TaskID       string       `json:"taskId" gorm:"size:64;index"`
-	ArtifactID   string       `json:"artifactId,omitempty" gorm:"size:64;index"`
+	FileID       uint64       `json:"fileId,omitempty" gorm:"index"`
 	Code         string       `json:"code" gorm:"size:64;index"`
 	Phase        string       `json:"phase" gorm:"size:64"`
 	FromStatus   string       `json:"fromStatus" gorm:"size:32"`

@@ -3,7 +3,6 @@ package middleware
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
@@ -18,15 +17,11 @@ const downloadAuditMetadataKey = "tr069.download.audit.metadata"
 // DownloadAuditMetadata is the deliberately small, non-secret audit payload
 // recorded for an artifact download. The artifact bytes are never buffered.
 type DownloadAuditMetadata struct {
-	ArtifactID string `json:"artifactId,omitempty"`
-	DeviceID   uint   `json:"deviceId,omitempty"`
+	FileID   uint64 `json:"fileId,omitempty"`
+	DeviceID uint   `json:"deviceId,omitempty"`
 }
 
 func SetDownloadAuditMetadata(c *gin.Context, metadata DownloadAuditMetadata) {
-	metadata.ArtifactID = strings.TrimSpace(metadata.ArtifactID)
-	if len(metadata.ArtifactID) > 128 {
-		metadata.ArtifactID = metadata.ArtifactID[:128]
-	}
 	c.Set(downloadAuditMetadataKey, metadata)
 }
 

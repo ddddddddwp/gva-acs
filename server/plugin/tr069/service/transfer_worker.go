@@ -127,7 +127,7 @@ func (w *TransferWorkers) reconcileReceiving(ctx context.Context, now time.Time)
 			result = errors.Join(result, copyErr, closeErr, w.failReceivingArtifact(ctx, artifact, "RECONCILE_OBJECT_MISMATCH", now))
 			continue
 		}
-		available, finalizeErr := w.transfers.MarkArtifactAvailable(ctx, artifact.ArtifactID, artifact.Version, ArtifactFinalization{
+		available, finalizeErr := w.transfers.MarkArtifactAvailable(ctx, artifact.ID, artifact.Version, ArtifactFinalization{
 			Size: size, SHA256: hex.EncodeToString(hasher.Sum(nil)), ReceivedAt: now,
 		})
 		if errors.Is(finalizeErr, ErrArtifactTransitionConflict) {
@@ -137,7 +137,7 @@ func (w *TransferWorkers) reconcileReceiving(ctx context.Context, now time.Time)
 			result = errors.Join(result, finalizeErr)
 			continue
 		}
-		if lifecycleErr := w.lifecycle.OnArtifactAvailable(ctx, available.TaskID, available.ArtifactID, now); lifecycleErr != nil {
+		if lifecycleErr := w.lifecycle.OnArtifactAvailable(ctx, available.TaskID, available.ID, now); lifecycleErr != nil {
 			result = errors.Join(result, lifecycleErr)
 		}
 	}
@@ -145,7 +145,7 @@ func (w *TransferWorkers) reconcileReceiving(ctx context.Context, now time.Time)
 }
 
 func (w *TransferWorkers) failReceivingArtifact(ctx context.Context, artifact model.Artifact, code string, at time.Time) error {
-	if err := w.transfers.MarkArtifactFailed(ctx, artifact.ArtifactID, artifact.Version); err != nil && !errors.Is(err, ErrArtifactTransitionConflict) {
+	if err := w.transfers.MarkArtifactFailed(ctx, artifact.ID, artifact.Version); err != nil && !errors.Is(err, ErrArtifactTransitionConflict) {
 		return err
 	}
 	var task model.TransferTask
@@ -199,7 +199,7 @@ func (w *TransferWorkers) deleteExpiredArtifacts(ctx context.Context, now time.T
 	for _, artifact := range artifacts {
 		if artifact.Status == model.ArtifactStatusAvailable {
 			claim := w.transfers.db.WithContext(ctx).Model(new(model.Artifact)).
-				Where("artifact_id = ? AND status = ? AND version = ?", artifact.ArtifactID, model.ArtifactStatusAvailable, artifact.Version).
+				Where("id = ? AND status = ? AND version = ?", artifact.ID, model.ArtifactStatusAvailable, artifact.Version).
 				Updates(map[string]any{"status": model.ArtifactStatusDeleting, "version": gorm.Expr("version + 1"), "updated_at": now})
 			if claim.Error != nil {
 				result = errors.Join(result, claim.Error)
@@ -214,7 +214,7 @@ func (w *TransferWorkers) deleteExpiredArtifacts(ctx context.Context, now time.T
 		deleteErr := w.objects.Delete(ctx, artifact.ObjectKey)
 		if deleteErr != nil && !errors.Is(deleteErr, ErrArtifactNotFound) {
 			_ = w.transfers.db.WithContext(ctx).Create(&model.TransferEvent{
-				TaskID: artifact.TaskID, ArtifactID: artifact.ArtifactID, Code: "RETENTION_DELETE_FAILED",
+				TaskID: artifact.TaskID, FileID: artifact.ID, Code: "RETENTION_DELETE_FAILED",
 				Phase: "worker.retention", Message: deleteErr.Error(), CreatedAt: now,
 			}).Error
 			result = errors.Join(result, deleteErr)
@@ -222,7 +222,7 @@ func (w *TransferWorkers) deleteExpiredArtifacts(ctx context.Context, now time.T
 		}
 		deletedAt := now
 		update := w.transfers.db.WithContext(ctx).Model(new(model.Artifact)).
-			Where("artifact_id = ? AND status = ? AND version = ?", artifact.ArtifactID, model.ArtifactStatusDeleting, artifact.Version).
+			Where("id = ? AND status = ? AND version = ?", artifact.ID, model.ArtifactStatusDeleting, artifact.Version).
 			Updates(map[string]any{"status": model.ArtifactStatusDeleted, "deleted_at": deletedAt, "version": gorm.Expr("version + 1"), "updated_at": now})
 		if update.Error != nil {
 			result = errors.Join(result, update.Error)
@@ -230,7 +230,7 @@ func (w *TransferWorkers) deleteExpiredArtifacts(ctx context.Context, now time.T
 		}
 		if update.RowsAffected == 1 {
 			_ = w.transfers.db.WithContext(ctx).Create(&model.TransferEvent{
-				TaskID: artifact.TaskID, ArtifactID: artifact.ArtifactID, Code: "RETENTION_DELETED",
+				TaskID: artifact.TaskID, FileID: artifact.ID, Code: "RETENTION_DELETED",
 				Phase: "worker.retention", CreatedAt: now,
 			}).Error
 		}

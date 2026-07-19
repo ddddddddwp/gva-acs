@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 )
 
 type fakeDigestNonceStore struct {
@@ -122,6 +124,50 @@ func TestFileAuthMissingAndEmptyConfiguredCredentials(t *testing.T) {
 	}), nil)
 	if _, _, err := empty.Authenticate(request); !errors.Is(err, ErrFileAuthConfiguration) {
 		t.Fatalf("empty configured credentials error=%v", err)
+	}
+}
+
+func TestRuntimeFileCredentialProviderMatchesVendorPathVariants(t *testing.T) {
+	previous := config.CurrentRuntime()
+	t.Cleanup(func() { config.StoreRuntime(previous.Settings) })
+	config.StoreRuntime(config.TR069Config{FileIngress: config.FileIngressConfig{
+		Authentication: config.FileIngressAuthConfig{
+			Username: "log-user", Password: "super-secret", Realm: "GVA-TR069-LOG", Schemes: []string{"basic"},
+		},
+		Channels: map[string]config.TransferChannelConfig{
+			"log": {Enabled: true, Path: "/acs/log"},
+		},
+	}})
+
+	provider := RuntimeFileCredentialProvider{}
+	for _, target := range []string{"/acs/log", "/acs/log/", "/acs/log/Log_20260719.tar.gz"} {
+		request, err := http.NewRequest(http.MethodPut, "http://example.com"+target, nil)
+		if err != nil {
+			t.Fatalf("new request %s: %v", target, err)
+		}
+		credential, err := provider.CredentialForRequest(request)
+		if err != nil || credential.Channel != "LOG" {
+			t.Fatalf("target=%s channel=%q err=%v", target, credential.Channel, err)
+		}
+	}
+
+	rejected, _ := http.NewRequest(http.MethodPut, "http://example.com/acs/logger", nil)
+	if _, err := provider.CredentialForRequest(rejected); !errors.Is(err, ErrFileAuthConfiguration) {
+		t.Fatalf("unrelated path accepted: %v", err)
+	}
+	for _, rejectedRequest := range []*http.Request{
+		func() *http.Request {
+			request, _ := http.NewRequest(http.MethodPost, "http://example.com/acs/log/log.tar.gz", nil)
+			return request
+		}(),
+		func() *http.Request {
+			request, _ := http.NewRequest(http.MethodPut, "http://example.com/acs/log/nested/log.tar.gz", nil)
+			return request
+		}(),
+	} {
+		if _, err := provider.CredentialForRequest(rejectedRequest); !errors.Is(err, ErrFileAuthConfiguration) {
+			t.Fatalf("unsupported path accepted: %s %s", rejectedRequest.Method, rejectedRequest.URL.Path)
+		}
 	}
 }
 

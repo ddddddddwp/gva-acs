@@ -27,7 +27,7 @@ func TestDownloadAuditDoesNotBufferStreamedResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.GET("/download", DownloadAudit(), func(c *gin.Context) {
-		SetDownloadAuditMetadata(c, DownloadAuditMetadata{ArtifactID: "artifact-20m", DeviceID: 42})
+		SetDownloadAuditMetadata(c, DownloadAuditMetadata{FileID: 101, DeviceID: 42})
 		c.Data(http.StatusOK, "application/octet-stream", bytes.Repeat([]byte("x"), 20<<20))
 	})
 	recorder := httptest.NewRecorder()
