@@ -317,7 +317,7 @@ func (s *DeviceDeletionService) Delete(context.Context, uint) (DeviceDeletionRes
 
 - [ ] **Step 1: Write the full failing cascade test**
 
-Create an in-memory SQLite schema for all device-owned models and seed two complete devices. For the target include alarms, values, RPC methods, FAP service, profile, commands/events/XML, transfer task/events, artifact metadata, and fake-store objects.
+Create an in-memory SQLite schema for all device-owned models and seed two complete devices. For the target include both `tr069_alarms` and `support_tr069_alarms`, values, RPC methods, FAP service, profile, commands/events/XML, transfer task/events, artifact metadata, and fake-store objects.
 
 After deleting the target, assert zero target rows in every table, all target objects removed, and every peer row/object preserved. Assert the runtime cleaner received exactly the target identity.
 

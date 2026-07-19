@@ -131,7 +131,7 @@ MinIO 全部清理成功后，在一个 GORM 数据库事务中执行硬删除�
 5. 删除 `tr069_command_xmls`。
 6. 删除 `tr069_command_events`。
 7. 删除 `tr069_commands`。
-8. 删除 `tr069_alarms`。
+8. 删除 `tr069_alarms` 和 `support_tr069_alarms`。
 9. 删除 `tr069_datamodel_values`。
 10. 删除 `tr069_device_rpc_methods`。
 11. 删除 `tr069_fap_services`。
