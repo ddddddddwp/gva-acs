@@ -43,6 +43,9 @@ type ArtifactStore interface {
 type ArtifactWriter interface {
 	io.Writer
 	Commit(context.Context) (ObjectStat, error)
+	// Abort may be called concurrently with Write or Commit when device
+	// deletion cancels an active upload. Implementations must make it safe
+	// and idempotent.
 	Abort(context.Context) error
 }
 

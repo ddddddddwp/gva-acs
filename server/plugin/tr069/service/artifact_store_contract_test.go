@@ -16,6 +16,7 @@ type memoryArtifactStore struct {
 }
 
 type memoryArtifactWriter struct {
+	mu      sync.Mutex
 	store   *memoryArtifactStore
 	key     string
 	buffer  bytes.Buffer
@@ -70,6 +71,8 @@ func (s *memoryArtifactStore) Delete(ctx context.Context, key string) error {
 }
 
 func (w *memoryArtifactWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.aborted {
 		return 0, ErrArtifactWriterAborted
 	}
@@ -83,6 +86,8 @@ func (w *memoryArtifactWriter) Commit(ctx context.Context) (ObjectStat, error) {
 	if err := ctx.Err(); err != nil {
 		return ObjectStat{}, err
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.aborted {
 		return ObjectStat{}, ErrArtifactWriterAborted
 	}
@@ -96,6 +101,8 @@ func (w *memoryArtifactWriter) Commit(ctx context.Context) (ObjectStat, error) {
 }
 
 func (w *memoryArtifactWriter) Abort(context.Context) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.aborted = true
 	return nil
 }
