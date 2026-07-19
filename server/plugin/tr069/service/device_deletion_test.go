@@ -193,7 +193,7 @@ func newDeviceDeletionDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		new(model.Device), new(model.Command), new(model.CommandEvent), new(model.CommandXML),
 		new(model.DataModelValue), new(model.DeviceRPCMethods), new(model.FAPService),
-		new(model.Tr069Alarm), new(model.ConnectionProfile), new(model.TransferTask),
+		new(model.Tr069Alarm), new(model.SupportTr069Alarm), new(model.ConnectionProfile), new(model.TransferTask),
 		new(model.Artifact), new(model.TransferEvent),
 	); err != nil {
 		t.Fatalf("migrate deletion models: %v", err)
@@ -216,6 +216,7 @@ func seedDeviceDeletionFixture(t *testing.T, db *gorm.DB, oui, serial string) de
 		&model.DeviceRPCMethods{DeviceID: device.ID, MethodsJSON: datatypes.JSON(`["Upload"]`)},
 		&model.FAPService{DeviceID: device.ID, CellID: "cell-" + serial},
 		&model.Tr069Alarm{DeviceID: device.ID, SerialNumber: serial, AlarmIdentifier: "alarm-" + serial, Status: "Active", EventTime: now, StartTime: now, LastChanged: now},
+		&model.SupportTr069Alarm{DeviceID: device.ID, SerialNumber: serial, EventType: "support-alarm", PerceivedSeverity: "Major"},
 		&model.ConnectionProfile{DeviceID: device.ID, DiscoveredURL: "http://" + device.IP + ":7547", CreatedAt: now, UpdatedAt: now},
 		&command,
 		&model.CommandEvent{CommandID: commandID, EventType: "CREATED", ToStatus: model.CommandStatusCompleted, CreatedAt: now},
@@ -254,6 +255,7 @@ func assertDeviceDeletionFixtureCount(t *testing.T, db *gorm.DB, fixture deletio
 		{"rpc methods", new(model.DeviceRPCMethods), "device_id = ?", fixture.device.ID},
 		{"fap", new(model.FAPService), "device_id = ?", fixture.device.ID},
 		{"alarm", new(model.Tr069Alarm), "device_id = ?", fixture.device.ID},
+		{"support alarm", new(model.SupportTr069Alarm), "device_id = ?", fixture.device.ID},
 		{"profile", new(model.ConnectionProfile), "device_id = ?", fixture.device.ID},
 		{"command", new(model.Command), "device_id = ?", fixture.device.ID},
 		{"command event", new(model.CommandEvent), "command_id = ?", fixture.commandID},

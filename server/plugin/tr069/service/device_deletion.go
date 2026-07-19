@@ -257,6 +257,7 @@ func (s *DeviceDeletionService) deleteDatabaseRows(ctx context.Context, deviceID
 		}{
 			{new(model.Command), "commands"},
 			{new(model.Tr069Alarm), "alarms"},
+			{new(model.SupportTr069Alarm), "support_alarms"},
 			{new(model.DataModelValue), "datamodel_values"},
 			{new(model.DeviceRPCMethods), "device_rpc_methods"},
 			{new(model.FAPService), "fap_services"},
