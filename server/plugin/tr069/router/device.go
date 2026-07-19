@@ -7,12 +7,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type DeviceRouter struct{}
+type DeviceRouter struct {
+	deviceApi *api.DeviceApi
+}
+
+func NewDeviceRouter(deviceApi *api.DeviceApi) *DeviceRouter {
+	return &DeviceRouter{deviceApi: deviceApi}
+}
 
 func (r *DeviceRouter) InitDeviceRouter(Router *gin.RouterGroup) {
 	// Device Base Management
 	deviceRouter := Router.Group("device")
-	deviceApi := new(api.DeviceApi)
+	deviceApi := r.deviceApi
+	if deviceApi == nil {
+		deviceApi = api.NewDeviceApi(nil)
+	}
 	{
 		deviceRouter.GET("list", deviceApi.GetDeviceList)
 		deviceRouter.POST("", deviceApi.CreateDevice)

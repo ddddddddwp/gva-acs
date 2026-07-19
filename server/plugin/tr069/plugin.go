@@ -10,6 +10,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/api"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/engine"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
@@ -72,7 +73,14 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 
 	r := group.Group("tr069")
 	r.Use(middleware.JWTAuth()).Use(middleware.CasbinHandler())
-	deviceRouter := new(router.DeviceRouter)
+	runtimeCleaner := adapter.NewRedisDeviceRuntimeCleaner(global.GVA_REDIS)
+	deletion := service.NewDeviceDeletionService(
+		global.GVA_DB,
+		initialize.CurrentArtifactStore(),
+		initialize.CurrentUploadRuntimeRegistry(),
+		runtimeCleaner,
+	)
+	deviceRouter := router.NewDeviceRouter(api.NewDeviceApi(deletion))
 	deviceRouter.InitDeviceRouter(r)
 	alarmRouter := new(router.AlarmRouter)
 	alarmRouter.InitAlarmRouter(r)

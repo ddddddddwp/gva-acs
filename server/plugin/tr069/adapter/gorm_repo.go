@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -98,6 +99,17 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	}
 	if serial == "" {
 		return "", nil
+	}
+	var existing model.Device
+	existingErr := db.Unscoped().WithContext(ctx).
+		Select("id", "deleting_at").
+		Where("serial_number = ?", serial).
+		First(&existing).Error
+	if existingErr == nil && existing.DeletingAt != nil {
+		return "", service.ErrDeviceDeleting
+	}
+	if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+		return "", existingErr
 	}
 
 	device := model.Device{

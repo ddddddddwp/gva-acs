@@ -1,9 +1,22 @@
 package handler
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"testing"
+
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 )
+
+func TestCWMPErrorStatusMapsDeletingDeviceToConflict(t *testing.T) {
+	if got := cwmpErrorStatus(fmt.Errorf("wrapped: %w", service.ErrDeviceDeleting)); got != http.StatusConflict {
+		t.Fatalf("cwmpErrorStatus() = %d, want %d", got, http.StatusConflict)
+	}
+	if got := cwmpErrorStatus(errors.New("other")); got != http.StatusInternalServerError {
+		t.Fatalf("cwmpErrorStatus(other) = %d, want %d", got, http.StatusInternalServerError)
+	}
+}
 
 func TestRemoteIPFromRequest(t *testing.T) {
 	r1, _ := http.NewRequest(http.MethodPost, "http://example.com/", nil)

@@ -122,6 +122,8 @@ func NewFileIngressHandler(auth FileRequestAuthenticator, resolver UploadDeviceR
 				c.Status(http.StatusServiceUnavailable)
 			case errors.Is(err, service.ErrTransferContentConflict):
 				c.Status(http.StatusConflict)
+			case errors.Is(err, service.ErrDeviceDeleting):
+				c.Status(http.StatusConflict)
 			case errors.Is(err, context.DeadlineExceeded):
 				c.Status(http.StatusRequestTimeout)
 			default:

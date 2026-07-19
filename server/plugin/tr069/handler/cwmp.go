@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/engine"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/ddddddddwp/tr069-core-only/factory"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
@@ -107,7 +109,7 @@ func CWMPHandler(c *gin.Context) {
 		"ok":      strconv.FormatBool(err == nil),
 	})
 	if err != nil {
-		c.Status(http.StatusInternalServerError)
+		c.Status(cwmpErrorStatus(err))
 		return
 	}
 
@@ -132,6 +134,13 @@ func CWMPHandler(c *gin.Context) {
 	if config.CurrentRuntime().Settings.Debug {
 		gvaGlobal.GVA_LOG.Debug("TR069 Trace", zap.String("traceId", traceID), zap.Any("trace", trace.Get(ctx, traceID)))
 	}
+}
+
+func cwmpErrorStatus(err error) int {
+	if errors.Is(err, service.ErrDeviceDeleting) {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }
 
 func copyHeaderIfPresent(out map[string]string, r *http.Request, name string) {

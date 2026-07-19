@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -16,11 +17,25 @@ import (
 	tr069Config "github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	deviceResponse "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/response"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
+
+type fakeDeviceDeletion struct {
+	result   service.DeviceDeletionResult
+	err      error
+	deviceID uint
+	calls    int
+}
+
+func (f *fakeDeviceDeletion) Delete(_ context.Context, deviceID uint) (service.DeviceDeletionResult, error) {
+	f.calls++
+	f.deviceID = deviceID
+	return f.result, f.err
+}
 
 func TestConnectionProfileAPIStoresManualOverrideWithoutExposingPassword(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -174,5 +189,49 @@ func TestLoadDeviceRPCMethodsSkipsQueryForEmptyPage(t *testing.T) {
 	}
 	if len(got) != 0 || queryCount != 0 {
 		t.Fatalf("loadDeviceRPCMethods(nil) = %#v, queries=%d; want empty map and zero queries", got, queryCount)
+	}
+}
+
+func TestDeleteDeviceDelegatesToCascadeService(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deletion := &fakeDeviceDeletion{result: service.DeviceDeletionResult{DeviceID: 42, DeletedObjects: 2}}
+	engine := gin.New()
+	engine.DELETE("/tr069/device/:deviceId", NewDeviceApi(deletion).DeleteDevice)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodDelete, "/tr069/device/42", nil))
+	if deletion.calls != 1 || deletion.deviceID != 42 {
+		t.Fatalf("deletion calls/id = %d/%d", deletion.calls, deletion.deviceID)
+	}
+	if !strings.Contains(recorder.Body.String(), `"code":0`) || !strings.Contains(recorder.Body.String(), `"删除成功"`) {
+		t.Fatalf("delete response = %s", recorder.Body.String())
+	}
+}
+
+func TestDeleteDeviceReturnsSafeStageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deletion := &fakeDeviceDeletion{err: &service.DeviceDeletionError{Stage: service.DeletionStageArtifacts, Cause: errors.New("secret MinIO endpoint")}}
+	engine := gin.New()
+	engine.DELETE("/tr069/device/:deviceId", NewDeviceApi(deletion).DeleteDevice)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodDelete, "/tr069/device/7", nil))
+	if !strings.Contains(recorder.Body.String(), service.DeletionStageArtifacts) || strings.Contains(recorder.Body.String(), "secret MinIO endpoint") {
+		t.Fatalf("unsafe deletion response = %s", recorder.Body.String())
+	}
+}
+
+func TestDeleteDeviceMapsMissingAndInvalidIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deletion := &fakeDeviceDeletion{err: service.ErrDeviceNotFound}
+	engine := gin.New()
+	engine.DELETE("/tr069/device/:deviceId", NewDeviceApi(deletion).DeleteDevice)
+	for _, path := range []string{"/tr069/device/999", "/tr069/device/not-a-number"} {
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodDelete, path, nil))
+		if !strings.Contains(recorder.Body.String(), `"code":7`) {
+			t.Fatalf("%s response = %s", path, recorder.Body.String())
+		}
+	}
+	if deletion.calls != 1 {
+		t.Fatalf("deletion calls = %d, want only valid ID call", deletion.calls)
 	}
 }

@@ -78,3 +78,15 @@ func TestDeviceRouterRegistersConnectionProfileRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceRouterPreservesDeviceDeleteRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	new(DeviceRouter).InitDeviceRouter(engine.Group("/tr069"))
+	for _, route := range engine.Routes() {
+		if route.Method == "DELETE" && route.Path == "/tr069/device/:deviceId" {
+			return
+		}
+	}
+	t.Fatal("device delete route is not registered")
+}

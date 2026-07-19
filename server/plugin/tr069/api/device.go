@@ -16,6 +16,7 @@ import (
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	tr069Request "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
 	deviceResponse "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/response"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -24,7 +25,17 @@ import (
 // 设备离线阈值（秒），超过此时间未收到 Inform 视为离线
 const offlineThreshold = 180 // 3分钟
 
-type DeviceApi struct{}
+type DeviceDeletion interface {
+	Delete(context.Context, uint) (service.DeviceDeletionResult, error)
+}
+
+type DeviceApi struct {
+	deletion DeviceDeletion
+}
+
+func NewDeviceApi(deletion DeviceDeletion) *DeviceApi {
+	return &DeviceApi{deletion: deletion}
+}
 
 func connectionProfileResponse(profile model.ConnectionProfile) deviceResponse.ConnectionProfileResponse {
 	effectiveURL := strings.TrimSpace(profile.OverrideURL)
@@ -258,38 +269,34 @@ func (a *DeviceApi) CreateDevice(c *gin.Context) {
 // @Success 200 {object} response.Response{msg=string} "删除成功"
 // @Router /tr069/device/{deviceId} [delete]
 func (a *DeviceApi) DeleteDevice(c *gin.Context) {
-	deviceId := c.Param("deviceId")
-
-	var device model.Device
-	if err := global.GVA_DB.First(&device, deviceId).Error; err != nil {
-		response.FailWithMessage("设备不存在", c)
+	deviceID, err := strconv.ParseUint(strings.TrimSpace(c.Param("deviceId")), 10, 64)
+	if err != nil || deviceID == 0 {
+		response.FailWithMessage("设备ID错误", c)
 		return
 	}
-
-	// Transaction to delete device and related data (alarms, values)
-	err := global.GVA_DB.Transaction(func(tx *gorm.DB) error {
-		// 1. Delete Alarms (Hard Delete)
-		if err := tx.Unscoped().Where("device_id = ?", device.ID).Delete(&model.Tr069Alarm{}).Error; err != nil {
-			return err
-		}
-		// 2. Delete DataModel Values (Hard Delete)
-		if err := tx.Unscoped().Where("device_id = ?", device.ID).Delete(&model.DataModelValue{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Unscoped().Where("device_id = ?", device.ID).Delete(&model.ConnectionProfile{}).Error; err != nil {
-			return err
-		}
-		// 3. Delete Device (Hard Delete)
-		if err := tx.Unscoped().Delete(&device).Error; err != nil {
-			return err
-		}
-		return nil
-	})
-
+	if a == nil || a.deletion == nil {
+		response.FailWithMessage("设备删除服务未初始化", c)
+		return
+	}
+	result, err := a.deletion.Delete(c.Request.Context(), uint(deviceID))
 	if err != nil {
-		global.GVA_LOG.Error("删除设备失败", zap.Error(err))
-		response.FailWithMessage("删除失败", c)
+		if errors.Is(err, service.ErrDeviceNotFound) {
+			response.FailWithMessage("设备不存在", c)
+			return
+		}
+		var deletionErr *service.DeviceDeletionError
+		if errors.As(err, &deletionErr) {
+			if global.GVA_LOG != nil {
+				global.GVA_LOG.Error("删除设备失败", zap.Uint64("deviceId", deviceID), zap.String("stage", deletionErr.Stage), zap.Error(err))
+			}
+			response.FailWithMessage("删除失败（"+deletionErr.Stage+"），请重试", c)
+			return
+		}
+		if global.GVA_LOG != nil {
+			global.GVA_LOG.Error("删除设备失败", zap.Uint64("deviceId", deviceID), zap.Error(err))
+		}
+		response.FailWithMessage("删除失败，请重试", c)
 		return
 	}
-	response.OkWithMessage("删除成功", c)
+	response.OkWithDetailed(result, "删除成功", c)
 }

@@ -66,6 +66,41 @@ func TestGormDeviceRepoDoesNotBindWhenInformPersistenceFails(t *testing.T) {
 	}
 }
 
+func TestGormDeviceRepoRejectsInformForDeletingDevice(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(new(model.Device), new(model.DataModelValue), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate device models: %v", err)
+	}
+	lastInform := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	deletingAt := lastInform.Add(time.Minute)
+	device := model.Device{OUI: "001122", SerialNumber: "INFORM-DELETING", IP: "192.0.2.80", LastInform: lastInform, DeletingAt: &deletingAt}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create deleting device: %v", err)
+	}
+	repo := NewGormDeviceRepo(db, NewConnectionProfileRepository(db, nil))
+	info := &tr069core.InformSummary{Params: map[string]string{
+		"Device.DeviceInfo.SerialNumber":    "INFORM-DELETING",
+		"Device.DeviceInfo.SoftwareVersion": "must-not-update",
+	}}
+	if _, err := repo.UpsertFromInform(context.Background(), info, "192.0.2.81"); !errors.Is(err, service.ErrDeviceDeleting) {
+		t.Fatalf("UpsertFromInform() error = %v, want ErrDeviceDeleting", err)
+	}
+	var kept model.Device
+	if err := db.First(&kept, device.ID).Error; err != nil {
+		t.Fatalf("load deleting device: %v", err)
+	}
+	if !kept.LastInform.Equal(lastInform) || kept.IP != device.IP || kept.SoftwareVer != "" {
+		t.Fatalf("deleting device was updated: %#v", kept)
+	}
+	var values int64
+	if err := db.Model(new(model.DataModelValue)).Where("device_id = ?", device.ID).Count(&values).Error; err != nil || values != 0 {
+		t.Fatalf("parameter count = %d, error = %v", values, err)
+	}
+}
+
 func newGormCommandRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
