@@ -1,0 +1,15 @@
+{
+  "change": "add-tr069-log-collection",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "fec5d872d98d6d425133492c489d2eea59cbce58990407b9337d2f595d00f1d5",
+  "files": [
+    { "path": "openspec/changes/add-tr069-log-collection/proposal.md", "sha256": "04857752aebf615e164494f72d6252845c4af063351802f015fb895aa4bdaa40" },
+    { "path": "openspec/changes/add-tr069-log-collection/design.md", "sha256": "7b946610b0b6cdff719f92249c79a35004a94a13e2794902c0b2cd3e0ac4c2c5" },
+    { "path": "openspec/changes/add-tr069-log-collection/tasks.md", "sha256": "9ac7e999c141cc15d77acbd06ef79f9b65ebf92736f012ea861175d04886eb93" },
+    { "path": "openspec/changes/add-tr069-log-collection/specs/tr069-file-ingress/spec.md", "sha256": "aee71d02b712acd48a898690ae2e74cd26455d40689f218487f919af3d0403df" },
+    { "path": "openspec/changes/add-tr069-log-collection/specs/tr069-log-artifact-management/spec.md", "sha256": "2bfbda3e202bc9c8bb67fc1580c6c25ac768e7192751924a05a724604358de91" }
+  ]
+}

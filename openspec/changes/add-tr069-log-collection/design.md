@@ -2,7 +2,7 @@
 
 当前 TR-069 插件在独立监听端口 `7458` 上处理 `POST /acs`。CWMP RawDump 中间件会读取整个请求体并记录 XML，这种处理适合受控大小的 SOAP 报文，但不能用于约 20 MiB 的压缩日志文件。GVA 已有附件上传和 MinIO 支持，但现有适配器以 `multipart.FileHeader` 和内存缓冲为中心，无法满足设备以 HTTP PUT/POST 原始请求体流式上传、传输中止清理和跨存储迁移的要求。
 
-TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Password 和 CommandKey。标准文件传输使用 HTTP PUT；为兼容 BS 厂商实现，本项目同时接受 POST。后续文件请求无论使用 PUT 还是 POST，都不包含标准 DeviceIdStruct，也不保证回传 CommandKey。项目决定所有 BS 共用一套配置文件中的 LOG 账号，因而认证账号只能标识“允许访问 LOG 通道”，不能标识具体设备。设备身份必须由先前 Inform 保存的设备标识和来源 IP 唯一解析。
+TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Password 和 CommandKey。确认后的厂商扩展契约要求 GVA 下发固定目标 URL，但 Username/Password 始终为空，由 BS 使用用户在 `Device.LogMgmt.*` 中预配置的本地 LOG 凭据访问文件入口。标准文件传输使用 HTTP PUT；为兼容 BS 厂商实现，本项目同时接受 POST。后续文件请求无论使用 PUT 还是 POST，都不包含标准 DeviceIdStruct，也不保证回传 CommandKey。所有 BS 共用全局 LOG Profile，因而认证账号只能标识“允许访问 LOG 通道”，不能标识具体设备。设备身份必须由先前成功认证的 Inform 保存的设备标识和来源 IP 唯一解析。
 
 相关参与者包括 BS/CPE、TR-069 7458 文件入口、TR-069 命令管理器、MySQL、Redis、MinIO，以及通过 GVA JWT/Casbin 访问日志页面的管理用户。
 
@@ -11,7 +11,7 @@ TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Pa
 **Goals:**
 
 - 在同一个 7458 监听端口上隔离 CWMP XML 和大文件上传处理路径。
-- 使用共享长期账号实现 Basic/Digest 认证，并拒绝空配置、空凭据和错误凭据。
+- 使用全局 LOG Profile 实现 Basic/Digest 认证；Profile 同时为空时允许无认证，同时非空时强制认证，半配置状态被凭据服务拒绝。
 - 只接受能够唯一映射到已注册设备的上传，不使用用户名作为设备身份。
 - 支持主动 Upload 与设备周期上传，保留任务、事件、文件和失败原因。
 - 以固定内存流式写入 MinIO，校验大小和 SHA-256，并可恢复跨 MySQL/对象存储的不一致状态。
@@ -44,7 +44,7 @@ TR-069 的 Upload RPC 由 ACS 下发给设备，包含目标 URL、Username、Pa
 
 ### 2. 通道配置和启动校验
 
-TR-069 配置新增 `file-ingress` 和 `artifact-store`：
+TR-069 配置保留 `file-ingress` 和 `artifact-store` 的路径、限制和存储设置；用户名和密码改由 `secure-tr069-credential-authentication` 提供的全局 LOG Profile 动态解析：
 
 ```yaml
 tr069:
@@ -54,12 +54,6 @@ tr069:
     public-base-url: "http://host.docker.internal:7458"
     trusted-proxies: []
     identity-binding-ttl: 30m
-    authentication:
-      username: "${TR069_LOG_USERNAME}"
-      password: "${TR069_LOG_PASSWORD}"
-      schemes: [digest, basic]
-      realm: "GVA-TR069-LOG"
-      nonce-ttl: 5m
     channels:
       log:
         enabled: true
@@ -80,11 +74,11 @@ tr069:
     prefix: artifacts
 ```
 
-当文件入口或 LOG 通道启用时，共享用户名、密码、realm、存储驱动和必要的 MinIO 配置必须非空且合法，否则 TR-069 插件启动失败并给出不含秘密的配置错误。默认文件上限 64 MiB，为当前约 20 MiB 日志留出余量；所有限制均可配置。配置中的秘密不写入普通日志、GVA 操作日志或 API 响应。
+当文件入口或 LOG 通道启用时，路径、存储驱动和必要的 MinIO 配置必须合法，否则 TR-069 插件启动失败。LOG Profile 为空不再阻止启动，而是明确启用无认证模式；半配置状态无法保存。默认文件上限 64 MiB，为当前约 20 MiB 日志留出余量；所有限制均可配置。配置中的秘密不写入普通日志、GVA 操作日志或 API 响应。
 
 ### 3. 共享账号只认证通道
 
-`PUT/POST /acs/log` 支持 HTTP Basic 和 Digest。Digest 校验必须把实际 HTTP 方法纳入响应摘要计算，并支持 `qop=auth` 及设备常见的 MD5/MD5-sess；算法和挑战行为通过协议测试固定。Digest nonce 有有效期并校验 nonce-count，重放状态存入 Redis。Basic 与 Digest 使用同一套共享账号，生产环境仍应通过 HTTPS 保护文件正文和 Basic 凭据。
+`PUT/POST /acs/log` 通过 LOG_UPLOAD 通道取得全局 LOG Profile并支持 HTTP Basic 和 Digest。Digest 校验必须把实际 HTTP 方法纳入响应摘要计算，并支持 `qop=auth` 及设备常见的 MD5/MD5-sess；算法和挑战行为通过协议测试固定。Digest nonce 有有效期并校验 nonce-count，重放状态存入 Redis。Basic 与 Digest 使用同一套共享账号，生产环境仍应通过 HTTPS 保护文件正文和 Basic 凭据。Profile用户名和密码同时为空时跳过认证，但仍执行设备唯一解析与全部资源限制。
 
 认证失败返回 `401` 和适当的 `WWW-Authenticate` 挑战。认证成功只得到 `channel=LOG`，不会从 username 推导 deviceId。相比每设备账号，共享账号降低 BS 配置成本，但失去凭据级设备隔离；该权衡由当前部署规模和明确需求接受。
 
@@ -112,7 +106,7 @@ tr069:file-ingress:ip:<normalized-ip>
 
 ### 5. 主动与周期上传的关联
 
-主动采集继续通过现有 Upload RPC 创建 GVA 命令，同时创建 `source=ACTIVE` 的传输任务并进入 `WAITING_FILE`。RPC 中的 URL 指向 `/acs/log`，用户名和密码来自共享配置，CommandKey 继续关联 UploadResponse 和 TransferComplete。设备发起 PUT 或 POST 时，如果该设备只有一个等待文件的主动 LOG 任务，则文件关联该任务；否则没有主动任务时自动创建 `source=PERIODIC` 的任务。
+主动采集继续通过现有 Upload RPC 创建 GVA 命令，同时创建 `source=ACTIVE` 的传输任务并进入 `WAITING_FILE`。RPC 中的 URL 固定指向 `/acs/log`，Username和Password始终为空，CommandKey继续关联UploadResponse和TransferComplete；BS必须使用用户预配置的本地LOG凭据完成实际HTTP上传。设备发起PUT或POST时，如果该设备只有一个等待文件的主动LOG任务，则文件关联该任务；否则没有主动任务时自动创建`source=PERIODIC`任务。
 
 同一设备同一时间只允许一个 LOG 文件流和一个等待文件的主动任务，避免共享 URL 不携带任务标识造成错误关联。若周期文件恰好与主动等待窗口重叠，协议本身无法从 PUT/POST 文件请求区分两者，系统优先关联唯一主动任务并在事件中记录推断来源。这是共享 URL/共享账号方案的明确限制。
 
@@ -170,7 +164,7 @@ MySQL 和对象存储无法形成单事务，数据库使用以下状态处理�
 - `tr069_artifacts`：自增 `id` 主键、task_id、device_id、channel、状态、storage_driver、object_key、原始文件名、content_type、size、sha256、source_ip、received_at、删除时间；不保留文件 UUID。
 - `tr069_transfer_events`：task_id、数值 `file_id`、事件码、阶段、前后状态、非敏感消息和结构化元数据、时间戳。
 
-`device_id + received_at`、`task_id`、`state + updated_at`、`sha256` 建立必要索引。共享认证来自配置文件，因此不创建 `tr069_upload_credentials`；GVA 不管理 `Device.LogMgmt.*`，因此不创建日志策略表。
+`device_id + received_at`、`task_id`、`state + updated_at`、`sha256` 建立必要索引。LOG认证来自全局凭据Profile和通道映射，本change不重复创建凭据表；GVA不管理`Device.LogMgmt.*`，因此不创建日志策略表。
 
 ### 9. 管理 API、菜单和下载
 
@@ -191,7 +185,7 @@ MySQL 是任务、事件和制品元数据的事实来源。Redis 只保存有 T
 
 ## Risks / Trade-offs
 
-- [共享账号泄漏会允许攻击者访问 LOG 上传入口] → 配置密钥不入库/日志，支持轮换，生产使用 HTTPS，并仍要求来源 IP 唯一映射到已注册设备。
+- [共享账号泄漏会允许攻击者访问 LOG 上传入口] → Profile密码加密入库且不进入日志，支持revision轮换，生产使用HTTPS，并仍要求来源IP唯一映射到已注册设备。
 - [NAT 或代理导致多个设备共用来源 IP] → 可信代理白名单、唯一性查询和歧义拒绝；以后引入每设备凭据或一次性 token。
 - [周期上传与主动任务同时发生而被错误关联] → 每设备并发为 1、只允许一个主动等待任务、优先唯一主动任务并记录推断事件。
 - [MySQL 与 MinIO 部分成功] → 明确制品状态、确定性对象键、幂等条件更新和后台协调器。
@@ -210,4 +204,4 @@ MySQL 是任务、事件和制品元数据的事实来源。Redis 只保存有 T
 
 ## Open Questions
 
-无。当前范围已明确采用共享 LOG 凭据、Inform/IP 唯一解析、MinIO 首发存储和按设备 ID 查询下载；NAT 多设备、TR-181 和 PM/MR 留待后续变更。
+无。当前范围已明确采用全局LOG Profile、空凭据无认证、主动RPC不携带凭据、Inform/IP唯一解析、MinIO首发存储和按设备ID查询下载；NAT多设备与TR-181不在本change内，PM/MR由`enable-tr069-pm-mr-ingress`处理。

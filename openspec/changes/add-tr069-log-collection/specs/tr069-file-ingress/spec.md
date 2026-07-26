@@ -1,11 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Shared LOG channel authentication
-The system SHALL authenticate every `PUT /acs/log` and `POST /acs/log` request with the configured non-empty shared LOG username and password, SHALL support HTTP Basic and Digest for both methods, and SHALL fail plugin startup when the enabled channel has invalid credentials.
+The system SHALL resolve the global LOG credential Profile for every `PUT /acs/log` and `POST /acs/log` request, SHALL support HTTP Basic and Digest for both methods when both credential fields are configured, and SHALL operate without HTTP authentication when both fields are empty.
 
-#### Scenario: Enabled channel has empty credentials
-- **WHEN** the LOG file ingress channel is enabled and its configured username or password is empty
-- **THEN** the TR-069 plugin SHALL refuse to start the file ingress and SHALL report a non-secret configuration error
+#### Scenario: Both LOG credential fields are empty
+- **WHEN** the LOG file ingress channel is enabled and the LOG Profile username and password are both empty
+- **THEN** the system SHALL keep the channel available without requiring Authorization while retaining device resolution and resource protection
+
+#### Scenario: LOG credential Profile is invalid
+- **WHEN** an attempted credential update provides only username or only password
+- **THEN** the credential service SHALL reject the update and SHALL preserve the previous atomic Profile
 
 #### Scenario: Request has no authentication
 - **WHEN** a client sends `PUT /acs/log` or `POST /acs/log` without valid Basic or Digest authentication
@@ -120,6 +124,17 @@ The system SHALL associate a received file with the device's unique waiting acti
 #### Scenario: More than one active task could match
 - **WHEN** data corruption or a race leaves multiple waiting active LOG tasks for the same device
 - **THEN** the system SHALL reject the upload as ambiguous and SHALL not guess a task
+
+### Requirement: Active Upload omits file credentials
+The system MUST submit active LOG Upload RPCs with the fixed `/acs/log` destination and empty Username and Password fields, and SHALL rely on the BS vendor behavior that uses locally configured LOG credentials for the subsequent HTTP upload.
+
+#### Scenario: Administrator requests an active LOG upload
+- **WHEN** GVA creates an active LOG Upload command
+- **THEN** the persisted and transmitted RPC contains the configured public `/acs/log` URL, an empty Username, an empty Password, and the task CommandKey
+
+#### Scenario: BS uploads after the empty-credential RPC
+- **WHEN** the BS receives the active Upload command and has local LOG credentials configured
+- **THEN** the subsequent HTTP request is authenticated by the ordinary LOG ingress middleware and associated with the unique waiting ACTIVE task
 
 ### Requirement: Active Upload completion semantics
 The system SHALL combine UploadResponse, artifact storage, and TransferComplete idempotently according to the UploadResponse status.

@@ -1,0 +1,14 @@
+{
+  "change": "enable-tr069-pm-mr-ingress",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "ca40fe619d62db8febb67a45c370fd1478bcb5b069d265bc859daaca00ed1532",
+  "files": [
+    { "path": "openspec/changes/enable-tr069-pm-mr-ingress/proposal.md", "sha256": "6867add8ec1e822cddb811dc62c8015546d81d2efb11b768221e2b2c987a7ac5" },
+    { "path": "openspec/changes/enable-tr069-pm-mr-ingress/design.md", "sha256": "e481c48f6fb62794d4ddbaf63200203f2ad160f3db71c9d011440ccbb214cdfd" },
+    { "path": "openspec/changes/enable-tr069-pm-mr-ingress/tasks.md", "sha256": "6d168a75f10d859bbe9f5f54e54c727d34bd32e5780a554c685f85341f2890b6" },
+    { "path": "openspec/changes/enable-tr069-pm-mr-ingress/specs/tr069-pm-mr-file-ingress/spec.md", "sha256": "ee5b0cef32ad0e25a84becb7037fe6685b2406fab9802ceb64a9d902d1ee3a8a" }
+  ]
+}

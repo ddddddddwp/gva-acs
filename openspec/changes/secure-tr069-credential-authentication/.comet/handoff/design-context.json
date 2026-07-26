@@ -1,0 +1,15 @@
+{
+  "change": "secure-tr069-credential-authentication",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "5561f4735646c9e99bd41a0f24945c270385694bcb317a3a8709c01ae8bf6395",
+  "files": [
+    { "path": "openspec/changes/secure-tr069-credential-authentication/proposal.md", "sha256": "128c29a1b7322ae9c4222235939d67668cfa9517609a50e744e78869c6910cf3" },
+    { "path": "openspec/changes/secure-tr069-credential-authentication/design.md", "sha256": "ac31efd6dee954ee08a03c87d56222d0d7d6bd6ab14e6c6d334abe014b758118" },
+    { "path": "openspec/changes/secure-tr069-credential-authentication/tasks.md", "sha256": "6f0708bf6aed74d58331d45759e23d5c7fe4256e08e270bf52ac35f8b7d83ca8" },
+    { "path": "openspec/changes/secure-tr069-credential-authentication/specs/tr069-credential-management/spec.md", "sha256": "4e4be57bb1be000c4be73b31be36f3ab8fe556ce6dab38ddbea5c719b0310cc2" },
+    { "path": "openspec/changes/secure-tr069-credential-authentication/specs/tr069-cwmp-access-authentication/spec.md", "sha256": "2f0792094cf1ae37c5ab5d6cf64fb7e37fd27096a710626816745a6f0d7b7f92" }
+  ]
+}
