@@ -1,13 +1,20 @@
 package initialize
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/handler"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -49,15 +56,23 @@ func StartTR069Server() {
 // SetupEngine creates and configures the gin engine for TR069
 // Exported for testing purposes
 func SetupEngine() *gin.Engine {
+	uploadRuntime := service.NewUploadRuntimeRegistry()
+	routes, workers, objectStore, err := buildRuntimeFileIngressRoutes(uploadRuntime)
+	if err != nil {
+		panic(fmt.Errorf("initialize TR-069 file ingress: %w", err))
+	}
+	setTransferWorkers(workers)
+	setArtifactStore(objectStore)
+	setUploadRuntimeRegistry(uploadRuntime)
+	return setupEngine(routes)
+}
+
+func setupEngine(fileIngressRoutes map[string]gin.HandlerFunc) *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
-	// TR069 调试辅助：确保每个请求都有 requestId（Header: X-Request-Id，缺省则自动生成）。
+	// TR069 调试辅助：为每个请求生成仅用于内部日志链路的 traceId。
 	// 删除/禁用：移除这一行即可，不影响核心 TR069 处理逻辑。
-	engine.Use(middleware.EnsureRequestID())
-	// 原始报文中间件始终安装；每个请求从原子运行时快照决定是否捕获。
-	engine.Use(middleware.RawDump(middleware.RawDumpConfig{}))
-	engine.Use(middleware.RawResponseDump(middleware.RawResponseDumpConfig{}))
-
+	engine.Use(middleware.EnsureTraceID())
 	engine.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
 		var statusColor, methodColor, resetColor string
 		if param.IsOutputColor() {
@@ -100,9 +115,124 @@ func SetupEngine() *gin.Engine {
 		)
 	}))
 
-	// Register CWMP Handler
-	engine.POST("/", handler.CWMPHandler)
-	engine.POST("/acs", handler.CWMPHandler)
+	// Raw XML capture is deliberately limited to CWMP routes. File ingress bodies
+	// must never be buffered or written to the XML/raw diagnostic log.
+	cwmp := engine.Group("")
+	cwmp.Use(middleware.RawDump(middleware.RawDumpConfig{}))
+	cwmp.Use(middleware.RawResponseDump(middleware.RawResponseDumpConfig{}))
+	cwmp.POST("/", handler.CWMPHandler)
+	cwmp.POST("/acs", handler.CWMPHandler)
+
+	for routePath, routeHandler := range fileIngressRoutes {
+		basePath := strings.TrimRight(routePath, "/")
+		engine.Any(basePath, routeHandler)
+		// Some CPE implementations append the uploaded filename to the
+		// configured URL or retain a trailing slash. Mount a catch-all route so
+		// those requests enter the same file-only middleware chain without a
+		// Gin redirect.
+		engine.Any(basePath+"/*filename", routeHandler)
+	}
 
 	return engine
+}
+
+func buildRuntimeFileIngressRoutes(uploadRuntime *service.UploadRuntimeRegistry) (map[string]gin.HandlerFunc, *service.TransferWorkers, service.ArtifactStore, error) {
+	runtime := config.CurrentRuntime()
+	if !runtime.Settings.FileIngress.Enabled {
+		return nil, nil, nil, nil
+	}
+	if global.GVA_DB == nil {
+		return nil, nil, nil, errors.New("database is required")
+	}
+	if global.GVA_REDIS == nil {
+		return nil, nil, nil, errors.New("Redis is required")
+	}
+	storeConfig := runtime.Settings.FileIngress.ArtifactStore
+	objectStore, err := adapter.NewMinioArtifactStoreClient(
+		storeConfig.Endpoint, storeConfig.AccessKey, storeConfig.SecretKey,
+		storeConfig.Bucket, storeConfig.UseSSL,
+	)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	transferStore := service.NewTransferStore(global.GVA_DB)
+	identityStore := adapter.NewUploadIdentityStore(global.GVA_REDIS)
+	deviceResolver := service.NewUploadDeviceResolver(global.GVA_DB, transferStore, identityStore, runtime.FileIngress.IdentityBindingTTL)
+	receiver := service.NewTransferReceiver(transferStore, objectStore, uploadRuntime)
+	workers := service.NewTransferWorkers(transferStore, objectStore)
+	authenticator := middleware.NewFileAuthenticator(middleware.RuntimeFileCredentialProvider{}, adapter.NewRedisDigestNonceStore(global.GVA_REDIS))
+	ingressHandler := handler.NewFileIngressHandler(authenticator, deviceResolver, receiver, handler.RuntimeFileIngressChannelProvider{})
+	routes := make(map[string]gin.HandlerFunc)
+	for _, channel := range runtime.Settings.FileIngress.Channels {
+		if channel.Enabled {
+			routes[channel.Path] = ingressHandler
+		}
+	}
+	return routes, workers, objectStore, nil
+}
+
+var transferWorkerRuntime struct {
+	sync.Mutex
+	workers *service.TransferWorkers
+}
+
+var artifactStoreRuntime struct {
+	sync.RWMutex
+	store service.ArtifactStore
+}
+
+var uploadRuntimeRegistry struct {
+	sync.RWMutex
+	registry *service.UploadRuntimeRegistry
+}
+
+func setTransferWorkers(workers *service.TransferWorkers) {
+	transferWorkerRuntime.Lock()
+	transferWorkerRuntime.workers = workers
+	transferWorkerRuntime.Unlock()
+}
+
+func setArtifactStore(store service.ArtifactStore) {
+	artifactStoreRuntime.Lock()
+	artifactStoreRuntime.store = store
+	artifactStoreRuntime.Unlock()
+}
+
+// CurrentArtifactStore returns the object store initialized for file ingress.
+// It may be nil when file ingress is disabled; metadata list APIs remain usable.
+func CurrentArtifactStore() service.ArtifactStore {
+	artifactStoreRuntime.RLock()
+	defer artifactStoreRuntime.RUnlock()
+	return artifactStoreRuntime.store
+}
+
+func setUploadRuntimeRegistry(registry *service.UploadRuntimeRegistry) {
+	uploadRuntimeRegistry.Lock()
+	uploadRuntimeRegistry.registry = registry
+	uploadRuntimeRegistry.Unlock()
+}
+
+func CurrentUploadRuntimeRegistry() *service.UploadRuntimeRegistry {
+	uploadRuntimeRegistry.RLock()
+	defer uploadRuntimeRegistry.RUnlock()
+	return uploadRuntimeRegistry.registry
+}
+
+func StartTransferWorkers(ctx context.Context) {
+	transferWorkerRuntime.Lock()
+	workers := transferWorkerRuntime.workers
+	transferWorkerRuntime.Unlock()
+	if workers != nil {
+		go workers.Run(ctx)
+	}
+}
+
+func StopTransferWorkers(ctx context.Context) error {
+	transferWorkerRuntime.Lock()
+	workers := transferWorkerRuntime.workers
+	transferWorkerRuntime.Unlock()
+	if workers == nil {
+		return nil
+	}
+	return workers.Stop(ctx)
 }

@@ -2,15 +2,21 @@ package tr069
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
+	"github.com/ddddddddwp/gva-acs/server/middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/api"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/engine"
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/initialize"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/router"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/ddddddddwp/gva-acs/server/utils"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -27,15 +33,23 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 		utils.GlobalSystemEvents.RegisterConfigChangeHandler(initialize.ReloadConfig)
 		utils.GlobalSystemEvents.RegisterShutdownHandler(func(ctx context.Context) error {
 			adapter.StopRedisDispatcher()
-			return adapter.StopCommandWakeConsumer(ctx)
+			return errors.Join(engine.Stop(ctx), adapter.StopCommandWakeConsumer(ctx), initialize.StopTransferWorkers(ctx))
 		})
 	})
-	initialize.ReloadConfig()
+	if err := initialize.LoadConfig(); err != nil {
+		panic(fmt.Errorf("load TR-069 configuration: %w", err))
+	}
 	tr069Global.SetStartupConfig(config.CurrentRuntime().Settings)
-	initialize.Gorm(context.Background())
+	if err := initialize.Gorm(context.Background()); err != nil {
+		panic(fmt.Errorf("initialize TR-069 database: %w", err))
+	}
+	if _, err := engine.Get(); err != nil {
+		global.GVA_LOG.Error("failed to initialize TR-069 engine", zap.Error(err))
+	}
 	initialize.Api(context.Background())
 	initialize.Menu(context.Background())
 	initialize.StartTR069Server()
+	initialize.StartTransferWorkers(context.Background())
 
 	adapter.StartRedisDispatcher(context.Background(), adapter.RedisDispatcherConfig{
 		IngestStream: adapter.RedisIngestStreamKey,
@@ -53,12 +67,25 @@ func (p *tr069Plugin) Register(group *gin.Engine) {
 	}); err != nil {
 		global.GVA_LOG.Error("failed to start TR-069 command wake consumer", zap.Error(err))
 	}
+	if err := service.NewCommandQueueAdvancer(global.GVA_DB, adapter.EnqueueImmediate).Recover(context.Background()); err != nil {
+		global.GVA_LOG.Error("failed to recover TR-069 command FIFO", zap.Error(err))
+	}
 
 	r := group.Group("tr069")
-	deviceRouter := new(router.DeviceRouter)
+	r.Use(middleware.JWTAuth()).Use(middleware.CasbinHandler())
+	runtimeCleaner := adapter.NewRedisDeviceRuntimeCleaner(global.GVA_REDIS)
+	deletion := service.NewDeviceDeletionService(
+		global.GVA_DB,
+		initialize.CurrentArtifactStore(),
+		initialize.CurrentUploadRuntimeRegistry(),
+		runtimeCleaner,
+	)
+	deviceRouter := router.NewDeviceRouter(api.NewDeviceApi(deletion))
 	deviceRouter.InitDeviceRouter(r)
 	alarmRouter := new(router.AlarmRouter)
 	alarmRouter.InitAlarmRouter(r)
+	artifactRouter := router.NewArtifactRouter(service.NewTransferStore(global.GVA_DB), initialize.CurrentArtifactStore())
+	artifactRouter.InitArtifactRouter(r)
 }
 
 func (p *tr069Plugin) RouterPath() string {

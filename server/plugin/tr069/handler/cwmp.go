@@ -2,17 +2,17 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"io"
-	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	gvaGlobal "github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/engine"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/ddddddddwp/tr069-core-only/factory"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
@@ -23,14 +23,11 @@ import (
 )
 
 func CWMPHandler(c *gin.Context) {
-	reqIDVal, _ := c.Get("requestId")
-	reqID, _ := reqIDVal.(string)
-	if reqID == "" {
-		reqID = c.GetHeader("X-Request-Id")
-		if reqID == "" {
-			reqID = uuid.NewString()
-		}
-		c.Set("requestId", reqID)
+	traceIDValue, _ := c.Get("traceId")
+	traceID, _ := traceIDValue.(string)
+	if traceID == "" {
+		traceID = uuid.NewString()
+		c.Set("traceId", traceID)
 	}
 
 	body, err := io.ReadAll(c.Request.Body)
@@ -43,7 +40,7 @@ func CWMPHandler(c *gin.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = trace.WithRequestID(ctx, reqID)
+	ctx = trace.WithTraceID(ctx, traceID)
 	clientIP := remoteIPFromRequest(c.Request)
 
 	trace.Add(ctx, "http.recv", "request received", map[string]string{
@@ -101,7 +98,7 @@ func CWMPHandler(c *gin.Context) {
 	})
 	handleStart := time.Now()
 	resp, err := eng.Handle(ctx, &core.Request{
-		ID:         reqID,
+		TraceID:    traceID,
 		RemoteIP:   clientIP,
 		Headers:    headers,
 		Body:       body,
@@ -112,7 +109,7 @@ func CWMPHandler(c *gin.Context) {
 		"ok":      strconv.FormatBool(err == nil),
 	})
 	if err != nil {
-		c.Status(http.StatusInternalServerError)
+		c.Status(cwmpErrorStatus(err))
 		return
 	}
 
@@ -135,8 +132,15 @@ func CWMPHandler(c *gin.Context) {
 	c.Data(resp.StatusCode, "text/xml", resp.Body)
 
 	if config.CurrentRuntime().Settings.Debug {
-		gvaGlobal.GVA_LOG.Debug("TR069 Trace", zap.String("requestId", reqID), zap.Any("trace", trace.Get(ctx, reqID)))
+		gvaGlobal.GVA_LOG.Debug("TR069 Trace", zap.String("traceId", traceID), zap.Any("trace", trace.Get(ctx, traceID)))
 	}
+}
+
+func cwmpErrorStatus(err error) int {
+	if errors.Is(err, service.ErrDeviceDeleting) {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }
 
 func copyHeaderIfPresent(out map[string]string, r *http.Request, name string) {
@@ -146,27 +150,4 @@ func copyHeaderIfPresent(out map[string]string, r *http.Request, name string) {
 	if v := r.Header.Get(name); v != "" {
 		out[name] = v
 	}
-}
-
-func remoteIPFromRequest(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			ip := strings.TrimSpace(parts[0])
-			if ip != "" {
-				return ip
-			}
-		}
-	}
-	if xrip := strings.TrimSpace(r.Header.Get("X-Real-Ip")); xrip != "" {
-		return xrip
-	}
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err == nil && host != "" {
-		return host
-	}
-	return strings.TrimSpace(r.RemoteAddr)
 }

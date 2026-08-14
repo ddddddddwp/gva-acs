@@ -34,9 +34,10 @@ type Device struct {
 	CellID         string `json:"cellId" gorm:"comment:小区ID(ECGI/NCI)"`
 
 	// Management
-	GroupId uint   `json:"groupId" gorm:"index;comment:分组ID"`
-	Remark  string `json:"remark" gorm:"comment:备注信息"`
-	IsWhite bool   `json:"isWhite" gorm:"default:false;comment:是否白名单设备"`
+	GroupId    uint       `json:"groupId" gorm:"index;comment:分组ID"`
+	Remark     string     `json:"remark" gorm:"comment:备注信息"`
+	IsWhite    bool       `json:"isWhite" gorm:"default:false;comment:是否白名单设备"`
+	DeletingAt *time.Time `json:"-" gorm:"index;comment:设备级联删除开始时间"`
 }
 
 func (Device) TableName() string {

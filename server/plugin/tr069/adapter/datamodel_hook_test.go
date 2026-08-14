@@ -18,12 +18,123 @@ type captureIngest struct {
 	cmds []*core.Command
 }
 
+type transferLifecycleSpy struct {
+	uploadCommandID string
+	uploadStatus    int
+	commandKey      string
+	faultCode       int
+	faultString     string
+}
+
+func (s *transferLifecycleSpy) OnUploadResponse(_ context.Context, commandID string, status int, _ time.Time) error {
+	s.uploadCommandID = commandID
+	s.uploadStatus = status
+	return nil
+}
+
+func (s *transferLifecycleSpy) OnTransferComplete(_ context.Context, commandKey string, faultCode int, faultString string, _ time.Time) error {
+	s.commandKey = commandKey
+	s.faultCode = faultCode
+	s.faultString = faultString
+	return nil
+}
+
+func TestDataModelHookForwardsUploadResponseAndTransferComplete(t *testing.T) {
+	inflight := NewMemoryInflightRepo(10 * time.Minute)
+	ctx := context.Background()
+	if err := inflight.Save(ctx, core.InflightRequest{DeviceKey: "8CE468-BS-HOOK", CommandID: "upload-command", CwmpID: "cwmp-upload", RequestName: tr069.MethodUpload}); err != nil {
+		t.Fatalf("save inflight: %v", err)
+	}
+	spy := new(transferLifecycleSpy)
+	hook := NewDataModelHook(nil, inflight, nil, WithDataModelHookTransferLifecycle(spy), WithDataModelHookNow(func() time.Time {
+		return time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC)
+	}))
+	session := &core.Session{DeviceKey: "8CE468-BS-HOOK"}
+	handled, err := hook.OnResponse(ctx, session, &tr069.Message{Method: tr069.MethodUploadResponse, ID: "cwmp-upload", Status: 1})
+	if err != nil || !handled || spy.uploadCommandID != "upload-command" || spy.uploadStatus != 1 {
+		t.Fatalf("handled=%v spy=%#v err=%v", handled, spy, err)
+	}
+	handled, err = hook.OnTransferComplete(ctx, session, &tr069.Message{Method: tr069.MethodTransferComplete, CommandKey: "command-key", TransferFaultCode: 9010, TransferFaultString: "transfer failed"})
+	if err != nil || !handled || spy.commandKey != "command-key" || spy.faultCode != 9010 || spy.faultString != "transfer failed" {
+		t.Fatalf("transfer handled=%v spy=%#v err=%v", handled, spy, err)
+	}
+}
+
 func (i *captureIngest) Enqueue(ctx context.Context, cmd *core.Command) error {
 	_ = ctx
 	if cmd != nil {
 		i.cmds = append(i.cmds, cmd)
 	}
 	return nil
+}
+
+func TestDataModelHookGPVCollectsConnectionProfile(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	previousDB := appGlobal.GVA_DB
+	appGlobal.GVA_DB = db
+	t.Cleanup(func() { appGlobal.GVA_DB = previousDB })
+	if err := db.AutoMigrate(new(model.Device), new(model.DataModelValue), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	device := model.Device{OUI: "001122", SerialNumber: "GPV-PROFILE"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	cipher, err := NewCredentialCipher(testCredentialConfig(0x62))
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	profiles := NewConnectionProfileRepository(db, cipher)
+	hook := NewDataModelHook(nil, nil, nil, WithDataModelHookProfiles(profiles))
+
+	if err := hook.persistGPV(context.Background(), device.ID, []tr069.Parameter{
+		{Name: connectionRequestURLName, Value: "http://127.0.0.1:8400", Type: "xsd:string"},
+		{Name: connectionRequestUsernameName, Value: "gpv-user", Type: "xsd:string"},
+	}); err != nil {
+		t.Fatalf("persist GPV: %v", err)
+	}
+
+	profile := loadConnectionProfile(t, db, device.ID)
+	if profile.DiscoveredURL != "http://127.0.0.1:8400" || profile.Username != "gpv-user" {
+		t.Fatalf("profile=%#v", profile)
+	}
+}
+
+func TestDataModelHookProvisionerSchedulesNeededGPVProfile(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	previousDB := appGlobal.GVA_DB
+	appGlobal.GVA_DB = db
+	t.Cleanup(func() { appGlobal.GVA_DB = previousDB })
+	if err := db.AutoMigrate(new(model.Device), new(model.DataModelValue), new(model.ConnectionProfile)); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	device := model.Device{OUI: "001122", SerialNumber: "GPV-SCHEDULE"}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	cipher, err := NewCredentialCipher(testCredentialConfig(0x64))
+	if err != nil {
+		t.Fatalf("new cipher: %v", err)
+	}
+	scheduler := &recordingCredentialScheduler{accept: true}
+	hook := NewDataModelHook(nil, nil, nil,
+		WithDataModelHookProfiles(NewConnectionProfileRepository(db, cipher)),
+		WithDataModelHookProvisioner(scheduler),
+	)
+	if err := hook.persistGPV(context.Background(), device.ID, []tr069.Parameter{
+		{Name: connectionRequestURLName, Value: "http://127.0.0.1:8400", Type: "xsd:string"},
+	}); err != nil {
+		t.Fatalf("persist GPV: %v", err)
+	}
+	if len(scheduler.deviceIDs) != 1 || scheduler.deviceIDs[0] != device.ID {
+		t.Fatalf("scheduled device IDs = %#v, want [%d]", scheduler.deviceIDs, device.ID)
+	}
 }
 
 func TestDataModelHook_PersistsGPVAndExpandsGPN(t *testing.T) {

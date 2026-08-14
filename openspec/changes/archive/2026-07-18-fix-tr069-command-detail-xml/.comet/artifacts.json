@@ -1,0 +1,8 @@
+{
+  "openspec_proposal": "openspec/changes/fix-tr069-command-detail-xml/proposal.md",
+  "openspec_design": "openspec/changes/fix-tr069-command-detail-xml/design.md",
+  "openspec_tasks": "openspec/changes/fix-tr069-command-detail-xml/tasks.md",
+  "build_tasks_complete": "openspec/changes/fix-tr069-command-detail-xml/tasks.md",
+  "verification_report": "docs/superpowers/reports/2026-07-18-fix-tr069-command-detail-xml-verify.md",
+  "archive_directory": "openspec/changes/archive/2026-07-18-fix-tr069-command-detail-xml"
+}

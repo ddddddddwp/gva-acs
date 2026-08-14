@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/redact"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -16,6 +17,8 @@ var (
 	ErrCommandTransitionConflict = errors.New("command transition conflict")
 	ErrInvalidCommandTransition  = errors.New("invalid command transition")
 	ErrInvalidCommandJSON        = errors.New("invalid command JSON")
+	ErrInvalidCommandXML         = errors.New("invalid command XML")
+	ErrUncorrelatedCommandXML    = errors.New("uncorrelated command XML")
 	ErrInvalidCommandStatus      = errors.New("invalid command status")
 )
 
@@ -47,6 +50,13 @@ type CommandDetail struct {
 	Command model.Command        `json:"command"`
 	Events  []model.CommandEvent `json:"events"`
 	XML     []model.CommandXML   `json:"xml"`
+}
+
+type CommandXMLCorrelation struct {
+	CommandKey string
+	DeviceKey  string
+	Method     string
+	EventCodes []string
 }
 
 type CommandStore struct {
@@ -204,10 +214,61 @@ func (s *CommandStore) AppendEvent(ctx context.Context, event *model.CommandEven
 }
 
 func (s *CommandStore) SaveXML(ctx context.Context, record *model.CommandXML) error {
+	return s.SaveXMLWithCorrelation(ctx, record, CommandXMLCorrelation{})
+}
+
+func (s *CommandStore) SaveXMLWithCorrelation(ctx context.Context, record *model.CommandXML, correlation CommandXMLCorrelation) error {
 	if record == nil {
 		return errors.New("command XML is required")
 	}
-	return s.db.WithContext(ctx).Create(record).Error
+	copyRecord := *record
+	if copyRecord.CommandID == "" {
+		commandID, err := s.resolveXMLCommandID(ctx, copyRecord.CWMPID, correlation)
+		if err != nil {
+			return err
+		}
+		copyRecord.CommandID = commandID
+	}
+	sanitized, err := redact.CWMPXML(append([]byte(nil), record.Payload...))
+	if err != nil {
+		return ErrInvalidCommandXML
+	}
+	copyRecord.Payload = sanitized
+	return s.db.WithContext(ctx).Create(&copyRecord).Error
+}
+
+func (s *CommandStore) resolveXMLCommandID(ctx context.Context, cwmpID string, correlation CommandXMLCorrelation) (string, error) {
+	queries := make([]*gorm.DB, 0, 3)
+	if correlation.CommandKey != "" {
+		queries = append(queries, s.db.WithContext(ctx).
+			Select("command_id").
+			Where("command_key = ?", correlation.CommandKey).
+			Order("created_at DESC"))
+	}
+	if cwmpID != "" {
+		queries = append(queries, s.db.WithContext(ctx).
+			Select("command_id").
+			Where("cwmp_id = ?", cwmpID).
+			Order("created_at DESC"))
+	}
+	if correlation.Method == "Inform" && correlation.DeviceKey != "" && hasRebootConfirmationEvent(correlation.EventCodes) {
+		queries = append(queries, s.db.WithContext(ctx).
+			Select("command_id").
+			Where("device_key = ? AND operation = ? AND status = ?", correlation.DeviceKey, "Reboot", model.CommandStatusWaitingReboot).
+			Order("created_at ASC").Order("command_id ASC"))
+	}
+
+	for _, query := range queries {
+		var command model.Command
+		err := query.First(&command).Error
+		if err == nil {
+			return command.CommandID, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", err
+		}
+	}
+	return "", ErrUncorrelatedCommandXML
 }
 
 func (s *CommandStore) HeadForDevice(ctx context.Context, deviceID uint) (model.Command, error) {
@@ -280,6 +341,20 @@ func (s *CommandStore) Detail(ctx context.Context, commandID string) (CommandDet
 			Order("id ASC").
 			Find(&detail.XML).Error
 	})
+	if err == nil && detail.Command.CommandKey != nil {
+		params := make(map[string]any)
+		if len(detail.Command.ParamsJSON) > 0 && string(detail.Command.ParamsJSON) != "null" {
+			if err := json.Unmarshal(detail.Command.ParamsJSON, &params); err != nil {
+				return detail, fmt.Errorf("%w: params", ErrInvalidCommandJSON)
+			}
+		}
+		params["commandKey"] = *detail.Command.CommandKey
+		merged, marshalErr := json.Marshal(params)
+		if marshalErr != nil {
+			return detail, fmt.Errorf("encode command detail params: %w", marshalErr)
+		}
+		detail.Command.ParamsJSON = model.LongTextJSON(merged)
+	}
 	return detail, err
 }
 

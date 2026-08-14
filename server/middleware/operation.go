@@ -22,6 +22,10 @@ import (
 var respPool sync.Pool
 var bufferSize = 1024
 
+const operationRecordBodyRedacted = "[请求体脱敏失败]"
+
+type OperationBodySanitizer func([]byte) ([]byte, error)
+
 func init() {
 	respPool.New = func() interface{} {
 		return make([]byte, bufferSize)
@@ -29,6 +33,13 @@ func init() {
 }
 
 func OperationRecord() gin.HandlerFunc {
+	return OperationRecordWithBodySanitizer(nil)
+}
+
+// OperationRecordWithBodySanitizer preserves the request bytes consumed by the
+// handler while allowing a sanitized copy to be stored in the operation log.
+// Sanitizer failures hide the recorded body rather than persisting the input.
+func OperationRecordWithBodySanitizer(sanitize OperationBodySanitizer) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body []byte
 		var userId int
@@ -53,6 +64,15 @@ func OperationRecord() gin.HandlerFunc {
 			}
 			body, _ = json.Marshal(&m)
 		}
+		recordBody := append([]byte(nil), body...)
+		if sanitize != nil && len(recordBody) > 0 {
+			sanitized, err := sanitize(append([]byte(nil), recordBody...))
+			if err != nil {
+				recordBody = []byte(operationRecordBodyRedacted)
+			} else {
+				recordBody = sanitized
+			}
+		}
 		claims, _ := utils.GetClaims(c)
 		if claims != nil && claims.BaseClaims.ID != 0 {
 			userId = int(claims.BaseClaims.ID)
@@ -76,10 +96,10 @@ func OperationRecord() gin.HandlerFunc {
 		if strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
 			record.Body = "[文件]"
 		} else {
-			if len(body) > bufferSize {
+			if len(recordBody) > bufferSize {
 				record.Body = "[超出记录长度]"
 			} else {
-				record.Body = string(body)
+				record.Body = string(recordBody)
 			}
 		}
 

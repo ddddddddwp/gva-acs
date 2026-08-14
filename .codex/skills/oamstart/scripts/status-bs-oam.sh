@@ -6,7 +6,8 @@ runtime_root="${BS_OAM_RUNTIME_ROOT:-/root/code/gva-acs/bs-runtime}"
 config_dir="${BS_OAM_CONFIG_DIR:-${runtime_root}/root/hb_ping/BS_config}"
 log_dir="${BS_OAM_LOG_DIR:-${runtime_root}/logs}"
 wait_seconds="${BS_OAM_WAIT_SECONDS:-60}"
-connection_url="${BS_OAM_CONNECTION_URL:-http://127.0.0.1:8400}"
+web_url="${BS_OAM_WEB_URL:-http://127.0.0.1:8400}"
+connection_url="${BS_OAM_CONNECTION_URL:-http://127.0.0.1:7547}"
 required_processes=(oamProcess odsNameServer upapp m2m.x86.bs)
 
 pass() { printf '[PASS] %s\n' "$*"; }
@@ -24,7 +25,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 if ! command -v curl >/dev/null 2>&1; then
-  fail "curl is required to check ${connection_url}."
+  fail "curl is required to check ${web_url} and ${connection_url}."
   exit 1
 fi
 
@@ -45,6 +46,7 @@ stack_ready() {
   for process in "${required_processes[@]}"; do
     docker exec "$container" pgrep -f -- "$process" >/dev/null 2>&1 || return 1
   done
+  curl -sS --max-time 3 -o /dev/null "$web_url" >/dev/null 2>&1 || return 1
   curl -sS --max-time 3 -o /dev/null "$connection_url" >/dev/null 2>&1 || return 1
 }
 
@@ -66,10 +68,10 @@ else
 fi
 
 restart_policy="$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$container" 2>/dev/null || true)"
-if [ "$restart_policy" = "unless-stopped" ]; then
-  pass "Restart policy is unless-stopped."
+if [ "$restart_policy" = "no" ]; then
+  pass "Restart policy is no (manual start only)."
 else
-  fail "Restart policy is '${restart_policy:-unknown}', expected unless-stopped."
+  fail "Restart policy is '${restart_policy:-unknown}', expected no."
   failures=$((failures + 1))
 fi
 
@@ -81,6 +83,13 @@ for process in "${required_processes[@]}"; do
     failures=$((failures + 1))
   fi
 done
+
+if curl -sS --max-time 3 -o /dev/null "$web_url" >/dev/null 2>&1; then
+  pass "Web endpoint responds at ${web_url}."
+else
+  fail "Web endpoint is unavailable at ${web_url}."
+  failures=$((failures + 1))
+fi
 
 if curl -sS --max-time 3 -o /dev/null "$connection_url" >/dev/null 2>&1; then
   pass "Connection Request endpoint responds at ${connection_url}."

@@ -120,6 +120,7 @@ func TestCommandTransitionMapAndTerminalHelpers(t *testing.T) {
 		model.CommandStatusBuilding,
 		model.CommandStatusSent,
 		model.CommandStatusWaitingTransfer,
+		model.CommandStatusWaitingReboot,
 		model.CommandStatusCompleted,
 		model.CommandStatusFailed,
 		model.CommandStatusTimeout,
@@ -141,8 +142,12 @@ func TestCommandTransitionMapAndTerminalHelpers(t *testing.T) {
 		{model.CommandStatusBuilding, model.CommandStatusWaitingDevice},
 		{model.CommandStatusBuilding, model.CommandStatusSent},
 		{model.CommandStatusSent, model.CommandStatusWaitingTransfer},
+		{model.CommandStatusSent, model.CommandStatusWaitingReboot},
 		{model.CommandStatusSent, model.CommandStatusCompleted},
 		{model.CommandStatusWaitingTransfer, model.CommandStatusCompleted},
+		{model.CommandStatusWaitingReboot, model.CommandStatusCompleted},
+		{model.CommandStatusWaitingReboot, model.CommandStatusFailed},
+		{model.CommandStatusWaitingReboot, model.CommandStatusTimeout},
 	}
 	for _, transition := range allowed {
 		if !model.CanTransitionCommand(transition[0], transition[1]) {
@@ -153,6 +158,9 @@ func TestCommandTransitionMapAndTerminalHelpers(t *testing.T) {
 	for _, from := range accepted {
 		if from != model.CommandStatusSent && model.CanTransitionCommand(from, model.CommandStatusWaitingTransfer) {
 			t.Errorf("WAITING_TRANSFER must not follow %s", from)
+		}
+		if from != model.CommandStatusSent && model.CanTransitionCommand(from, model.CommandStatusWaitingReboot) {
+			t.Errorf("WAITING_REBOOT must not follow %s", from)
 		}
 	}
 	for _, terminal := range []string{model.CommandStatusCompleted, model.CommandStatusFailed, model.CommandStatusTimeout} {
@@ -349,13 +357,12 @@ func TestCommandStoreAppendEventAndSaveXMLPreservePayloads(t *testing.T) {
 		t.Fatalf("append event: %v", err)
 	}
 
-	xmlPayload := []byte("<cwmp:Download><Password>secret</Password></cwmp:Download>\x00")
+	xmlPayload := []byte("<Download><Password>secret</Password></Download>")
 	if err := store.SaveXML(context.Background(), &model.CommandXML{
 		CommandID: command.CommandID,
 		Direction: "outbound",
 		Method:    "Download",
 		CWMPID:    "cwmp-12",
-		RequestID: "request-12",
 		Payload:   xmlPayload,
 		ExpiresAt: now.Add(30 * 24 * time.Hour),
 		CreatedAt: now,
@@ -376,6 +383,51 @@ func TestCommandStoreAppendEventAndSaveXMLPreservePayloads(t *testing.T) {
 	}
 	if string(gotXML.Payload) != string(xmlPayload) {
 		t.Fatalf("XML payload changed: got %q want %q", gotXML.Payload, xmlPayload)
+	}
+}
+
+func TestCommandStoreSaveXMLSanitizesCopyBeforePersistence(t *testing.T) {
+	db := newCommandStoreTestDB(t)
+	store := NewCommandStore(db)
+	payload := []byte(`<Envelope><ParameterValueStruct><Name>Device.ManagementServer.ConnectionRequestPassword</Name><Value>database-secret</Value></ParameterValueStruct><Password>download-secret</Password></Envelope>`)
+	original := append([]byte(nil), payload...)
+	record := &model.CommandXML{CommandID: "cmd-redact", Payload: payload, CreatedAt: time.Now()}
+
+	if err := store.SaveXML(context.Background(), record); err != nil {
+		t.Fatalf("save XML: %v", err)
+	}
+	if string(record.Payload) != string(original) {
+		t.Fatalf("caller payload mutated: got %q want %q", record.Payload, original)
+	}
+	var persisted model.CommandXML
+	if err := db.First(&persisted, "command_id = ?", record.CommandID).Error; err != nil {
+		t.Fatalf("load XML: %v", err)
+	}
+	if strings.Contains(string(persisted.Payload), "database-secret") || !strings.Contains(string(persisted.Payload), "******") {
+		t.Fatalf("persisted XML was not sanitized: %s", persisted.Payload)
+	}
+	if !strings.Contains(string(persisted.Payload), "download-secret") {
+		t.Fatalf("unrelated password changed: %s", persisted.Payload)
+	}
+}
+
+func TestCommandStoreSaveXMLRejectsMalformedPayloadWithoutCreatingRow(t *testing.T) {
+	db := newCommandStoreTestDB(t)
+	store := NewCommandStore(db)
+	record := &model.CommandXML{
+		CommandID: "cmd-malformed",
+		Payload:   []byte(`<Envelope><ParameterValueStruct><Name>Device.ManagementServer.ConnectionRequestPassword</Name><Value>database-secret</Envelope>`),
+	}
+
+	if err := store.SaveXML(context.Background(), record); !errors.Is(err, ErrInvalidCommandXML) {
+		t.Fatalf("save error = %v, want ErrInvalidCommandXML", err)
+	}
+	var count int64
+	if err := db.Model(new(model.CommandXML)).Where("command_id = ?", record.CommandID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("persisted rows = %d, want 0", count)
 	}
 }
 
@@ -475,6 +527,27 @@ func TestCommandStoreHeadForDeviceReturnsEarliestNonTerminalCommand(t *testing.T
 	}
 }
 
+func TestCommandStoreWaitingRebootBlocksFIFO(t *testing.T) {
+	db := newCommandStoreTestDB(t)
+	store := NewCommandStore(db)
+	base := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	commands := []model.Command{
+		{CommandID: "waiting-reboot-head", DeviceID: 23, Status: model.CommandStatusWaitingReboot, CreatedAt: base},
+		{CommandID: "queued-behind-reboot", DeviceID: 23, Status: model.CommandStatusQueued, CreatedAt: base.Add(time.Second)},
+	}
+	if err := db.Create(&commands).Error; err != nil {
+		t.Fatalf("seed commands: %v", err)
+	}
+
+	head, err := store.HeadForDevice(context.Background(), 23)
+	if err != nil {
+		t.Fatalf("head for device: %v", err)
+	}
+	if head.CommandID != "waiting-reboot-head" {
+		t.Fatalf("head command = %q, want waiting-reboot-head", head.CommandID)
+	}
+}
+
 func TestCommandStoreListFiltersAndPaginatesCommands(t *testing.T) {
 	db := newCommandStoreTestDB(t)
 	store := NewCommandStore(db)
@@ -555,6 +628,41 @@ func TestCommandStoreDetailReturnsOrderedEventsAndXML(t *testing.T) {
 	}
 	if len(detail.XML) != 2 || detail.XML[0].Direction != "outbound" || detail.XML[1].Direction != "inbound" {
 		t.Fatalf("ordered XML = %#v", detail.XML)
+	}
+}
+
+func TestCommandStoreDetailMergesCommandKeyWithoutMutatingPersistedParams(t *testing.T) {
+	db := newCommandStoreTestDB(t)
+	store := NewCommandStore(db)
+	commandKey := "rpc-detail-command-key"
+	command := model.Command{
+		CommandID:  "cmd-detail-command-key",
+		DeviceID:   42,
+		DeviceKey:  "001122-SN42",
+		Operation:  "Reboot",
+		ParamsJSON: model.LongTextJSON(`{}`),
+		CommandKey: &commandKey,
+		Status:     model.CommandStatusSent,
+		CreatedAt:  time.Now(),
+	}
+	if err := db.Create(&command).Error; err != nil {
+		t.Fatalf("seed command: %v", err)
+	}
+
+	detail, err := store.Detail(context.Background(), command.CommandID)
+	if err != nil {
+		t.Fatalf("command detail: %v", err)
+	}
+	if got := string(detail.Command.ParamsJSON); got != `{"commandKey":"rpc-detail-command-key"}` {
+		t.Fatalf("detail params = %s, want merged commandKey", got)
+	}
+
+	var persisted model.Command
+	if err := db.First(&persisted, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("reload command: %v", err)
+	}
+	if got := string(persisted.ParamsJSON); got != `{}` {
+		t.Fatalf("persisted params = %s, want original {}", got)
 	}
 }
 

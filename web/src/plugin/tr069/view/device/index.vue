@@ -1,6 +1,6 @@
 <template>
-  <div class="device-list-container">
-    <div class="search-box">
+  <div>
+    <div class="gva-search-box">
       <el-form :inline="true" :model="searchInfo" class="demo-form-inline">
         <el-form-item label="序列号">
           <el-input v-model="searchInfo.serialNumber" placeholder="请输入序列号" clearable />
@@ -12,8 +12,8 @@
       </el-form>
     </div>
 
-    <div class="table-box">
-      <div class="btn-list">
+    <div class="gva-table-box">
+      <div class="gva-btn-list">
         <el-button type="primary" :icon="Plus" @click="openDialog">录入设备 (白名单)</el-button>
       </div>
 
@@ -26,33 +26,63 @@
         <el-table-column prop="ip" label="IP地址" width="140" show-overflow-tooltip />
         <el-table-column label="在线状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.online ? 'success' : 'info'" effect="light">
+            <el-tag v-if="scope.row.deleting" type="warning" effect="light">
+              删除中
+            </el-tag>
+            <el-tag v-else :type="scope.row.online ? 'success' : 'info'" effect="light">
               {{ scope.row.online ? '在线' : '离线' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right" align="center">
+        <el-table-column label="操作" width="360" fixed="right" align="center">
           <template #default="scope">
-            <el-button
-              type="primary"
-              link
-              :disabled="!canIssueDeviceCommand(scope.row)"
-              :loading="syncingDeviceIds.has(scope.row.ID)"
-              @click="syncParameters(scope.row)"
-            >同步参数</el-button>
-            <el-button type="primary" link :icon="Connection" @click="openDataModelFromRow(scope.row)">参数</el-button>
-            <el-dropdown trigger="click" @command="command => handleMoreCommand(command, scope.row)">
-              <el-button type="primary" link>
-                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="gpv" :disabled="!canIssueDeviceCommand(scope.row)">获取参数</el-dropdown-item>
-                  <el-dropdown-item command="spv" :disabled="!canIssueDeviceCommand(scope.row)">配置参数</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>删除设备</el-dropdown-item>
-                </el-dropdown-menu>
+            <div class="device-row-actions">
+              <template v-if="!scope.row.deleting">
+                <el-button type="primary" link :icon="Connection" @click="openDataModelFromRow(scope.row)">参数</el-button>
+
+                <el-dropdown
+                  v-for="menu in RPC_ACTION_MENUS"
+                  :key="menu.key"
+                  trigger="click"
+                  @command="command => handleMoreCommand(command, scope.row)"
+                >
+                  <el-button type="primary" link>
+                    {{ menu.label }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <template v-for="(group, groupIndex) in menu.groups" :key="group.label">
+                        <el-dropdown-item
+                          disabled
+                          :divided="groupIndex > 0"
+                          class="rpc-group-title"
+                        >
+                          {{ group.label }}
+                        </el-dropdown-item>
+                        <el-dropdown-item
+                          v-for="action in group.actions"
+                          :key="action.key"
+                          :command="action.key"
+                          :disabled="!canIssueRPCAction(scope.row, action)"
+                        >
+                          {{ action.label }}
+                        </el-dropdown-item>
+                      </template>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </template>
-            </el-dropdown>
+
+              <el-button
+                type="danger"
+                link
+                :loading="deletingDeviceId === scope.row.ID"
+                :disabled="deletingDeviceId !== 0 && deletingDeviceId !== scope.row.ID"
+                @click="deleteRow(scope.row)"
+              >
+                {{ scope.row.deleting ? '重试删除' : '删除' }}
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -92,60 +122,11 @@
       </template>
     </el-dialog>
 
-    <el-dialog title="GetParameterValues" v-model="gpvDialogVisible" width="720px" append-to-body>
-      <el-form :model="gpvForm" label-width="140px">
-        <el-form-item label="参数路径(一行一个)">
-          <el-input v-model="gpvForm.pathsText" type="textarea" :rows="10" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="gpvDialogVisible = false">取 消</el-button>
-          <el-button type="primary" @click="submitGPV" :loading="gpvSubmitting" :disabled="!canIssueDeviceCommand(currentRow)">确 定</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <el-dialog title="SetParameterValues" v-model="spvDialogVisible" width="820px" append-to-body>
-      <el-form :model="spvForm" label-width="140px">
-        <el-form-item label="ParameterKey">
-          <el-input v-model="spvForm.parameterKey" />
-        </el-form-item>
-        <el-form-item label="参数列表">
-          <el-table :data="spvForm.parameters" size="small">
-            <el-table-column label="Name" min-width="360">
-              <template #default="scope">
-                <el-input v-model="scope.row.name" />
-              </template>
-            </el-table-column>
-            <el-table-column label="Type" min-width="160">
-              <template #default="scope">
-                <el-input v-model="scope.row.type" />
-              </template>
-            </el-table-column>
-            <el-table-column label="Value" min-width="220">
-              <template #default="scope">
-                <el-input v-model="scope.row.value" />
-              </template>
-            </el-table-column>
-            <el-table-column label="" width="80">
-              <template #default="scope">
-                <el-button type="text" size="small" @click="removeSPVRow(scope.$index)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div class="mt-3">
-            <el-button type="primary" size="small" @click="addSPVRow">新增一行</el-button>
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="spvDialogVisible = false">取 消</el-button>
-          <el-button type="primary" @click="submitSPV" :loading="spvSubmitting" :disabled="!canIssueDeviceCommand(currentRow)">确 定</el-button>
-        </div>
-      </template>
-    </el-dialog>
+    <rpc-command-dialog
+      v-model="rpcDialogVisible"
+      :row="currentRow"
+      :action="currentRPCAction"
+    />
 
     <data-model-viewer
       v-model="dmDrawerVisible"
@@ -158,9 +139,13 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getDeviceList, createDevice, deleteDevice } from '@/plugin/tr069/api/device'
-import { fullDataModelSync, getParameterValues, setParameterValues } from '@/plugin/tr069/api/command'
-import { canIssueDeviceCommand } from '@/plugin/tr069/utils/device-actions'
+import {
+  RPC_ACTION_MENUS,
+  canIssueRPCAction,
+  findRPCAction
+} from '@/plugin/tr069/utils/device-actions'
 import DataModelViewer from './components/data-model-viewer.vue'
+import RpcCommandDialog from './components/rpc-command-dialog.vue'
 
 // 响应式数据
 const loading = ref(false)
@@ -177,17 +162,10 @@ const formData = reactive({
 })
 const addFormRef = ref(null)
 const currentRow = ref({})
-const gpvDialogVisible = ref(false)
-const gpvSubmitting = ref(false)
-const gpvForm = reactive({ pathsText: '' })
-const spvDialogVisible = ref(false)
-const spvSubmitting = ref(false)
-const spvForm = reactive({
-  parameterKey: '',
-  parameters: [{ name: '', type: 'xsd:string', value: '' }]
-})
-const syncingDeviceIds = ref(new Set())
+const currentRPCAction = ref()
+const rpcDialogVisible = ref(false)
 const dmDrawerVisible = ref(false)
+const deletingDeviceId = ref(0)
 
 // 表单校验规则
 const rules = {
@@ -255,116 +233,46 @@ const enterDevice = async () => {
 }
 
 const deleteRow = async (row) => {
+  if (deletingDeviceId.value !== 0) return
+
   try {
-    await ElMessageBox.confirm('确定要删除该设备吗?', '提示', { type: 'warning' })
+    await ElMessageBox.confirm(
+      '删除设备将永久删除该设备的参数树、RPC 记录、告警和全部日志文件，且无法恢复。确定继续吗？',
+      '永久删除设备',
+      {
+        type: 'error',
+        confirmButtonText: '永久删除',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch (error) {
+    return
+  }
+
+  deletingDeviceId.value = row.ID
+  try {
     const res = await deleteDevice(row.ID)
     if (res.code === 0) {
       ElMessage.success('删除成功')
-      getTableData()
+      await getTableData()
     } else {
       ElMessage.error(res.msg || '删除失败')
+      await getTableData()
     }
   } catch (error) {
-    // 用户取消
-  }
-}
-
-const selectCommandDevice = (row) => {
-  currentRow.value = row
-}
-
-const openGPVDialog = (row) => {
-  selectCommandDevice(row)
-  gpvForm.pathsText = 'Device.DeviceInfo.SerialNumber'
-  gpvDialogVisible.value = true
-}
-
-const submitGPV = async () => {
-  if (!currentRow.value.ID) return
-  const paths = (gpvForm.pathsText || '')
-    .split('\n')
-    .map(s => s.trim())
-    .filter(Boolean)
-  if (paths.length === 0) {
-    ElMessage.warning('请填写参数路径')
-    return
-  }
-  gpvSubmitting.value = true
-  try {
-    const res = await getParameterValues(currentRow.value.ID, { paths })
-    if (res.code === 0) {
-      ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
-      gpvDialogVisible.value = false
-    } else {
-      ElMessage.error(res.msg || '下发失败')
-    }
+    ElMessage.error('删除失败，请稍后重试')
+    await getTableData()
   } finally {
-    gpvSubmitting.value = false
-  }
-}
-
-const openSPVDialog = (row) => {
-  selectCommandDevice(row)
-  spvForm.parameterKey = ''
-  spvForm.parameters = [{ name: '', type: 'xsd:string', value: '' }]
-  spvDialogVisible.value = true
-}
-
-const addSPVRow = () => {
-  spvForm.parameters = [...spvForm.parameters, { name: '', type: 'xsd:string', value: '' }]
-}
-
-const removeSPVRow = (idx) => {
-  spvForm.parameters = spvForm.parameters.filter((_, i) => i !== idx)
-}
-
-const submitSPV = async () => {
-  if (!currentRow.value.ID) return
-  const payload = {
-    parameterKey: spvForm.parameterKey,
-    parameters: (spvForm.parameters || [])
-      .map(p => ({ ...p, name: (p.name || '').trim(), type: (p.type || '').trim() }))
-      .filter(p => p.name)
-  }
-  if (payload.parameters.length === 0) {
-    ElMessage.warning('请至少填写一条参数')
-    return
-  }
-  spvSubmitting.value = true
-  try {
-    const res = await setParameterValues(currentRow.value.ID, payload)
-    if (res.code === 0) {
-      ElMessage.success(`已下发，commandId=${res.data?.commandId || '-'}`)
-      spvDialogVisible.value = false
-    } else {
-      ElMessage.error(res.msg || '下发失败')
-    }
-  } finally {
-    spvSubmitting.value = false
-  }
-}
-
-const syncParameters = async (row) => {
-  if (!canIssueDeviceCommand(row) || syncingDeviceIds.value.has(row.ID)) return
-  syncingDeviceIds.value = new Set(syncingDeviceIds.value).add(row.ID)
-  try {
-    const res = await fullDataModelSync(row.ID)
-    if (res.code === 0) {
-      ElMessage.success(`参数同步已下发，commandId=${res.data?.commandId || '-'}`)
-    } else {
-      ElMessage.error(res.msg || '下发失败')
-    }
-  } finally {
-    const next = new Set(syncingDeviceIds.value)
-    next.delete(row.ID)
-    syncingDeviceIds.value = next
+    deletingDeviceId.value = 0
   }
 }
 
 const handleMoreCommand = (command, row) => {
-  if (command === 'gpv') openGPVDialog(row)
-  if (command === 'spv') openSPVDialog(row)
-  if (command === 'delete') deleteRow(row)
+  const action = findRPCAction(command)
+  if (!action || !canIssueRPCAction(row, action)) return
+  currentRow.value = row
+  currentRPCAction.value = action
+  rpcDialogVisible.value = true
 }
 
 const openDataModelFromRow = (row) => {
@@ -379,17 +287,21 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.device-list-container {
-  padding: 20px;
-  background-color: #fff;
+.device-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
 }
-.search-box {
-  margin-bottom: 20px;
+.device-row-actions :deep(.el-button) {
+  margin-left: 0;
 }
-.table-box {
-  background-color: #fff;
-}
-.btn-list {
-  margin-bottom: 10px;
+:deep(.rpc-group-title) {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  cursor: default;
+  opacity: 1;
 }
 </style>

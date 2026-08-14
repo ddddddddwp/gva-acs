@@ -1,8 +1,6 @@
 package initialize
 
 import (
-	"fmt"
-
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/pkg/errors"
@@ -12,23 +10,32 @@ import (
 // ReloadConfig loads TR-069 settings into a local value and atomically publishes
 // a normalized runtime snapshot. It never mutates the legacy startup config.
 func ReloadConfig() {
+	if err := LoadConfig(); err != nil {
+		zap.L().Error("TR069配置加载失败，继续使用上一份有效配置", zap.Error(err))
+	}
+}
+
+// LoadConfig loads, validates, and atomically publishes the TR-069 runtime
+// configuration. Callers during startup can treat a returned error as fatal.
+func LoadConfig() error {
 	if global.GVA_VP == nil {
-		zap.L().Error("TR069配置加载失败: Viper 未初始化")
-		return
+		return errors.New("Viper 未初始化")
 	}
 
 	var next config.TR069Config
 	if err := global.GVA_VP.UnmarshalKey("tr069", &next); err != nil {
-		err = errors.Wrap(err, "初始化TR069配置文件失败!")
-		zap.L().Error(fmt.Sprintf("%+v", err))
-		return
+		return errors.Wrap(err, "初始化TR069配置文件失败")
 	}
 
 	logMissingQueueConfig(next)
 	applyLegacyConfigAliases(&next)
 	next = config.NormalizeRuntimeConfig(next)
+	if err := config.ValidateFileIngress(next); err != nil {
+		return errors.Wrap(err, "TR069文件入口配置无效")
+	}
 	runtime := config.StoreRuntime(next)
 	logRuntimeConfig(runtime.Settings)
+	return nil
 }
 
 func logMissingQueueConfig(next config.TR069Config) {
@@ -116,7 +123,13 @@ func logRuntimeConfig(next config.TR069Config) {
 		zap.Int("commandQueueImmediateTTL", next.CommandQueueImmediateTTL),
 		zap.Int("commandQueueWaitTimeout", next.CommandQueueWaitTimeout),
 		zap.Int("rpcResponseTimeout", next.RPCResponseTimeout),
+		zap.Int("rebootConfirmTimeout", next.RebootConfirmTimeout),
 		zap.Int("transferCompleteTimeout", next.TransferCompleteTimeout),
 		zap.Int("rpcXMLRetentionDays", next.RPCXMLRetentionDays),
+		zap.Bool("connectionRequestAutoProvisionCredentials", next.ConnectionRequest.AutoProvisionCredentials),
+		zap.String("connectionRequestCredentialKeyVersion", next.ConnectionRequest.CredentialKeyVersion),
+		zap.Int("connectionRequestTimeout", next.ConnectionRequest.RequestTimeout),
+		zap.String("connectionRequestAuthScheme", next.ConnectionRequest.AuthScheme),
+		zap.Int("connectionRequestAllowedCIDRCount", len(next.ConnectionRequest.AllowedCIDRs)),
 	)
 }

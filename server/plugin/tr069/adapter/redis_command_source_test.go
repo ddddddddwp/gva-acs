@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
 	req "github.com/ddddddddwp/gva-acs/server/plugin/tr069/model/request"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
@@ -75,10 +77,79 @@ func newRedisCommandSourceTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(new(model.Device), new(model.DeviceRPCMethods), new(model.Command), new(model.CommandEvent)); err != nil {
+	if err := db.AutoMigrate(new(model.Device), new(model.DeviceRPCMethods), new(model.Command), new(model.CommandEvent), new(model.ConnectionProfile)); err != nil {
 		t.Fatalf("migrate command source models: %v", err)
 	}
 	return db
+}
+
+func TestRedisCommandSourceHydratesProtectedConnectionRequestPasswordOnlyInMemory(t *testing.T) {
+	db := newRedisCommandSourceTestDB(t)
+	cipher, err := NewCredentialCipher(config.ConnectionRequestConfig{
+		CredentialKeyVersion:    "v1",
+		CredentialEncryptionKey: base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	})
+	if err != nil {
+		t.Fatalf("create credential cipher: %v", err)
+	}
+	repository := NewConnectionProfileRepository(db, cipher)
+	if _, err := repository.UpdateOverride(context.Background(), 31, ConnectionProfileOverride{
+		OverrideURL: "http://127.0.0.1:8400/",
+		Username:    "acs-user",
+		Password:    "runtime-only-secret",
+	}); err != nil {
+		t.Fatalf("seed connection profile: %v", err)
+	}
+
+	now := time.Now().Add(-time.Second)
+	params, err := service.EncodeRPCRequest("SetParameterValues", req.SetParameterValuesRequest{Parameters: []req.SetParameterValue{
+		{Name: connectionRequestUsernameName, Value: "acs-user", Type: "xsd:string"},
+		{Name: connectionRequestPasswordName, Value: connectionRequestPasswordPlaceholder, Type: "xsd:string"},
+	}})
+	if err != nil {
+		t.Fatalf("encode protected request: %v", err)
+	}
+	command := model.Command{
+		CommandID: "hydrate-password", DeviceID: 31, DeviceKey: "001122-HYDRATE", Operation: "SetParameterValues",
+		ParamsJSON: params, Status: model.CommandStatusWaitingDevice,
+		QueuedAt: now, WaitingAt: &now, CreatedAt: now,
+	}
+	if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+		t.Fatalf("seed protected command: %v", err)
+	}
+
+	source := newRedisCommandSource(db, newCommandSourceLocker(), RedisCommandSourceConfig{InstanceID: "hydrate-test"},
+		WithRedisCommandHydrator(NewConnectionProfilePayloadProtector(repository)))
+	pulled, ack, _, err := source.Pull(context.Background(), command.DeviceKey)
+	if err != nil {
+		t.Fatalf("Pull(): %v", err)
+	}
+	if pulled == nil || ack == nil {
+		t.Fatalf("Pull() = command:%#v ack:%v", pulled, ack != nil)
+	}
+	parameters, ok := pulled.Params["parameters"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("pulled parameters type = %T", pulled.Params["parameters"])
+	}
+	var password string
+	for _, parameter := range parameters {
+		if parameter["name"] == connectionRequestPasswordName {
+			password, _ = parameter["value"].(string)
+		}
+	}
+	if password != "runtime-only-secret" {
+		t.Fatalf("hydrated password = %q", password)
+	}
+	var persisted model.Command
+	if err := db.First(&persisted, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("reload protected command: %v", err)
+	}
+	if strings.Contains(string(persisted.ParamsJSON), "runtime-only-secret") {
+		t.Fatal("plaintext password was persisted after hydration")
+	}
+	if err := ack(context.Background()); err != nil {
+		t.Fatalf("ack hydrated command: %v", err)
+	}
 }
 
 func TestRedisCommandSourceUsesUniqueOwnerPerAcquisitionAndConfiguredTTL(t *testing.T) {
@@ -414,7 +485,7 @@ func TestRedisCommandSourceNackDoesNotRestoreAfterRequestWasSent(t *testing.T) {
 	if err := db.First(&sent, "command_id = ?", command.CommandID).Error; err != nil {
 		t.Fatalf("load sent command: %v", err)
 	}
-	if sent.Status != model.CommandStatusSent || sent.RequestID != "cwmp-sent" {
+	if sent.Status != model.CommandStatusSent || sent.CWMPID != "cwmp-sent" {
 		t.Fatalf("nack restored already sent command: %#v", sent)
 	}
 	if locker.isHeld(RedisDeviceLockPrefix + command.DeviceKey) {
@@ -459,5 +530,48 @@ func TestRedisCommandSourceInjectsTransferCommandKeyAtDispatch(t *testing.T) {
 	}
 	if err := ack(context.Background()); err != nil {
 		t.Fatalf("ack: %v", err)
+	}
+}
+
+func TestRedisCommandSourceInjectsServerCommandKeyAtDispatch(t *testing.T) {
+	tests := []struct {
+		operation string
+		request   any
+	}{
+		{"Download", req.DownloadRequest{FileType: "1 Firmware Upgrade Image", URL: "https://example.test/fw.bin"}},
+		{"Reboot", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.operation, func(t *testing.T) {
+			db := newRedisCommandSourceTestDB(t)
+			paramsJSON, err := service.EncodeRPCRequest(tt.operation, tt.request)
+			if err != nil {
+				t.Fatalf("encode %s: %v", tt.operation, err)
+			}
+			now := time.Now()
+			key := "rpc-server-owned-" + strings.ToLower(tt.operation)
+			command := model.Command{
+				CommandID: "dispatch-" + tt.operation, DeviceID: 1,
+				DeviceKey: "001122-" + strings.ToUpper(tt.operation),
+				Operation: tt.operation, ParamsJSON: paramsJSON, CommandKey: &key,
+				Status: model.CommandStatusWaitingDevice, QueuedAt: now,
+				WaitingAt: &now, CreatedAt: now,
+			}
+			if err := service.NewCommandStore(db).Create(context.Background(), &command); err != nil {
+				t.Fatalf("seed command: %v", err)
+			}
+			source := newRedisCommandSource(db, newCommandSourceLocker(),
+				RedisCommandSourceConfig{InstanceID: "server-key-test"})
+			pulled, ack, _, err := source.Pull(context.Background(), command.DeviceKey)
+			if err != nil {
+				t.Fatalf("Pull: %v", err)
+			}
+			if pulled == nil || pulled.Params["commandKey"] != key {
+				t.Fatalf("dispatched params = %#v, want commandKey %q", pulled, key)
+			}
+			if err := ack(context.Background()); err != nil {
+				t.Fatalf("ack: %v", err)
+			}
+		})
 	}
 }

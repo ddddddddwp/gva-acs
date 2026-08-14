@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -19,9 +20,61 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type GormDeviceRepo struct{}
+type GormDeviceRepo struct {
+	db              *gorm.DB
+	profiles        *ConnectionProfileRepository
+	provisioner     ConnectionCredentialScheduler
+	rebootConfirmer RebootInformConfirmer
+	uploadBinder    UploadIdentityBinder
+}
+
+type RebootInformConfirmer interface {
+	ConfirmFromInform(context.Context, uint, []string, time.Time) error
+}
+
+type UploadIdentityBinder interface {
+	Bind(context.Context, UploadIdentityBinding, time.Duration) error
+}
+
+func NewGormDeviceRepo(db *gorm.DB, profiles *ConnectionProfileRepository, provisioners ...ConnectionCredentialScheduler) *GormDeviceRepo {
+	repo := &GormDeviceRepo{db: db, profiles: profiles}
+	if len(provisioners) > 0 {
+		repo.provisioner = provisioners[0]
+	}
+	return repo
+}
+
+func (r *GormDeviceRepo) SetRebootInformConfirmer(confirmer RebootInformConfirmer) {
+	if r != nil {
+		r.rebootConfirmer = confirmer
+	}
+}
+
+func (r *GormDeviceRepo) SetUploadIdentityBinder(binder UploadIdentityBinder) {
+	if r != nil {
+		r.uploadBinder = binder
+	}
+}
+
+func (r *GormDeviceRepo) database() *gorm.DB {
+	if r != nil && r.db != nil {
+		return r.db
+	}
+	return global.GVA_DB
+}
+
+func (r *GormDeviceRepo) profileRepository() *ConnectionProfileRepository {
+	if r != nil && r.profiles != nil {
+		return r.profiles
+	}
+	return NewConnectionProfileRepository(r.database(), nil)
+}
 
 func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.InformSummary, ip string) (string, error) {
+	db := r.database()
+	if db == nil {
+		return "", gorm.ErrInvalidDB
+	}
 	deviceID, ok := deviceIDFromContext(ctx)
 	if !ok {
 		deviceID = nil
@@ -46,6 +99,17 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	}
 	if serial == "" {
 		return "", nil
+	}
+	var existing model.Device
+	existingErr := db.Unscoped().WithContext(ctx).
+		Select("id", "deleting_at").
+		Where("serial_number = ?", serial).
+		First(&existing).Error
+	if existingErr == nil && existing.DeletingAt != nil {
+		return "", service.ErrDeviceDeleting
+	}
+	if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+		return "", existingErr
 	}
 
 	device := model.Device{
@@ -76,26 +140,29 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 		}
 	}
 
-	err := global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "serial_number"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"oui",
-			"product_class",
-			"manufacturer",
-			"software_ver",
-			"hardware_ver",
-			"spec_ver",
-			"ip",
-			"connection_req_url",
-			"last_inform",
-		}),
+	updateColumns := []string{
+		"oui",
+		"product_class",
+		"manufacturer",
+		"software_ver",
+		"hardware_ver",
+		"spec_ver",
+		"ip",
+		"last_inform",
+	}
+	if device.ConnectionReqURL != "" {
+		updateColumns = append(updateColumns, "connection_req_url")
+	}
+	err := db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "serial_number"}},
+		DoUpdates: clause.AssignmentColumns(updateColumns),
 	}).Create(&device).Error
 	if err != nil {
 		return "", err
 	}
 
 	// Force restore if soft-deleted
-	if err := global.GVA_DB.Unscoped().Model(&model.Device{}).Where("serial_number = ?", serial).Update("deleted_at", nil).Error; err != nil {
+	if err := db.Unscoped().Model(&model.Device{}).Where("serial_number = ?", serial).Update("deleted_at", nil).Error; err != nil {
 		global.GVA_LOG.Warn("failed to restore soft-deleted device", zap.String("serial", serial), zap.Error(err))
 	}
 
@@ -111,16 +178,35 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 	// But does it clear deleted_at? Our OnConflict columns didn't include deleted_at.
 	// Let's add Unscoped to be safe and check if we need to restore it.
 
+	var persistedDeviceID uint
+	if r.uploadBinder != nil && ip != "" {
+		var persisted model.Device
+		if err := db.Unscoped().WithContext(ctx).Select("id, serial_number, oui, product_class").Where("serial_number = ?", serial).First(&persisted).Error; err != nil {
+			if global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to resolve device for upload identity binding", zap.String("serial", serial), zap.Error(err))
+			}
+		} else {
+			persistedDeviceID = persisted.ID
+			binding := UploadIdentityBinding{
+				DeviceID: persisted.ID, IP: ip, OUI: persisted.OUI,
+				ProductClass: persisted.ProductClass, SerialNumber: persisted.SerialNumber,
+			}
+			if err := r.uploadBinder.Bind(ctx, binding, config.CurrentRuntime().FileIngress.IdentityBindingTTL); err != nil && global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to bind Inform upload identity", zap.Uint("deviceID", persisted.ID), zap.String("stage", "inform.identity_bind"), zap.Error(err))
+			}
+		}
+	}
 	// 2. Sync parameters from Inform to DataModelValue
 	if info != nil && len(info.Params) > 0 {
 		var dbDevice model.Device
 		// Use Unscoped to find the device even if it was soft-deleted
-		if err := global.GVA_DB.Unscoped().WithContext(ctx).Select("id, deleted_at").Where("serial_number = ?", serial).First(&dbDevice).Error; err != nil {
+		if err := db.Unscoped().WithContext(ctx).Select("id, deleted_at").Where("serial_number = ?", serial).First(&dbDevice).Error; err != nil {
 			global.GVA_LOG.Warn("failed to find device for parameter sync", zap.String("serial", serial), zap.Error(err))
 		} else {
+			persistedDeviceID = dbDevice.ID
 			// If it was deleted, restore it (clear deleted_at)
 			if dbDevice.DeletedAt.Valid {
-				if err := global.GVA_DB.Unscoped().Model(&dbDevice).Update("deleted_at", nil).Error; err != nil {
+				if err := db.Unscoped().Model(&dbDevice).Update("deleted_at", nil).Error; err != nil {
 					global.GVA_LOG.Warn("failed to restore device", zap.Uint("deviceID", dbDevice.ID), zap.Error(err))
 				}
 			}
@@ -168,18 +254,39 @@ func (r *GormDeviceRepo) UpsertFromInform(ctx context.Context, info *core.Inform
 				// Batch Upsert
 				// On conflict (device_id + name), update value_json and last_collected_at
 				// Preserve existing ValueType if Inform doesn't carry it
-				if err := global.GVA_DB.WithContext(ctx).Clauses(clause.OnConflict{
-					Columns: []clause.Column{{Name: "device_id"}, {Name: "name"}},
-					DoUpdates: clause.Assignments(map[string]interface{}{
-						"value_type":        gorm.Expr("COALESCE(NULLIF(VALUES(value_type),''), value_type)"),
-						"value_json":        gorm.Expr("VALUES(value_json)"),
-						"last_collected_at": gorm.Expr("VALUES(last_collected_at)"),
-						"updated_at":        gorm.Expr("NOW()"),
-					}),
+				if err := db.WithContext(ctx).Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "device_id"}, {Name: "name"}},
+					DoUpdates: clause.AssignmentColumns([]string{"value_type", "value_json", "last_collected_at", "updated_at"}),
 				}).CreateInBatches(values, 100).Error; err != nil {
 					global.GVA_LOG.Error("failed to batch upsert data model values", zap.Error(err))
 					return "", err
 				}
+			}
+			collected, collectErr := r.profileRepository().Collect(ctx, dbDevice.ID, info.Params)
+			if collectErr != nil {
+				if global.GVA_LOG != nil {
+					global.GVA_LOG.Warn("failed to collect connection profile from Inform", zap.Uint("deviceID", dbDevice.ID), zap.Error(collectErr))
+				}
+			} else if collected.NeedsProvisioning && r.provisioner != nil {
+				r.provisioner.Schedule(dbDevice.ID)
+			}
+		}
+	}
+
+	if info != nil && r.rebootConfirmer != nil {
+		if persistedDeviceID == 0 {
+			var persisted model.Device
+			if err := db.Unscoped().WithContext(ctx).Select("id").Where("serial_number = ?", serial).First(&persisted).Error; err != nil {
+				if global.GVA_LOG != nil {
+					global.GVA_LOG.Warn("failed to resolve device for Reboot confirmation", zap.String("serial", serial), zap.Error(err))
+				}
+			} else {
+				persistedDeviceID = persisted.ID
+			}
+		}
+		if persistedDeviceID != 0 {
+			if err := r.rebootConfirmer.ConfirmFromInform(ctx, persistedDeviceID, info.Events, time.Now()); err != nil && global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to confirm Reboot from Inform", zap.Uint("deviceID", persistedDeviceID), zap.Strings("eventCodes", info.Events), zap.Error(err))
 			}
 		}
 	}
@@ -330,12 +437,17 @@ func (r *GormDeviceRepo) UpdateOnlineStatus(ctx context.Context, deviceID string
 }
 
 type GormCommandRepo struct {
-	db    *gorm.DB
-	store *service.CommandStore
+	db       *gorm.DB
+	store    *service.CommandStore
+	advancer *service.CommandQueueAdvancer
 }
 
 func newGormCommandRepo(db *gorm.DB) *GormCommandRepo {
-	return &GormCommandRepo{db: db, store: service.NewCommandStore(db)}
+	return NewGormCommandRepo(db, nil)
+}
+
+func NewGormCommandRepo(db *gorm.DB, advancer *service.CommandQueueAdvancer) *GormCommandRepo {
+	return &GormCommandRepo{db: db, store: service.NewCommandStore(db), advancer: advancer}
 }
 
 func (r *GormCommandRepo) database() *gorm.DB {
@@ -358,7 +470,7 @@ func (r *GormCommandRepo) current(ctx context.Context, commandID string) (model.
 	return command, err
 }
 
-func (r *GormCommandRepo) MarkSending(ctx context.Context, commandID, requestID string, sentAt time.Time) error {
+func (r *GormCommandRepo) MarkSending(ctx context.Context, commandID, cwmpID string, sentAt time.Time) error {
 	if sentAt.IsZero() {
 		sentAt = time.Now()
 	}
@@ -375,7 +487,7 @@ func (r *GormCommandRepo) MarkSending(ctx context.Context, commandID, requestID 
 		EventType:       "REQUEST_SENT",
 		Stage:           "request",
 		Updates: map[string]any{
-			"request_id":        requestID,
+			"cwmp_id":           cwmpID,
 			"sent_at":           sentAt,
 			"phase_deadline_at": deadline,
 		},
@@ -387,22 +499,51 @@ func (r *GormCommandRepo) MarkSuccess(ctx context.Context, commandID string, fin
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
 	}
-	current, err := r.current(ctx, commandID)
-	if err != nil {
-		return err
-	}
-	_, err = r.commandStore().Transition(ctx, service.CommandTransition{
-		CommandID:       commandID,
-		FromStatuses:    []string{model.CommandStatusSent, model.CommandStatusWaitingTransfer},
-		ToStatus:        model.CommandStatusCompleted,
-		ExpectedVersion: current.Version,
-		EventType:       "RESPONSE_COMPLETED",
-		Stage:           "response",
-		Updates: map[string]any{
-			"finished_at":       finishedAt,
-			"phase_deadline_at": nil,
-		},
+	var terminalDeviceID uint
+	err := r.database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Command
+		if err := tx.WithContext(ctx).First(&current, "command_id = ?", commandID).Error; err != nil {
+			return err
+		}
+		if current.Operation == "Reboot" && current.Status == model.CommandStatusSent {
+			deadline := finishedAt.Add(config.CurrentRuntime().RebootConfirmTimeout)
+			_, err := service.NewCommandStore(tx).Transition(ctx, service.CommandTransition{
+				CommandID:       current.CommandID,
+				FromStatuses:    []string{model.CommandStatusSent},
+				ToStatus:        model.CommandStatusWaitingReboot,
+				ExpectedVersion: current.Version,
+				EventType:       "REBOOT_ACKNOWLEDGED",
+				Stage:           "reboot.acknowledged",
+				Updates: map[string]any{
+					"phase_deadline_at": deadline,
+					"finished_at":       nil,
+				},
+			})
+			return err
+		}
+		if _, err := service.NewCommandStore(tx).Transition(ctx, service.CommandTransition{
+			CommandID:       commandID,
+			FromStatuses:    []string{model.CommandStatusSent, model.CommandStatusWaitingTransfer},
+			ToStatus:        model.CommandStatusCompleted,
+			ExpectedVersion: current.Version,
+			EventType:       "RESPONSE_COMPLETED",
+			Stage:           "response",
+			Updates: map[string]any{
+				"finished_at":       finishedAt,
+				"phase_deadline_at": nil,
+			},
+		}); err != nil {
+			return err
+		}
+		if err := (&ConnectionProfileRepository{db: tx}).MarkTerminal(ctx, tx, commandID, model.ConnectionProfileStateReady, ""); err != nil {
+			return err
+		}
+		terminalDeviceID = current.DeviceID
+		return nil
 	})
+	if err == nil && r != nil && r.advancer != nil {
+		r.advancer.AdvanceAfterTerminal(ctx, terminalDeviceID)
+	}
 	return err
 }
 
@@ -418,37 +559,51 @@ func (r *GormCommandRepo) markFailAtStage(ctx context.Context, commandID string,
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
 	}
-	current, err := r.current(ctx, commandID)
-	if err != nil {
-		return err
-	}
-	stage := explicitStage
-	if stage == "" {
-		stage = "cwmp.fault"
-		if current.Status == model.CommandStatusBuilding {
-			stage = "core.build"
+	var terminalDeviceID uint
+	err := r.database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Command
+		if err := tx.WithContext(ctx).First(&current, "command_id = ?", commandID).Error; err != nil {
+			return err
 		}
-	}
-	_, err = r.commandStore().Transition(ctx, service.CommandTransition{
-		CommandID: commandID,
-		FromStatuses: []string{
-			model.CommandStatusWaitingDevice,
-			model.CommandStatusBuilding,
-			model.CommandStatusSent,
-			model.CommandStatusWaitingTransfer,
-		},
-		ToStatus:        model.CommandStatusFailed,
-		ExpectedVersion: current.Version,
-		EventType:       "COMMAND_FAILED",
-		Stage:           stage,
-		Message:         faultString,
-		Updates: map[string]any{
-			"failure_stage":     stage,
-			"fault_code":        faultCode,
-			"fault_string":      faultString,
-			"finished_at":       finishedAt,
-			"phase_deadline_at": nil,
-		},
+		stage := explicitStage
+		if stage == "" {
+			stage = "cwmp.fault"
+			if current.Status == model.CommandStatusBuilding {
+				stage = "core.build"
+			}
+		}
+		if _, err := service.NewCommandStore(tx).Transition(ctx, service.CommandTransition{
+			CommandID: commandID,
+			FromStatuses: []string{
+				model.CommandStatusWaitingDevice,
+				model.CommandStatusBuilding,
+				model.CommandStatusSent,
+				model.CommandStatusWaitingTransfer,
+				model.CommandStatusWaitingReboot,
+			},
+			ToStatus:        model.CommandStatusFailed,
+			ExpectedVersion: current.Version,
+			EventType:       "COMMAND_FAILED",
+			Stage:           stage,
+			Message:         faultString,
+			Updates: map[string]any{
+				"failure_stage":     stage,
+				"fault_code":        faultCode,
+				"fault_string":      faultString,
+				"finished_at":       finishedAt,
+				"phase_deadline_at": nil,
+			},
+		}); err != nil {
+			return err
+		}
+		if err := (&ConnectionProfileRepository{db: tx}).MarkTerminal(ctx, tx, commandID, model.ConnectionProfileStateFailed, faultString); err != nil {
+			return err
+		}
+		terminalDeviceID = current.DeviceID
+		return nil
 	})
+	if err == nil && r != nil && r.advancer != nil {
+		r.advancer.AdvanceAfterTerminal(ctx, terminalDeviceID)
+	}
 	return err
 }

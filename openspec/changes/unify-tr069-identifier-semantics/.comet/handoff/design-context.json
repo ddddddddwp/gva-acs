@@ -1,0 +1,14 @@
+{
+  "change": "unify-tr069-identifier-semantics",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "fa607740f9f2f88d36866a820b222937352c1390784f93a561ea6a3457c128f2",
+  "files": [
+    { "path": "openspec/changes/unify-tr069-identifier-semantics/proposal.md", "sha256": "2912271da1c008ed787cae9e0b63586af12dd713af49344b7f68f5d2753ddba6" },
+    { "path": "openspec/changes/unify-tr069-identifier-semantics/design.md", "sha256": "525042e83290763507c3e6d307b3230daa82cbad2db2d7e627a66cf037e4cdec" },
+    { "path": "openspec/changes/unify-tr069-identifier-semantics/tasks.md", "sha256": "b0e7279547141aa69e115f77e9b1dff601d5cb165a35d7bb7b5cce821b4a1c31" },
+    { "path": "openspec/changes/unify-tr069-identifier-semantics/specs/tr069-identifier-semantics/spec.md", "sha256": "1082a29f63008f6ac5eb2a2ce5f4cd57ce74697212d6d117111e2647aad85d44" }
+  ]
+}

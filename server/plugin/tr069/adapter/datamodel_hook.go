@@ -5,6 +5,8 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -13,18 +15,28 @@ import (
 	tr069Global "github.com/ddddddddwp/gva-acs/server/plugin/tr069/global"
 	gormmiddleware "github.com/ddddddddwp/gva-acs/server/plugin/tr069/middleware/gorm_middleware"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/model"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 type DataModelHook struct {
-	base     core.CorrelationHook
-	inflight core.InflightRepo
-	ingest   core.CommandIngest
-	now      func() time.Time
+	base              core.CorrelationHook
+	inflight          core.InflightRepo
+	ingest            core.CommandIngest
+	profiles          *ConnectionProfileRepository
+	provisioner       ConnectionCredentialScheduler
+	transferLifecycle TransferLifecycleHandler
+	now               func() time.Time
+}
+
+type TransferLifecycleHandler interface {
+	OnUploadResponse(context.Context, string, int, time.Time) error
+	OnTransferComplete(context.Context, string, int, string, time.Time) error
 }
 
 type DataModelHookOption func(*DataModelHook)
@@ -32,6 +44,24 @@ type DataModelHookOption func(*DataModelHook)
 func WithDataModelHookNow(now func() time.Time) DataModelHookOption {
 	return func(h *DataModelHook) {
 		h.now = now
+	}
+}
+
+func WithDataModelHookProfiles(profiles *ConnectionProfileRepository) DataModelHookOption {
+	return func(h *DataModelHook) {
+		h.profiles = profiles
+	}
+}
+
+func WithDataModelHookProvisioner(provisioner ConnectionCredentialScheduler) DataModelHookOption {
+	return func(h *DataModelHook) {
+		h.provisioner = provisioner
+	}
+}
+
+func WithDataModelHookTransferLifecycle(lifecycle TransferLifecycleHandler) DataModelHookOption {
+	return func(h *DataModelHook) {
+		h.transferLifecycle = lifecycle
 	}
 }
 
@@ -63,15 +93,41 @@ func (h *DataModelHook) OnResponse(ctx context.Context, session *core.Session, r
 		return false, nil
 	}
 	req, found := h.lookupInflight(ctx, session, resp)
+	var lifecycleErr error
 	if found {
 		if err := h.handleDataModelResponse(ctx, session, req, resp); err != nil {
 			global.GVA_LOG.Error("failed to handle data model response", zap.Error(err))
 		}
+		if h.transferLifecycle != nil && req.RequestName == tr069.MethodUpload && resp.Method == tr069.MethodUploadResponse {
+			lifecycleErr = h.transferLifecycle.OnUploadResponse(ctx, req.CommandID, resp.Status, h.now())
+		}
 	}
 	if h.base != nil {
-		return h.base.OnResponse(ctx, session, resp)
+		handled, baseErr := h.base.OnResponse(ctx, session, resp)
+		return handled || found, errors.Join(lifecycleErr, baseErr)
 	}
-	return found, nil
+	return found, lifecycleErr
+}
+
+func (h *DataModelHook) OnTransferComplete(ctx context.Context, session *core.Session, complete *tr069.Message) (bool, error) {
+	if h == nil || complete == nil {
+		return false, nil
+	}
+	handled := false
+	var lifecycleErr error
+	if h.transferLifecycle != nil && complete.CommandKey != "" {
+		handled = true
+		lifecycleErr = h.transferLifecycle.OnTransferComplete(ctx, complete.CommandKey, complete.TransferFaultCode, complete.TransferFaultString, h.now())
+		if errors.Is(lifecycleErr, gorm.ErrRecordNotFound) {
+			handled = false
+			lifecycleErr = nil
+		}
+	}
+	if base, ok := h.base.(core.TransferCompleteHook); ok {
+		baseHandled, baseErr := base.OnTransferComplete(ctx, session, complete)
+		return handled || baseHandled, errors.Join(lifecycleErr, baseErr)
+	}
+	return handled, lifecycleErr
 }
 
 func (h *DataModelHook) OnFault(ctx context.Context, session *core.Session, fault *tr069.Message) (bool, error) {
@@ -156,6 +212,7 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 
 	now := h.now()
 	records := make([]model.DataModelValue, 0, len(params))
+	profileValues := make(map[string]string, 3)
 
 	for _, p := range params {
 		if p.Name == "" {
@@ -181,6 +238,10 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 			ValueJSON:       b,
 			LastCollectedAt: now,
 		})
+		switch p.Name {
+		case connectionRequestURLName, connectionRequestUsernameName, connectionRequestPasswordName:
+			profileValues[p.Name] = fmt.Sprint(p.Value)
+		}
 	}
 
 	if len(records) == 0 {
@@ -194,6 +255,20 @@ func (h *DataModelHook) persistGPV(ctx context.Context, deviceID uint, params []
 	}).Create(records).Error; err != nil {
 		global.GVA_LOG.Error("failed to batch persist GPV", zap.Error(err))
 		return err
+	}
+	if len(profileValues) > 0 {
+		profiles := h.profiles
+		if profiles == nil {
+			profiles = NewConnectionProfileRepository(global.GVA_DB, nil)
+		}
+		collected, collectErr := profiles.Collect(ctx, deviceID, profileValues)
+		if collectErr != nil {
+			if global.GVA_LOG != nil {
+				global.GVA_LOG.Warn("failed to collect connection profile from GPV", zap.Uint("deviceID", deviceID), zap.Error(collectErr))
+			}
+		} else if collected.NeedsProvisioning && h.provisioner != nil {
+			h.provisioner.Schedule(deviceID)
+		}
 	}
 	return nil
 }
@@ -441,3 +516,5 @@ func normalizeValueType(valType string) string {
 }
 
 var _ core.CorrelationHook = (*DataModelHook)(nil)
+var _ core.TransferCompleteHook = (*DataModelHook)(nil)
+var _ TransferLifecycleHandler = (*service.TransferLifecycle)(nil)

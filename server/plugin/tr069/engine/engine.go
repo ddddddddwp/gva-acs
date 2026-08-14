@@ -1,39 +1,90 @@
 package engine
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"github.com/ddddddddwp/gva-acs/server/global"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/adapter"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/service"
 	"github.com/ddddddddwp/tr069-core-only/factory"
 	tr069 "github.com/ddddddddwp/tr069-core-only/interface"
+	"github.com/ddddddddwp/tr069-core-only/observability"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core"
 	"github.com/ddddddddwp/tr069-core-only/pkg/core/defaults"
 	"go.uber.org/zap"
 )
 
 type Deps struct {
-	Parser       tr069.Parser
-	Builder      tr069.Builder
-	SessionStore core.SessionStore
-	DeviceRepo   core.DeviceRepo
-	CommandRepo  core.CommandRepo
-	CommandQueue core.CommandSource
-	ExecutorReg  core.ExecutorRegistry
-	InflightRepo core.InflightRepo
-	Hook         core.CorrelationHook
+	Parser         tr069.Parser
+	Builder        tr069.Builder
+	SessionStore   core.SessionStore
+	DeviceRepo     core.DeviceRepo
+	CommandRepo    core.CommandRepo
+	CommandQueue   core.CommandSource
+	ExecutorReg    core.ExecutorRegistry
+	InflightRepo   core.InflightRepo
+	Hook           core.CorrelationHook
+	EventSink      observability.EventSink
+	RuntimeContext context.Context
+	CommandWakeup  service.CommandWakeupFunc
 }
 
 func New(deps Deps) (*core.DefaultEngine, error) {
+	engine, _, err := newEngine(deps)
+	return engine, err
+}
+
+func newEngine(deps Deps) (*core.DefaultEngine, <-chan struct{}, error) {
+	var profileRepository *adapter.ConnectionProfileRepository
+	var payloadCodec *adapter.CompositeCommandPayloadCodec
+	var provisioner *adapter.ConnectionCredentialProvisioner
+	var queueAdvancer *service.CommandQueueAdvancer
+	var rebootConfirmer *service.RebootConfirmationService
+	var rebootScanner *service.RebootTimeoutScanner
+	var transferLifecycle *service.TransferLifecycle
+	if adapter.DBAvailable() {
+		profileRepository = adapter.NewConnectionProfileRepository(nil, adapter.NewRuntimeCredentialCipher())
+		payloadCodec = adapter.NewCompositeCommandPayloadCodec(
+			adapter.NewConnectionProfilePayloadProtector(profileRepository),
+			adapter.LogUploadPayloadCodec{},
+		)
+		wakeup := deps.CommandWakeup
+		if wakeup == nil {
+			wakeup = adapter.EnqueueImmediate
+		}
+		queueAdvancer = service.NewCommandQueueAdvancer(global.GVA_DB, wakeup)
+		manager := service.NewCommandManager(nil, wakeup,
+			service.WithCommandPayloadProtector(payloadCodec),
+			service.WithCommandCreatedHook(service.NewActiveUploadTaskHook(nil)),
+		)
+		provisioner = adapter.NewConnectionCredentialProvisioner(manager, profileRepository)
+		rebootConfirmer = service.NewRebootConfirmationService(global.GVA_DB, queueAdvancer)
+		rebootScanner = service.NewRebootTimeoutScanner(global.GVA_DB, queueAdvancer)
+		transferLifecycle = service.NewTransferLifecycle(global.GVA_DB, queueAdvancer)
+	}
+
+	eventSink := deps.EventSink
+	if eventSink == nil && adapter.DBAvailable() {
+		eventSink = adapter.NewCommandXMLSink(service.NewCommandStore(global.GVA_DB), nil)
+	}
 	parser := deps.Parser
 	if parser == nil {
-		parser = factory.NewParser(tr069.WithStrictMode(false))
+		options := []tr069.Option{tr069.WithStrictMode(false)}
+		if eventSink != nil {
+			options = append(options, tr069.WithEventSink(eventSink))
+		}
+		parser = factory.NewParser(options...)
 	}
 	builder := deps.Builder
 	if builder == nil {
-		builder = factory.NewBuilder()
+		if eventSink != nil {
+			builder = factory.NewBuilder(tr069.WithEventSink(eventSink))
+		} else {
+			builder = factory.NewBuilder()
+		}
 	}
 	store := deps.SessionStore
 	if store == nil {
@@ -45,12 +96,17 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 	}
 	devRepo := deps.DeviceRepo
 	if devRepo == nil {
-		devRepo = new(adapter.GormDeviceRepo)
+		gormDeviceRepo := adapter.NewGormDeviceRepo(nil, profileRepository, provisioner)
+		gormDeviceRepo.SetRebootInformConfirmer(rebootConfirmer)
+		if adapter.RedisAvailable() && config.CurrentRuntime().Settings.FileIngress.Enabled {
+			gormDeviceRepo.SetUploadIdentityBinder(adapter.NewUploadIdentityStore(global.GVA_REDIS))
+		}
+		devRepo = gormDeviceRepo
 	}
 	cmdRepo := deps.CommandRepo
 	if cmdRepo == nil {
 		if adapter.DBAvailable() {
-			cmdRepo = new(adapter.GormCommandRepo)
+			cmdRepo = adapter.NewGormCommandRepo(global.GVA_DB, queueAdvancer)
 		} else {
 			cmdRepo = defaults.NewMemoryCommandRepo()
 		}
@@ -66,7 +122,10 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 				MaxPendingPerSession: cfg.CommandQueueMaxPendingPerSession,
 			}
 			var err error
-			queue, err = adapter.NewRedisCommandSource(queueCfg)
+			queue, err = adapter.NewRedisCommandSource(
+				queueCfg,
+				adapter.WithRedisCommandHydrator(payloadCodec),
+			)
 			if err != nil {
 				global.GVA_LOG.Error("failed to create Redis command source", zap.Error(err))
 				queue = defaults.NewMemoryQueue()
@@ -111,9 +170,19 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 				ingest = defaults.NewMemoryCommandIngest(mq)
 			}
 		}
-		hook = adapter.NewDataModelHook(base, inflight, ingest)
+		hookOptions := make([]adapter.DataModelHookOption, 0, 2)
+		if profileRepository != nil {
+			hookOptions = append(hookOptions, adapter.WithDataModelHookProfiles(profileRepository))
+		}
+		if provisioner != nil {
+			hookOptions = append(hookOptions, adapter.WithDataModelHookProvisioner(provisioner))
+		}
+		if transferLifecycle != nil {
+			hookOptions = append(hookOptions, adapter.WithDataModelHookTransferLifecycle(transferLifecycle))
+		}
+		hook = adapter.NewDataModelHook(base, inflight, ingest, hookOptions...)
 	}
-	return core.NewEngine(core.Config{
+	engine, err := core.NewEngine(core.Config{
 		Parser:          parser,
 		Builder:         builder,
 		SessionStore:    store,
@@ -123,17 +192,95 @@ func New(deps Deps) (*core.DefaultEngine, error) {
 		CommandSource:   queue,
 		CorrelationHook: hook,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	workers := make([]func(context.Context), 0, 2)
+	if provisioner != nil {
+		workers = append(workers, provisioner.Run)
+	}
+	if rebootScanner != nil {
+		workers = append(workers, rebootScanner.Run)
+	}
+	runtimeDone := runRuntimeWorkers(deps.RuntimeContext, workers...)
+	return engine, runtimeDone, nil
+}
+
+func runRuntimeWorkers(ctx context.Context, workers ...func(context.Context)) <-chan struct{} {
+	if ctx == nil || len(workers) == 0 {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wait sync.WaitGroup
+		for _, worker := range workers {
+			wait.Add(1)
+			go func(run func(context.Context)) {
+				defer wait.Done()
+				run(ctx)
+			}(worker)
+		}
+		wait.Wait()
+	}()
+	return done
 }
 
 var (
-	once sync.Once
-	inst *core.DefaultEngine
-	err  error
+	once             sync.Once
+	inst             *core.DefaultEngine
+	err              error
+	runtimeLifecycle struct {
+		sync.Mutex
+		cancel context.CancelFunc
+		done   <-chan struct{}
+	}
 )
 
 func Get() (*core.DefaultEngine, error) {
 	once.Do(func() {
-		inst, err = New(Deps{})
+		runCtx, cancel := context.WithCancel(context.Background())
+		var done <-chan struct{}
+		inst, done, err = newEngine(Deps{RuntimeContext: runCtx})
+		if err != nil {
+			cancel()
+			return
+		}
+		runtimeLifecycle.Lock()
+		runtimeLifecycle.cancel = cancel
+		runtimeLifecycle.done = done
+		runtimeLifecycle.Unlock()
 	})
 	return inst, err
+}
+
+// Stop cancels the default engine's background profile runtime and waits for
+// its worker to exit. Explicit engines created with New own their context.
+func Stop(ctx context.Context) error {
+	runtimeLifecycle.Lock()
+	cancel := runtimeLifecycle.cancel
+	done := runtimeLifecycle.done
+	runtimeLifecycle.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	if done == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-done:
+		runtimeLifecycle.Lock()
+		if runtimeLifecycle.done == done {
+			runtimeLifecycle.cancel = nil
+			runtimeLifecycle.done = nil
+		}
+		runtimeLifecycle.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

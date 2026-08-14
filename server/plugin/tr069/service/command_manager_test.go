@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -15,6 +16,12 @@ import (
 	"gorm.io/gorm"
 )
 
+type testCommandPayloadProtector struct{}
+
+func (testCommandPayloadProtector) Protect(_ context.Context, _ *gorm.DB, _ uint, _, _ string, encoded []byte) ([]byte, error) {
+	return bytes.ReplaceAll(encoded, []byte("system-secret"), []byte("protected-secret")), nil
+}
+
 func newCommandManagerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -22,10 +29,104 @@ func newCommandManagerTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(new(model.Device), new(model.DeviceRPCMethods), new(model.Command), new(model.CommandEvent)); err != nil {
+	if err := db.AutoMigrate(new(model.Device), new(model.DeviceRPCMethods), new(model.Command), new(model.CommandEvent), new(model.TransferTask), new(model.TransferEvent)); err != nil {
 		t.Fatalf("migrate command manager models: %v", err)
 	}
 	return db
+}
+
+func TestCommandManagerCreatedHookCreatesActiveUploadTaskAtomically(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 19, 7, 0, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "ACTIVE-UPLOAD", now)
+	setCommandManagerCapabilities(t, db, device.ID, `["Upload"]`)
+	order := make([]string, 0, 2)
+	managerHook := NewActiveUploadTaskHook(func() string { return "active-task-fixed" })
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+		WithCommandCreatedHook(func(ctx context.Context, tx *gorm.DB, command *model.Command) error {
+			order = append(order, "manager")
+			return managerHook(ctx, tx, command)
+		}),
+	)
+	result, err := manager.SubmitSystem(context.Background(), device.ID, "Upload", req.UploadRequest{
+		FileType: "Vendor Log File", URL: "http://gva:7458/acs/log", Username: "log", Password: "secret",
+	}, "", func(context.Context, *gorm.DB, *model.Command) error {
+		order = append(order, "submission")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("submit Upload: %v", err)
+	}
+	var command model.Command
+	if err := db.First(&command, "command_id = ?", result.CommandID).Error; err != nil {
+		t.Fatalf("load command: %v", err)
+	}
+	assertDerivedCommandKey(t, command)
+	var task model.TransferTask
+	if err := db.First(&task, "command_id = ?", command.CommandID).Error; err != nil {
+		t.Fatalf("load active task: %v", err)
+	}
+	if task.TaskID != "active-task-fixed" || task.Source != model.TransferSourceActive || task.Status != model.TransferStatusWaitingFile || task.CommandKey == nil || *task.CommandKey != *command.CommandKey {
+		t.Fatalf("task=%#v", task)
+	}
+	if !reflect.DeepEqual(order, []string{"manager", "submission"}) {
+		t.Fatalf("hook order=%#v", order)
+	}
+}
+
+func TestCommandManagerCreatedHookFailureRollsBackCommand(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 19, 7, 5, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "HOOK-ROLLBACK", now)
+	setCommandManagerCapabilities(t, db, device.ID, `["Upload"]`)
+	injected := errors.New("active task create failed")
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+		WithCommandCreatedHook(func(context.Context, *gorm.DB, *model.Command) error { return injected }),
+	)
+	if _, err := manager.Submit(context.Background(), device.ID, "Upload", req.UploadRequest{FileType: "Vendor Log File", URL: "http://gva/acs/log"}); !errors.Is(err, injected) {
+		t.Fatalf("submit error=%v", err)
+	}
+	var commands int64
+	db.Model(new(model.Command)).Count(&commands)
+	if commands != 0 {
+		t.Fatalf("commands after hook rollback=%d", commands)
+	}
+}
+
+func TestCommandManagerRetryUploadCreatesNewActiveTaskAndCommandKey(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 19, 7, 10, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "UPLOAD-RETRY", now)
+	setCommandManagerCapabilities(t, db, device.ID, `["Upload"]`)
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+		WithCommandCreatedHook(NewActiveUploadTaskHook(nil)),
+	)
+	first, err := manager.Submit(context.Background(), device.ID, "Upload", req.UploadRequest{FileType: "Vendor Log File", URL: "http://gva/acs/log"})
+	if err != nil {
+		t.Fatalf("submit first Upload: %v", err)
+	}
+	finishedAt := now.Add(time.Minute)
+	if err := db.Model(new(model.Command)).Where("command_id = ?", first.CommandID).Updates(map[string]any{"status": model.CommandStatusTimeout, "finished_at": finishedAt}).Error; err != nil {
+		t.Fatalf("mark first Upload timeout: %v", err)
+	}
+	retry, err := manager.Retry(context.Background(), first.CommandID)
+	if err != nil {
+		t.Fatalf("retry Upload: %v", err)
+	}
+	var commands []model.Command
+	if err := db.Where("command_id IN ?", []string{first.CommandID, retry.CommandID}).Order("created_at ASC").Find(&commands).Error; err != nil || len(commands) != 2 {
+		t.Fatalf("commands=%#v err=%v", commands, err)
+	}
+	if commands[0].CommandKey == nil || commands[1].CommandKey == nil || *commands[0].CommandKey == *commands[1].CommandKey {
+		t.Fatalf("command keys=%v/%v", commands[0].CommandKey, commands[1].CommandKey)
+	}
+	var tasks []model.TransferTask
+	if err := db.Where("command_id IN ?", []string{first.CommandID, retry.CommandID}).Find(&tasks).Error; err != nil || len(tasks) != 2 || tasks[0].TaskID == tasks[1].TaskID {
+		t.Fatalf("tasks=%#v err=%v", tasks, err)
+	}
 }
 
 func createCommandManagerDevice(t *testing.T, db *gorm.DB, serial string, now time.Time) model.Device {
@@ -38,10 +139,78 @@ func createCommandManagerDevice(t *testing.T, db *gorm.DB, serial string, now ti
 	return device
 }
 
+func TestCommandManagerRejectsDeletingDevice(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "DELETING-COMMAND", now)
+	deletingAt := now.Add(-time.Second)
+	if err := db.Model(&device).Update("deleting_at", deletingAt).Error; err != nil {
+		t.Fatalf("mark device deleting: %v", err)
+	}
+
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+	)
+	_, err := manager.Submit(context.Background(), device.ID, "GetRPCMethods", nil)
+	if !errors.Is(err, ErrDeviceDeleting) {
+		t.Fatalf("Submit() error = %v, want ErrDeviceDeleting", err)
+	}
+
+	var commands int64
+	if err := db.Model(new(model.Command)).Where("device_id = ?", device.ID).Count(&commands).Error; err != nil {
+		t.Fatalf("count commands: %v", err)
+	}
+	if commands != 0 {
+		t.Fatalf("deleting device command count = %d, want 0", commands)
+	}
+}
+
 func setCommandManagerCapabilities(t *testing.T, db *gorm.DB, deviceID uint, methods string) {
 	t.Helper()
 	if err := db.Create(&model.DeviceRPCMethods{DeviceID: deviceID, MethodsJSON: datatypes.JSON(methods)}).Error; err != nil {
 		t.Fatalf("create device capabilities: %v", err)
+	}
+}
+
+func TestCommandManagerSubmitSystemProtectsPayloadAndBypassesUnknownCapabilities(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "SYSTEM-PROVISION", now)
+	hookCalled := false
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }),
+		WithCommandPayloadProtector(testCommandPayloadProtector{}),
+	)
+	request := req.SetParameterValuesRequest{Parameters: []req.SetParameterValue{
+		{Name: "Device.ManagementServer.ConnectionRequestUsername", Type: "xsd:string", Value: "system-user"},
+		{Name: "Device.ManagementServer.ConnectionRequestPassword", Type: "xsd:string", Value: "system-secret"},
+	}}
+	result, err := manager.SubmitSystem(context.Background(), device.ID, "SetParameterValues", request, "connection-profile:1:v1", func(_ context.Context, tx *gorm.DB, command *model.Command) error {
+		hookCalled = true
+		var count int64
+		if err := tx.Model(new(model.Command)).Where("command_id = ?", command.CommandID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			t.Fatalf("hook command count=%d", count)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubmitSystem: %v", err)
+	}
+	if result.CommandID == "" || !hookCalled {
+		t.Fatalf("result=%#v hookCalled=%t", result, hookCalled)
+	}
+	var command model.Command
+	if err := db.First(&command, "command_id = ?", result.CommandID).Error; err != nil {
+		t.Fatalf("load command: %v", err)
+	}
+	if command.Origin != model.CommandOriginSystem || command.DedupKey != "connection-profile:1:v1" {
+		t.Fatalf("command origin/dedup=%q/%q", command.Origin, command.DedupKey)
+	}
+	if strings.Contains(string(command.ParamsJSON), "system-secret") || !strings.Contains(string(command.ParamsJSON), "protected-secret") {
+		t.Fatalf("protected params=%s", command.ParamsJSON)
 	}
 }
 
@@ -161,13 +330,52 @@ func TestCommandManagerRedisEnqueueFailureTerminatesCreatedCommand(t *testing.T)
 	}
 }
 
+func TestCommandManagerWakeFailureAdvancesQueuedFollower(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 19, 18, 20, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "FAIL-NEXT", now)
+	current := model.Command{
+		CommandID: "wake-failed-head", DeviceID: device.ID, DeviceKey: device.OUI + "-" + device.SerialNumber,
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusWaitingDevice,
+		QueuedAt: now, WaitingAt: &now, CreatedAt: now,
+	}
+	next := model.Command{
+		CommandID: "queued-after-wake-failure", DeviceID: device.ID, DeviceKey: current.DeviceKey,
+		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`), Status: model.CommandStatusQueued,
+		QueuedAt: now.Add(time.Second), CreatedAt: now.Add(time.Second),
+	}
+	for _, command := range []*model.Command{&current, &next} {
+		if err := NewCommandStore(db).Create(context.Background(), command); err != nil {
+			t.Fatalf("seed command %s: %v", command.CommandID, err)
+		}
+	}
+	wakeups := 0
+	manager := NewCommandManager(db, func(context.Context, string) error {
+		wakeups++
+		return nil
+	}, WithCommandManagerNow(func() time.Time { return now.Add(time.Minute) }))
+	if _, err := manager.failWakeup(context.Background(), current, SubmitResult{CommandID: current.CommandID, Status: current.Status}, errors.New("initial enqueue failed")); err != nil {
+		t.Fatalf("failWakeup: %v", err)
+	}
+	var failed, promoted model.Command
+	if err := db.First(&failed, "command_id = ?", current.CommandID).Error; err != nil {
+		t.Fatalf("load failed command: %v", err)
+	}
+	if err := db.First(&promoted, "command_id = ?", next.CommandID).Error; err != nil {
+		t.Fatalf("load promoted command: %v", err)
+	}
+	if failed.Status != model.CommandStatusFailed || promoted.Status != model.CommandStatusWaitingDevice || wakeups != 1 {
+		t.Fatalf("statuses failed=%s promoted=%s wakeups=%d", failed.Status, promoted.Status, wakeups)
+	}
+}
+
 func TestCommandManagerWakeFailurePreservesAlreadySentCommand(t *testing.T) {
 	db := newCommandManagerTestDB(t)
 	now := time.Date(2026, 7, 16, 13, 10, 0, 0, time.UTC)
 	command := model.Command{
 		CommandID: "wake-raced-with-send", DeviceID: 1, DeviceKey: "001122-SENT",
 		Operation: "GetRPCMethods", ParamsJSON: model.LongTextJSON(`{}`),
-		Status: model.CommandStatusSent, RequestID: "cwmp-sent", QueuedAt: now, CreatedAt: now,
+		Status: model.CommandStatusSent, CWMPID: "cwmp-sent", QueuedAt: now, CreatedAt: now,
 	}
 	if err := NewCommandStore(db).Create(context.Background(), &command); err != nil {
 		t.Fatalf("seed SENT command: %v", err)
@@ -253,9 +461,7 @@ func TestCommandManagerTransfersReceiveUniqueSystemCommandKeys(t *testing.T) {
 	}
 	keys := make(map[string]struct{}, len(commands))
 	for _, command := range commands {
-		if command.CommandKey == nil || !strings.HasPrefix(*command.CommandKey, "rpc-") {
-			t.Fatalf("%s command key = %v, want rpc- prefix", command.Operation, command.CommandKey)
-		}
+		assertDerivedCommandKey(t, command)
 		keys[*command.CommandKey] = struct{}{}
 		if strings.Contains(string(command.ParamsJSON), "commandKey") {
 			t.Fatalf("%s persisted system CommandKey in typed params: %s", command.Operation, command.ParamsJSON)
@@ -263,6 +469,112 @@ func TestCommandManagerTransfersReceiveUniqueSystemCommandKeys(t *testing.T) {
 	}
 	if len(keys) != 2 {
 		t.Fatalf("unique system command keys = %d, want 2", len(keys))
+	}
+}
+
+func TestCommandKeyFromCommandID(t *testing.T) {
+	got, err := commandKeyFromCommandID("62a53a00-786f-4a45-b31f-b23f7d23bb6e")
+	if err != nil {
+		t.Fatalf("commandKeyFromCommandID() error: %v", err)
+	}
+	if got != "62a53a00786f4a45b31fb23f7d23bb6e" {
+		t.Fatalf("commandKeyFromCommandID() = %q", got)
+	}
+	if _, err := commandKeyFromCommandID("not-a-uuid"); err == nil {
+		t.Fatal("commandKeyFromCommandID() accepted an invalid UUID")
+	}
+}
+
+func TestCommandManagerSynchronousRPCDoesNotCreateCommandKey(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 18, 13, 45, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "SYNC-NO-KEY", now)
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil }, WithCommandManagerNow(func() time.Time { return now }))
+
+	result, err := manager.Submit(context.Background(), device.ID, "GetRPCMethods", nil)
+	if err != nil {
+		t.Fatalf("submit GetRPCMethods: %v", err)
+	}
+	var command model.Command
+	if err := db.First(&command, "command_id = ?", result.CommandID).Error; err != nil {
+		t.Fatalf("load GetRPCMethods command: %v", err)
+	}
+	if command.CommandKey != nil {
+		t.Fatalf("synchronous command key = %q, want nil", *command.CommandKey)
+	}
+}
+
+func TestCommandManagerRebootCreatesUniqueServerKeysAndRetryGetsNewKey(t *testing.T) {
+	db := newCommandManagerTestDB(t)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	device := createCommandManagerDevice(t, db, "REBOOT-KEY", now)
+	setCommandManagerCapabilities(t, db, device.ID, `["Reboot"]`)
+	manager := NewCommandManager(db, func(context.Context, string) error { return nil },
+		WithCommandManagerNow(func() time.Time { return now }))
+
+	first, err := manager.Submit(context.Background(), device.ID, "Reboot", nil)
+	if err != nil {
+		t.Fatalf("first Reboot: %v", err)
+	}
+	second, err := manager.Submit(context.Background(), device.ID, "Reboot", nil)
+	if err != nil {
+		t.Fatalf("second Reboot: %v", err)
+	}
+	var commands []model.Command
+	if err := db.Where("command_id IN ?", []string{first.CommandID, second.CommandID}).Find(&commands).Error; err != nil {
+		t.Fatalf("load Reboot commands: %v", err)
+	}
+	if len(commands) != 2 || commands[0].CommandKey == nil || commands[1].CommandKey == nil ||
+		*commands[0].CommandKey == *commands[1].CommandKey {
+		t.Fatalf("Reboot keys are not unique: %#v", commands)
+	}
+	for _, command := range commands {
+		assertDerivedCommandKey(t, command)
+		if string(command.ParamsJSON) != `{}` {
+			t.Fatalf("Reboot persistence = key:%v params:%s", command.CommandKey, command.ParamsJSON)
+		}
+	}
+
+	original := commands[0]
+	finishedAt := now.Add(time.Second)
+	if err := db.Model(&model.Command{}).Where("command_id = ?", original.CommandID).Updates(map[string]any{
+		"status": model.CommandStatusTimeout, "finished_at": finishedAt,
+	}).Error; err != nil {
+		t.Fatalf("mark original retryable: %v", err)
+	}
+	retried, err := manager.Retry(context.Background(), original.CommandID)
+	if err != nil {
+		t.Fatalf("retry Reboot: %v", err)
+	}
+	var retry model.Command
+	if err := db.First(&retry, "command_id = ?", retried.CommandID).Error; err != nil {
+		t.Fatalf("load retry: %v", err)
+	}
+	if retry.CommandKey == nil || *retry.CommandKey == *original.CommandKey {
+		t.Fatalf("retry key = %v, original = %v", retry.CommandKey, original.CommandKey)
+	}
+	assertDerivedCommandKey(t, retry)
+	if retry.RetryOf != original.CommandID {
+		t.Fatalf("retryOf = %q, want %q", retry.RetryOf, original.CommandID)
+	}
+}
+
+func assertDerivedCommandKey(t *testing.T, command model.Command) {
+	t.Helper()
+	if command.CommandKey == nil {
+		t.Fatalf("%s command key is nil", command.Operation)
+	}
+	want := strings.ReplaceAll(command.CommandID, "-", "")
+	if *command.CommandKey != want {
+		t.Fatalf("%s command key = %q, want %q", command.Operation, *command.CommandKey, want)
+	}
+	if len(*command.CommandKey) != 32 {
+		t.Fatalf("%s command key length = %d, want 32", command.Operation, len(*command.CommandKey))
+	}
+	for _, char := range *command.CommandKey {
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			t.Fatalf("%s command key contains non-lowercase-hex rune %q", command.Operation, char)
+		}
 	}
 }
 

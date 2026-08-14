@@ -6,6 +6,7 @@ const (
 	CommandStatusBuilding        = "BUILDING"
 	CommandStatusSent            = "SENT"
 	CommandStatusWaitingTransfer = "WAITING_TRANSFER"
+	CommandStatusWaitingReboot   = "WAITING_REBOOT"
 	CommandStatusCompleted       = "COMPLETED"
 	CommandStatusFailed          = "FAILED"
 	CommandStatusTimeout         = "TIMEOUT"
@@ -30,11 +31,17 @@ var commandStatusTransitions = map[string]map[string]struct{}{
 	},
 	CommandStatusSent: {
 		CommandStatusWaitingTransfer: {},
+		CommandStatusWaitingReboot:   {},
 		CommandStatusCompleted:       {},
 		CommandStatusFailed:          {},
 		CommandStatusTimeout:         {},
 	},
 	CommandStatusWaitingTransfer: {
+		CommandStatusCompleted: {},
+		CommandStatusFailed:    {},
+		CommandStatusTimeout:   {},
+	},
+	CommandStatusWaitingReboot: {
 		CommandStatusCompleted: {},
 		CommandStatusFailed:    {},
 		CommandStatusTimeout:   {},
@@ -50,6 +57,7 @@ var nonTerminalCommandStatuses = []string{
 	CommandStatusBuilding,
 	CommandStatusSent,
 	CommandStatusWaitingTransfer,
+	CommandStatusWaitingReboot,
 }
 
 func IsCommandStatus(status string) bool {

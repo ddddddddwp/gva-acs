@@ -52,7 +52,7 @@ func TestEngine_CPEOnboardingAndInflightCorrelation(t *testing.T) {
 	ip := "203.0.113.10"
 
 	_, err = e.Handle(ctx, &core.Request{
-		ID:       "req-1",
+		TraceID:  "trace-1",
 		RemoteIP: ip,
 		Headers:  map[string]string{},
 		Body:     []byte(sampleInformXMLBoot2),
@@ -62,7 +62,7 @@ func TestEngine_CPEOnboardingAndInflightCorrelation(t *testing.T) {
 	}
 
 	pollResp, err := e.Handle(ctx, &core.Request{
-		ID:       "req-2",
+		TraceID:  "trace-2",
 		RemoteIP: ip,
 		Headers:  map[string]string{},
 		Body:     nil,
@@ -92,7 +92,7 @@ func TestEngine_CPEOnboardingAndInflightCorrelation(t *testing.T) {
 		t.Fatalf("build GPV response error: %v", err)
 	}
 	gpvHandleResp, err := e.Handle(ctx, &core.Request{
-		ID:       "req-2-2",
+		TraceID:  "trace-2-2",
 		RemoteIP: ip,
 		Headers:  map[string]string{},
 		Body:     gpvRespXML,
@@ -127,7 +127,7 @@ func TestEngine_CPEOnboardingAndInflightCorrelation(t *testing.T) {
 		t.Fatalf("build wrong response error: %v", err)
 	}
 	_, err = e.Handle(ctx, &core.Request{
-		ID:       "req-3",
+		TraceID:  "trace-3",
 		RemoteIP: ip,
 		Headers:  map[string]string{},
 		Body:     wrongRespXML,
@@ -147,7 +147,7 @@ func TestEngine_CPEOnboardingAndInflightCorrelation(t *testing.T) {
 		t.Fatalf("build reboot response error: %v", err)
 	}
 	_, err = e.Handle(ctx, &core.Request{
-		ID:       "req-4",
+		TraceID:  "trace-4",
 		RemoteIP: ip,
 		Headers:  map[string]string{},
 		Body:     okRespXML,

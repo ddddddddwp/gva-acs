@@ -9,12 +9,11 @@ import (
 type DebugApi struct{}
 
 func (a *DebugApi) GetTrace(c *gin.Context) {
-	requestID := c.Param("requestId")
-	if requestID == "" {
-		response.FailWithMessage("requestId 不能为空", c)
+	traceID := c.Param("traceId")
+	if traceID == "" {
+		response.FailWithMessage("traceId 不能为空", c)
 		return
 	}
-	entries := trace.Get(c.Request.Context(), requestID)
+	entries := trace.Get(c.Request.Context(), traceID)
 	response.OkWithDetailed(entries, "获取成功", c)
 }
-

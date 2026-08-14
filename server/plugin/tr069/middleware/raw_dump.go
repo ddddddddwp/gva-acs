@@ -12,6 +12,7 @@ import (
 
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/config"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/infolog"
+	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/redact"
 	"github.com/ddddddddwp/gva-acs/server/plugin/tr069/trace"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -27,23 +28,19 @@ type RawDumpConfig struct {
 
 const defaultDumpMaxBytes = 64 * 1024
 
-// EnsureRequestID 是 TR069 调试辅助中间件：
-// - 优先使用请求头 X-Request-Id
-// - 否则自动生成 UUID，并写入 gin.Context(key="requestId")
+// EnsureTraceID 是 TR069 调试辅助中间件：
+// - 为每个请求生成内部 UUID，并写入 gin.Context(key="traceId")
+// - 不接受外部链路标识覆盖，也不向 CPE 返回内部 Trace ID
 // 删除/禁用：从 TR069 server 的 middleware 链中移除此中间件即可。
-func EnsureRequestID() gin.HandlerFunc {
+func EnsureTraceID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if v, ok := c.Get("requestId"); ok {
+		if v, ok := c.Get("traceId"); ok {
 			if s, ok := v.(string); ok && s != "" {
 				c.Next()
 				return
 			}
 		}
-		reqID := c.GetHeader("X-Request-Id")
-		if reqID == "" {
-			reqID = uuid.NewString()
-		}
-		c.Set("requestId", reqID)
+		c.Set("traceId", uuid.NewString())
 		c.Next()
 	}
 }
@@ -63,8 +60,8 @@ func RawDump(_ RawDumpConfig) gin.HandlerFunc {
 			return
 		}
 		maxBytes := dumpMaxBytes(settings)
-		reqID, _ := c.Get("requestId")
-		requestID, _ := reqID.(string)
+		traceIDValue, _ := c.Get("traceId")
+		traceID, _ := traceIDValue.(string)
 
 		var reqBody []byte
 		if c.Request != nil && c.Request.Body != nil {
@@ -75,7 +72,8 @@ func RawDump(_ RawDumpConfig) gin.HandlerFunc {
 			}
 		}
 
-		reqDump := dumpRequest(c.Request, reqBody, requestID, settings.DumpRedactAuth, settings.DumpRedactCookie, maxBytes)
+		logBody := sanitizedCWMPLogCopy(reqBody)
+		reqDump := dumpRequest(c.Request, logBody, traceID, settings.DumpRedactAuth, settings.DumpRedactCookie, maxBytes)
 		if settings.DumpRaw {
 			_, _ = fmt.Fprintln(os.Stdout, reqDump)
 		}
@@ -86,16 +84,24 @@ func RawDump(_ RawDumpConfig) gin.HandlerFunc {
 			// }
 			writeInfoLog(reqDump, settings)
 		}
-		if requestID != "" {
-			trace.Default.Add(requestID, trace.Entry{
+		if traceID != "" {
+			trace.Default.Add(traceID, trace.Entry{
 				At:      time.Now(),
 				Stage:   "raw.request",
-				Message: truncateBytes(reqBody, maxBytes),
+				Message: truncateBytes(logBody, maxBytes),
 			})
 		}
 
 		c.Next()
 	}
+}
+
+func sanitizedCWMPLogCopy(body []byte) []byte {
+	sanitized, err := redact.CWMPXML(append([]byte(nil), body...))
+	if err != nil {
+		return []byte("<REDACTED: malformed XML>")
+	}
+	return sanitized
 }
 
 func rawDumpEnabled(settings config.TR069Config) bool {
@@ -109,14 +115,14 @@ func dumpMaxBytes(settings config.TR069Config) int {
 	return defaultDumpMaxBytes
 }
 
-func dumpRequest(r *http.Request, body []byte, requestID string, redactAuth, redactCookie bool, maxBytes int) string {
+func dumpRequest(r *http.Request, body []byte, traceID string, redactAuth, redactCookie bool, maxBytes int) string {
 	if r == nil {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("----- TR069 RAW REQUEST BEGIN -----\n")
-	if requestID != "" {
-		b.WriteString("requestId: " + requestID + "\n")
+	if traceID != "" {
+		b.WriteString("traceId: " + traceID + "\n")
 	}
 	b.WriteString(fmt.Sprintf("%s %s %s\n", r.Method, r.URL.RequestURI(), r.Proto))
 	b.WriteString("Host: " + r.Host + "\n")
@@ -175,11 +181,11 @@ func (w *responseCaptureWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
-func dumpResponse(status int, headers http.Header, body []byte, requestID string, elapsed time.Duration, maxBytes int) string {
+func dumpResponse(status int, headers http.Header, body []byte, traceID string, elapsed time.Duration, maxBytes int) string {
 	var b strings.Builder
 	b.WriteString("----- TR069 RAW RESPONSE BEGIN -----\n")
-	if requestID != "" {
-		b.WriteString("requestId: " + requestID + "\n")
+	if traceID != "" {
+		b.WriteString("traceId: " + traceID + "\n")
 	}
 	b.WriteString(fmt.Sprintf("status: %d\n", status))
 	b.WriteString("elapsed: " + elapsed.String() + "\n")

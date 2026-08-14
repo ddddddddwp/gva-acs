@@ -57,10 +57,11 @@ else
     --hostname "$container" \
     --detach \
     --privileged \
-    --restart unless-stopped \
+    --restart no \
     --network bridge \
     --add-host host.docker.internal:host-gateway \
     --publish 8400:8400 \
+    --publish 7547:7547 \
     --tmpfs /run \
     --tmpfs /run/lock \
     --volume /sys/fs/cgroup:/sys/fs/cgroup:rw \

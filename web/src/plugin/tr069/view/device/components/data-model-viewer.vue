@@ -10,16 +10,32 @@
   >
     <div class="dm-container h-full flex flex-col">
       <!-- Top Actions Bar -->
-      <div class="dm-header flex justify-between items-center px-6 py-4 border-b border-gray-200 bg-white">
+      <div class="dm-header dm-surface dm-border-bottom flex justify-between items-center px-6 py-4">
         <div class="flex items-center gap-3">
-          <span class="text-lg font-bold text-gray-800 tracking-wide font-mono">{{ deviceRow.serialNumber || 'Unknown Device' }}</span>
+          <span class="dm-title text-lg font-bold tracking-wide font-mono">{{ deviceRow.serialNumber || 'Unknown Device' }}</span>
           <el-tag :type="deviceRow.online ? 'success' : 'info'" effect="dark" size="small" class="ml-2 rounded-full px-3">
             {{ deviceRow.online ? '在线' : '离线' }}
           </el-tag>
         </div>
         <div class="flex gap-2">
-          <el-button type="primary" plain size="small" :icon="Refresh" @click="refreshStructure" :loading="loadingStructure">
-            刷新结构
+          <el-button
+            type="primary"
+            plain
+            size="small"
+            :icon="Refresh"
+            :loading="loadingStructure"
+            @click="refreshStructure"
+          >
+            刷新本地数据
+          </el-button>
+          <el-button
+            type="primary"
+            size="small"
+            :disabled="!deviceRow.online"
+            :loading="syncingParameters"
+            @click="syncDeviceParameters"
+          >
+            同步设备参数
           </el-button>
         </div>
       </div>
@@ -27,8 +43,8 @@
       <!-- Main Content Split -->
       <div class="dm-content flex-1 flex overflow-hidden">
         <!-- Left: Tree Structure -->
-        <div class="dm-sidebar w-1/3 min-w-[300px] border-r border-gray-100 flex flex-col bg-white">
-          <div class="p-3 border-b border-gray-50">
+        <div class="dm-sidebar dm-surface dm-border-right w-1/3 min-w-[300px] flex flex-col">
+          <div class="dm-border-bottom p-3">
             <el-input
               v-model="filterText"
               placeholder="搜索参数节点..."
@@ -51,13 +67,13 @@
               <template #default="{ node, data }">
                 <div class="custom-tree-node flex items-center text-sm py-1">
                   <!-- User requested to remove icons to save space -->
-                  <span class="truncate font-medium text-gray-700" :title="node.label">{{ node.label }}</span>
-                  <span v-if="data.children && data.children.length > 0" class="text-gray-400 text-xs ml-2">({{ data.children.length }})</span>
+                  <span class="dm-node-label truncate font-medium" :title="node.label">{{ node.label }}</span>
+                  <span v-if="data.children && data.children.length > 0" class="dm-secondary-text text-xs ml-2">({{ data.children.length }})</span>
                 </div>
               </template>
             </el-tree>
             
-            <div v-if="loadingStructure" class="py-10 text-center text-gray-400">
+            <div v-if="loadingStructure" class="dm-secondary-text py-10 text-center">
               <el-icon class="is-loading text-xl mb-2"><Loading /></el-icon>
               <p class="text-xs">正在加载数据结构...</p>
             </div>
@@ -65,13 +81,13 @@
         </div>
 
         <!-- Right: Parameter Values -->
-        <div class="dm-main flex-1 flex flex-col bg-gray-50/30">
+        <div class="dm-main dm-subtle-surface flex-1 flex flex-col">
           <div v-if="currentPath" class="h-full flex flex-col">
             <!-- Breadcrumb / Path Header -->
-            <div class="p-4 bg-white border-b border-gray-100 flex justify-between items-center shadow-sm z-10">
+            <div class="dm-path-header dm-surface dm-border-bottom p-4 flex justify-between items-center shadow-sm z-10">
               <div class="flex flex-col gap-1">
-                <span class="text-xs text-gray-400">当前路径</span>
-                <span class="font-mono text-sm font-semibold text-primary break-all">{{ currentPath }}</span>
+                <span class="dm-secondary-text text-xs">当前路径</span>
+                <span class="dm-path font-mono text-sm font-semibold break-all">{{ currentPath }}</span>
               </div>
               <el-button type="primary" text bg size="small" :icon="RefreshRight" @click="refreshValues" :loading="loadingValues">
                 刷新数值
@@ -88,20 +104,28 @@
                   v-loading="loadingValues"
                   stripe
                 >
-                  <el-table-column prop="name" label="参数名" min-width="200" show-overflow-tooltip sortable>
+                  <el-table-column prop="name" label="参数名" min-width="260" sortable>
                      <template #default="scope">
-                        <span class="font-mono text-xs">{{ scope.row.name.replace(currentPath, '') }}</span>
-                        <span class="text-gray-400 text-xs ml-2">({{ scope.row.name }})</span>
+                        <div class="parameter-name-cell">
+                          <el-tooltip :content="scope.row.name" placement="top" :show-after="500">
+                            <span class="parameter-name-text font-mono text-xs">{{ scope.row.name }}</span>
+                          </el-tooltip>
+                          <el-tooltip content="复制参数名" placement="top">
+                            <el-button
+                              class="parameter-name-copy"
+                              link
+                              type="primary"
+                              :icon="CopyDocument"
+                              aria-label="复制参数名"
+                              @click.stop="copyParameterName(scope.row.name)"
+                            />
+                          </el-tooltip>
+                        </div>
                      </template>
                   </el-table-column>
                   <el-table-column prop="valueJson" label="值" min-width="150" show-overflow-tooltip>
                     <template #default="scope">
-                      <div class="flex items-center justify-between group">
-                        <span class="font-mono text-sm truncate">{{ formatValue(scope.row.valueJson) }}</span>
-                        <el-icon class="cursor-pointer opacity-0 group-hover:opacity-100 text-gray-400 hover:text-primary transition-opacity" @click="copyValue(formatValue(scope.row.valueJson))">
-                          <CopyDocument />
-                        </el-icon>
-                      </div>
+                      <span class="font-mono text-sm truncate">{{ formatValue(scope.row.valueJson) }}</span>
                     </template>
                   </el-table-column>
                   <el-table-column prop="valueType" label="类型" width="100">
@@ -111,7 +135,7 @@
                   </el-table-column>
                   <el-table-column prop="updatedAt" label="更新时间" width="160">
                     <template #default="scope">
-                      <span class="text-xs text-gray-500">{{ formatDate(scope.row.UpdatedAt) }}</span>
+                      <span class="dm-secondary-text text-xs">{{ formatDate(scope.row.UpdatedAt) }}</span>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -120,7 +144,7 @@
           </div>
 
           <!-- Empty State -->
-          <div v-else class="h-full flex flex-col items-center justify-center text-gray-400">
+          <div v-else class="dm-secondary-text h-full flex flex-col items-center justify-center">
             <el-empty description="请从左侧选择一个节点查看参数" :image-size="120" />
           </div>
         </div>
@@ -134,6 +158,7 @@
 import { ref, watch, computed } from 'vue'
 import { Search, Refresh, RefreshRight, CopyDocument, Loading } from '@element-plus/icons-vue'
 import { getDataModelStructure, getDataModelList } from '@/plugin/tr069/api/datamodel'
+import { fullDataModelSync } from '@/plugin/tr069/api/command'
 import { formatTimeToStr } from '@/utils/date'
 import { ElMessage } from 'element-plus'
 import { useClipboard } from '@vueuse/core'
@@ -164,13 +189,14 @@ const tableData = ref([])
 const currentPath = ref('')
 const loadingStructure = ref(false)
 const loadingValues = ref(false)
+const syncingParameters = ref(false)
 
 const defaultProps = {
   children: 'children',
   label: 'label'
 }
 
-const { copy } = useClipboard()
+const { copy, isSupported } = useClipboard()
 
 watch(filterText, (val) => {
   treeRef.value?.filter(val)
@@ -216,6 +242,23 @@ const refreshStructure = async () => {
     console.error(error)
   } finally {
     loadingStructure.value = false
+  }
+}
+
+const syncDeviceParameters = async () => {
+  if (!props.row.ID || !deviceRow.value.online || syncingParameters.value) return
+  syncingParameters.value = true
+  try {
+    const res = await fullDataModelSync(props.row.ID)
+    if (res.code === 0) {
+      ElMessage.success('参数同步已下发')
+    } else {
+      ElMessage.error(res.msg || '参数同步下发失败')
+    }
+  } catch {
+    ElMessage.error('参数同步下发失败')
+  } finally {
+    syncingParameters.value = false
   }
 }
 
@@ -285,21 +328,73 @@ const formatDate = (time) => {
   return '-'
 }
 
-const copyValue = (text) => {
-  if (!text) return
-  copy(text)
-  ElMessage.success('已复制')
+const copyParameterName = async (name) => {
+  if (name === null || name === undefined || String(name) === '') return
+  try {
+    if (!isSupported.value) throw new Error('clipboard is not supported')
+    await copy(String(name))
+    ElMessage.success('参数名已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择参数名复制')
+  }
 }
 
 </script>
 
 <style scoped>
+.dm-container,
+.dm-surface {
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color);
+}
+.dm-subtle-surface {
+  background: var(--el-fill-color-light);
+}
+.dm-title,
+.dm-node-label {
+  color: var(--el-text-color-primary);
+}
+.dm-secondary-text {
+  color: var(--el-text-color-secondary);
+}
+.dm-path {
+  color: var(--el-color-primary);
+}
+.dm-border-bottom {
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+.dm-border-right {
+  border-right: 1px solid var(--el-border-color-light);
+}
+.parameter-name-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+.parameter-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+.parameter-name-copy {
+  flex: none;
+  opacity: 0;
+  color: var(--el-color-primary);
+  transition: opacity 0.15s ease;
+}
+.parameter-name-cell:hover .parameter-name-copy,
+.parameter-name-copy:focus-visible {
+  opacity: 1;
+}
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #e5e7eb;
+  background: var(--el-border-color-light);
   border-radius: 3px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {

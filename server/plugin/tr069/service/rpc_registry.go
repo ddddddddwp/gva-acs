@@ -25,18 +25,19 @@ var (
 )
 
 type RPCSpec struct {
-	Method         string
-	DisplayName    string
-	Operation      string
-	Capability     string
-	Permission     string
-	Confirmation   RPCConfirmationPolicy
-	ResultPolicy   RPCResultPolicy
-	DeferredPolicy RPCDeferredPolicy
-	Transfer       bool
-	Validate       func(any) error
-	newRequest     func() any
-	normalize      func(any) (map[string]interface{}, error)
+	Method           string
+	DisplayName      string
+	Operation        string
+	Capability       string
+	Permission       string
+	Confirmation     RPCConfirmationPolicy
+	ResultPolicy     RPCResultPolicy
+	DeferredPolicy   RPCDeferredPolicy
+	Transfer         bool
+	ServerCommandKey bool
+	Validate         func(any) error
+	newRequest       func() any
+	normalize        func(any) (map[string]interface{}, error)
 }
 
 type RPCConfirmationPolicy string
@@ -110,18 +111,22 @@ var RPCSpecs = map[string]RPCSpec{
 	},
 	"Download": {
 		Method: "Download", DisplayName: "下载文件", Operation: "Download", Capability: "Download", Permission: "transfer",
-		Confirmation: RPCConfirmationNormal, ResultPolicy: RPCResultTransfer, DeferredPolicy: RPCDeferredTransferComplete, Transfer: true,
+		Confirmation: RPCConfirmationNormal, ResultPolicy: RPCResultTransfer, DeferredPolicy: RPCDeferredTransferComplete,
+		Transfer: true, ServerCommandKey: true,
 		Validate: validateDownload, newRequest: newRPCRequest[req.DownloadRequest], normalize: normalizeDownload,
 	},
 	"Upload": {
 		Method: "Upload", DisplayName: "上传文件", Operation: "Upload", Capability: "Upload", Permission: "transfer",
-		Confirmation: RPCConfirmationNormal, ResultPolicy: RPCResultTransfer, DeferredPolicy: RPCDeferredTransferComplete, Transfer: true,
+		Confirmation: RPCConfirmationNormal, ResultPolicy: RPCResultTransfer, DeferredPolicy: RPCDeferredTransferComplete,
+		Transfer: true, ServerCommandKey: true,
 		Validate: validateUpload, newRequest: newRPCRequest[req.UploadRequest], normalize: normalizeUpload,
 	},
 	"Reboot": {
 		Method: "Reboot", DisplayName: "重启设备", Operation: "Reboot", Capability: "Reboot", Permission: "maintenance",
 		Confirmation: RPCConfirmationDanger, ResultPolicy: RPCResultAcknowledgement, DeferredPolicy: RPCDeferredNone,
-		newRequest: newRPCRequest[req.RebootRequest], normalize: normalizeReboot,
+		ServerCommandKey: true,
+		newRequest:       newRPCRequest[emptyRPCRequest],
+		normalize:        normalizeEmptyRequest,
 	},
 	"FactoryReset": {
 		Method: "FactoryReset", DisplayName: "恢复出厂设置", Operation: "FactoryReset", Capability: "FactoryReset", Permission: "maintenance",
@@ -327,14 +332,6 @@ func normalizeUpload(input any) (map[string]interface{}, error) {
 		"fileType": in.FileType, "url": in.URL, "username": in.Username, "password": in.Password,
 		"delaySeconds": in.DelaySeconds,
 	}, nil
-}
-
-func normalizeReboot(input any) (map[string]interface{}, error) {
-	in, ok := requestValue[req.RebootRequest](input)
-	if !ok {
-		return nil, invalidRequestType[req.RebootRequest](input)
-	}
-	return map[string]interface{}{"commandKey": in.CommandKey}, nil
 }
 
 func ValidateRPCSubmission(ctx context.Context, db *gorm.DB, deviceID uint, method string, now time.Time) error {
